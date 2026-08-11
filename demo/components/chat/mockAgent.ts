@@ -526,7 +526,7 @@ export function useMockAgent() {
       ["person", "candidate", "employee"].includes(name) ? "person"
         : name.startsWith("department") ? "department"
         : "position";
-    const ev = (s.evidence ?? []).filter((e) => pairKey(e) === key);
+    const ev = (s.evidence ?? []).filter((e: any) => pairKey(e) === key);
     if (!ev.length) {
       say("这个对象没有对应的候选对——它是单源对象，可以直接改 YAML 调整。");
       return;
@@ -594,7 +594,7 @@ export function useMockAgent() {
       connection: x.connection,
       backend: x.backend ?? x.connection,
     }));
-    connectBase.current = existing.map((x) => x.connection);
+    connectBase.current = existing.map((x: any) => x.connection);
     setConnectFlow({ idx: existing.length, tested: false, saved: existing });
   }
 
@@ -930,7 +930,7 @@ export function useMockAgent() {
 
   const allDecided = () => {
     const ev = liveEvidence();
-    return !!ev && ev.every((e) => store.current.decisions[pairKey(e)]);
+    return !!ev && ev.every((e: any) => store.current.decisions[pairKey(e)]);
   };
 
   async function afterDecision(key: string, type: string) {
