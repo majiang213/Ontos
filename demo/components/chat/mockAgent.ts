@@ -1294,8 +1294,9 @@ export function useMockAgent() {
     const raw = [
       { key: "connect", name: "连接数据源", needs: null as string | null, done: !!s.connectDone },
       { key: "model", name: "逆向建模", needs: "connect", done: !!s.draftsConfirmed },
-      ...(needAdj ? [{ key: "integrate", name: "多源整合", needs: "model", done: adjudicated }] : []),
-      { key: "publish", name: "发布本体", needs: needAdj ? "integrate" : "model", done: !!s.merged },
+      // 流程骨架恒定四步：单源无候选对时，建模确认完成即算整合步自动跳过
+      { key: "integrate", name: "多源整合", needs: "model", done: needAdj ? adjudicated : !!s.draftsConfirmed },
+      { key: "publish", name: "发布本体", needs: "integrate", done: !!s.merged },
       // 生成新系统不是流程步骤——发布即自动出码；问数同理，是通用对话能力
     ];
     return raw.map((st) => ({
@@ -1314,23 +1315,27 @@ export function useMockAgent() {
     return steps.find((s) => s.state === "open") ?? steps[0];
   }
 
-  // 锁定步骤的拦截反馈：瞬时 toast，不写对话（UI 点击不发消息）
+  // 锁定/查看步骤的拦截反馈：瞬时 toast，不写对话（UI 点击不发消息）
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  function lockedHint(stepName: string) {
-    const target = steps.find((s) => s.name === stepName || s.key === stepName);
-    const next = nextStep();
-    setNotice(`「${target?.name ?? stepName}」还没到时候——流程是顺序执行的，先完成「${next.name}」`);
+  function showNotice(text: string) {
+    setNotice(text);
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), 2600);
   }
+  function lockedHint(stepName: string) {
+    const target = steps.find((s) => s.name === stepName || s.key === stepName);
+    const next = nextStep();
+    showNotice(`「${target?.name ?? stepName}」还没到时候——流程是顺序执行的，先完成「${next.name}」`);
+  }
 
-  // 侧栏步骤 = 导航查看（不重复执行）；执行入口在工作台对应面板里
+  // 侧栏步骤 = 进度展示（不重复执行）；点击给状态反馈，动作入口在画布浮动卡上
   function stepClick(key: string) {
     const st = steps.find((s) => s.key === key)!;
     if (st.state === "locked") return lockedHint(key);
     setWs({ type: "welcome" }); // 清掉取数详情视图
     setWizardStep(key);
+    showNotice(st.state === "done" ? `「${st.name}」已完成` : `当前阶段：${st.name}——动作在画布上的浮动卡里`);
   }
 
   // ---------- 侧栏资源 → 工作台对应步骤/模态 ----------

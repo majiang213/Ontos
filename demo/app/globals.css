@@ -147,9 +147,9 @@ details.sq summary { cursor: pointer; font-size: 12.5px; color: var(--accent); f
 /* 问数 = 纯对话页：不占工作台列，对话内容居中限宽 */
 .app3.always-ws.no-ws { grid-template-columns: 236px minmax(0, 1fr); }
 .app3.always-ws.no-ws .chat-col { max-width: 880px; width: 100%; margin: 0 auto; border-right: none; }
-/* 侧栏页面切换（分段控件） */
+/* 侧栏页面切换（分段控件）——与内容列同槽对齐（x=10），不再额外内缩 */
 .page-switch {
-  display: flex; gap: 2px; margin: 4px 12px 10px; padding: 3px;
+  display: flex; gap: 2px; margin: 2px 0 14px; padding: 3px;
   background: rgba(24, 24, 28, 0.05); border-radius: 10px;
 }
 .page-switch button {
@@ -158,7 +158,8 @@ details.sq summary { cursor: pointer; font-size: 12.5px; color: var(--accent); f
   background: none; border: none; cursor: pointer;
   transition: background 0.18s var(--ease), color 0.18s var(--ease);
 }
-.page-switch button.active { background: #fff; color: var(--ink); box-shadow: var(--shadow-sm); font-weight: 600; }
+.page-switch button:hover:not(.active) { color: var(--ink-2); background: rgba(255, 255, 255, 0.6); }
+.page-switch button.active { background: #fff; color: var(--ink); border: 1px solid var(--border); box-shadow: var(--shadow-sm); font-weight: 600; }
 .page-switch button i { display: inline-flex; }
 .chat-item .chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .chat-item.active .chat-title { color: var(--ink); }
@@ -251,13 +252,13 @@ details.sq summary { cursor: pointer; font-size: 12.5px; color: var(--accent); f
   display: flex; align-items: center; gap: 8px; width: 100%;
   background: var(--panel); border: 1px solid var(--border); color: var(--ink);
   border-radius: 12px; padding: 8px 12px; font-size: 13px; font-weight: 500;
-  box-shadow: var(--bezel), var(--shadow-sm); margin-bottom: 16px;
+  box-shadow: var(--shadow-sm); margin-bottom: 12px;
   transition: box-shadow 0.22s var(--ease), background 0.22s var(--ease);
 }
-.new-chat:hover { background: #fbfbf9; box-shadow: var(--bezel), var(--shadow-md); }
+.new-chat:hover { background: #fbfbf9; box-shadow: var(--shadow-md); }
 .nav-label {
-  font-size: 11px; color: var(--ink-3); font-weight: 600; letter-spacing: 0.05em;
-  padding: 10px 10px 6px;
+  font-size: 11px; color: var(--ink-3); font-weight: 600; letter-spacing: 0.08em;
+  padding: 14px 10px 4px;
 }
 .nav-item {
   display: flex; align-items: center; gap: 9px; width: 100%;
@@ -289,9 +290,9 @@ details.sq summary { cursor: pointer; font-size: 12.5px; color: var(--accent); f
 .chat-head .title span { color: var(--ink-3); font-weight: 400; font-size: 12px; }
 .chat-head .spacer { flex: 1; }
 .chat-scroll { flex: 1; overflow-y: auto; }
-.chat-stream { max-width: 720px; margin: 0 auto; padding: 26px 24px 20px; }
+.chat-stream { max-width: 720px; margin: 0 auto; padding: 32px 24px 20px; }
 
-.row { display: flex; margin-bottom: 22px; animation: rise 0.38s var(--ease) both; }
+.row { display: flex; margin-bottom: 24px; animation: rise 0.38s var(--ease) both; }
 .row.u { justify-content: flex-end; }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .avatar {
@@ -687,7 +688,15 @@ details.tbl-acc[open] summary { border-bottom: 1px solid var(--border); backgrou
   display: flex; flex-direction: column;
 }
 .canvas-wrap.max { position: fixed; inset: 0; z-index: 40; padding: 16px; }
-.canvas-main { flex: 1; min-height: 0; position: relative; }
+.canvas-main { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+/* 空画布轻提示：不遮罩、不拦截（pointer-events:none），只指路 */
+.canvas-hint {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  color: var(--ink-3); pointer-events: none; user-select: none;
+}
+.canvas-hint svg { opacity: 0.55; }
+.canvas-hint .ch-t { font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.canvas-hint .ch-d { font-size: 12.5px; }
 .canvas-max { position: absolute; top: 12px; right: 12px; z-index: 6; padding: 5px 9px; }
 /* 最大化时浮动卡（对象编辑等）整体下移，让出右上角退出按钮 */
 .canvas-wrap.max .cv-right { top: 56px; }

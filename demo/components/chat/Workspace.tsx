@@ -841,7 +841,7 @@ export default function Workspace({
               </button>
             )}
             <div className="canvas-main">
-              {canvasOnt && (
+              {canvasOnt ? (
                 <OntologyGraph
                   ontology={canvasOnt}
                   selected={selObj}
@@ -849,6 +849,12 @@ export default function Workspace({
                   onConnect={(a, b) => setLinkEdit({ from: a, to: b })}
                   onEdgeSelect={(id) => setLinkEdit({ name: id })}
                 />
+              ) : (
+                <div className="canvas-hint">
+                  <ShareNetwork size={22} weight="light" />
+                  <div className="ch-t">画布还是空的</div>
+                  <div className="ch-d">从上方工具条「连接数据源」导入，或「新建对象」手动搭建</div>
+                </div>
               )}
             </div>
 
