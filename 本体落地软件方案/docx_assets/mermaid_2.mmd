@@ -1,0 +1,16 @@
+graph LR
+    subgraph 语义元素
+        OT[对象类型 Object Type] -->|拥有| PROP[属性 Property]
+        LT[关系 Link Type] -->|连接| OT
+        OT -.实现.-> IF[接口 Interface]
+    end
+    subgraph 动力元素
+        ACT[动作 Action Type] -->|事务性变更| OT
+        ACT -->|调用| FN[函数 Function]
+        RULE[规则 Rule] -->|校验与触发| ACT
+        RULE -->|派生计算| PROP
+    end
+    subgraph 治理元素
+        PERM[权限 Permission] -->|约束可见性| OT
+        PERM -->|约束可执行性| ACT
+    end
