@@ -271,7 +271,6 @@ details.sq summary { cursor: pointer; font-size: 12.5px; color: var(--accent); f
 .nav-item em { margin-left: auto; font-style: normal; font-size: 10px; color: var(--ink-3); font-family: var(--mono); }
 .nav-item.active { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--bezel), var(--shadow-sm); }
 .nav-spacer { flex: 1; }
-.flow-note { font-size: 11px; color: var(--ink-3); line-height: 1.6; padding: 6px 10px 0; }
 .nav-user {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px;
   border-top: 1px solid var(--border); font-size: 12.5px; color: var(--ink-2);
@@ -726,6 +725,9 @@ details.tbl-acc[open] summary { border-bottom: 1px solid var(--border); backgrou
 .cv-bl { bottom: 14px; left: 12px; width: min(430px, calc(100% - 24px)); max-height: calc(100% - 28px); overflow-y: auto; }
 .cv-right { top: 12px; right: 12px; width: min(400px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow-y: auto; }
 .cv-bc, .cv-tc { animation: rise-x 0.32s var(--ease) both; }
+/* 发布条：未发布改动（编辑→发布） */
+.pub-bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; }
+.pub-bar .pb-t { font-size: 12.5px; color: var(--ink-2); margin-right: 4px; }
 @keyframes rise-x { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* 底部抽屉 */
@@ -742,6 +744,8 @@ details.tbl-acc[open] summary { border-bottom: 1px solid var(--border); backgrou
 .wd-head b { font-size: 13px; letter-spacing: -0.01em; }
 .wd-head button { margin-left: auto; }
 .wd-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+/* 抽屉里 schema 源块双列铺开，消灭右侧大片空白 */
+.wd-body > .grid { grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); align-items: start; }
 
 /* 选表器 */
 .pk-src { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }

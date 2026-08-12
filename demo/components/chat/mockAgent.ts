@@ -317,7 +317,7 @@ export function useMockAgent() {
     store.current.history.push({
       version: store.current.version,
       yaml: res.yaml,
-      ontology: res.ontology,
+      ontology: structuredClone(res.ontology), // 快照必须克隆——与 merged 工作副本脱钩，否则编辑会污染历史
       merge_decisions: res.merge_decisions,
       at: new Date().toISOString(),
     });
@@ -710,6 +710,19 @@ export function useMockAgent() {
     });
     s.pending = false;
     say(`已发布 v${s.version}——新系统同步到最新版本。`);
+    rerender();
+  }
+
+  // 放弃未发布改动：工作副本回退到最近一次已发布快照
+  function discardChanges() {
+    const s = store.current;
+    if (!s.merged || !s.pending) return;
+    const pub = s.history.at(-1);
+    if (pub) {
+      s.merged.ontology = structuredClone(pub.ontology);
+      s.merged.yaml = pub.yaml;
+    }
+    s.pending = false;
     rerender();
   }
 
@@ -1272,7 +1285,7 @@ export function useMockAgent() {
     steps, stepClick, lockedHint, openView,
     connectFlow, connectTest, connectSave,
     confirmDrafts, toggleIgnore, ui, rollbackTo,
-    schemaTick, publishChanges, stageTable, unstageTable, stageAll, createObject,
+    schemaTick, publishChanges, discardChanges, stageTable, unstageTable, stageAll, createObject,
     createLink, renameLink, deleteLink, deleteObject,
     actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish,
     convs: CONVS, activeConv, switchConv,

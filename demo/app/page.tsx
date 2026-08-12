@@ -37,8 +37,6 @@ export default function Home() {
         onSwitchWs={e.switchWorkspace}
         onNewWs={e.newWorkspace}
         badges={e.badges}
-        steps={e.steps}
-        onStep={e.stepClick}
         onOpenView={openSurface}
         convs={e.convs}
         activeConv={e.activeConv}
@@ -100,6 +98,7 @@ export default function Home() {
           decideAll: e.actDecideSuggested,
           publish: e.actPublish,
           publishChanges: () => e.ui(e.publishChanges),
+          discardChanges: () => e.ui(e.discardChanges),
           rollback: (v) => e.ui(() => e.rollbackTo(v)),
           stage: e.stageTable,
           unstage: e.unstageTable,

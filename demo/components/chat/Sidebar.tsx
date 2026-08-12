@@ -1,29 +1,17 @@
 "use client";
 
-// 左侧导航：工作空间切换 + 空间资源（数据源/本体/产物）+ 流程进度 + 会话。
-// 图标统一 Phosphor（无 emoji / 无 unicode 符号）。
+// 左侧导航：工作空间切换 + 页面切换 + 空间资源（数据源/本体/新系统）+ 问数会话列表。
+// 没有流程步骤列表——引导由交互承担（连接表单/加入画布/确认草稿/裁决面板/发布条）。
 import { useState } from "react";
 import {
   Plus, SquaresFour, CaretDown, Database, ShareNetwork, Code,
-  CheckCircle, Circle, LockSimple, ChatCircleText, GitBranch, Check,
+  ChatCircleText, GitBranch, Check,
 } from "@phosphor-icons/react";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-interface Step {
-  key: string;
-  name: string;
-  state: "done" | "open" | "locked";
-}
-
-const STEP_ICON = {
-  done: <CheckCircle size={14} weight="fill" />,
-  open: <Circle size={7} weight="fill" />,
-  locked: <LockSimple size={13} />,
-};
-
 export default function Sidebar({
-  wsList, activeWs, onSwitchWs, onNewWs, badges, steps, onStep, onOpenView, convs, activeConv, onSwitchConv,
+  wsList, activeWs, onSwitchWs, onNewWs, badges, onOpenView, convs, activeConv, onSwitchConv,
   chats, activeChatId, onNewChat, onSwitchChat,
 }: {
   wsList: { id: string; name: string }[];
@@ -31,8 +19,6 @@ export default function Sidebar({
   onSwitchWs: (id: string) => void;
   onNewWs: () => void;
   badges: { sources: number; objects: number; version: number | null; generated: boolean };
-  steps: Step[];
-  onStep: (key: string) => void;
   onOpenView: (kind: "schema" | "ontology" | "code") => void;
   convs: { id: string; title: string }[];
   activeConv: string;
@@ -111,7 +97,7 @@ export default function Sidebar({
         </>
       )}
 
-      {/* 空间资源 + 流程：构建上下文，只在「本体构建」页显示 */}
+      {/* 空间资源：构建上下文，只在「本体构建」页显示 */}
       {activeConv === "flow" && (
         <>
           <div className="nav-label">空间内容</div>
@@ -122,17 +108,6 @@ export default function Sidebar({
               <em className={r.ok ? "res-ok" : ""}>{r.value}</em>
             </button>
           ))}
-
-          <div className="nav-label">流程</div>
-          {steps.map((s) => (
-            <button key={s.key} className={`nav-item step-${s.state}`} onClick={() => onStep(s.key)}>
-              <i>{STEP_ICON[s.state]}</i>
-              {s.name}
-            </button>
-          ))}
-          {steps.length > 0 && steps.every((s) => s.state === "done") && (
-            <div className="flow-note">流程走完了，本体没定死——画布上随时改，每次修改自动存为新版本</div>
-          )}
         </>
       )}
 

@@ -37,7 +37,8 @@ export interface WsActions {
   integrate: () => void;
   decideAll: () => void;
   publish: () => void;
-  publishChanges: () => void; // 发布后画布改动 → 显式发布升版本
+  publishChanges: () => void; // 发布工作副本 → 新版本
+  discardChanges: () => void; // 放弃未发布改动
   rollback: (v: number) => void;
   // 选表上画布
   stage: (conn: string, table: string) => void;
@@ -758,11 +759,6 @@ export default function Workspace({
               <Plus size={11} className="i-inline" />新建对象
             </button>
             <span className="grow" />
-            {data.pending && (
-              <button className="sm" onClick={actions.publishChanges} title="画布是工作副本——发布后新系统才同步到最新版本">
-                发布 v{(badges.version ?? 0) + 1}
-              </button>
-            )}
             {data.merged && (
               <button className="ghost sm" onClick={() => actions.reopenDecisions()} title="清空全部裁决，重新逐对裁决">
                 <ArrowCounterClockwise size={11} className="i-inline" />全部重裁
@@ -832,6 +828,17 @@ export default function Workspace({
                   actions={actions}
                   onClose={data.merged ? () => onDecisionOpen(false) : undefined}
                 />
+              </div>
+            )}
+
+            {/* 浮动条：未发布改动——编辑→发布交互（画布=工作副本，应用=已发布版本） */}
+            {data.pending && !(decisionOpen && data.merged) && (
+              <div className="cv-float cv-bc">
+                <div className="panel pub-bar">
+                  <span className="pb-t">画布有未发布改动 · 新系统还是 v{badges.version}</span>
+                  <button className="sm" onClick={actions.publishChanges}>发布 v{(badges.version ?? 0) + 1}</button>
+                  <button className="ghost sm" onClick={actions.discardChanges}>放弃</button>
+                </div>
               </div>
             )}
 
