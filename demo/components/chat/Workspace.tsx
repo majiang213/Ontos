@@ -510,23 +510,7 @@ function PublishPanel({ data, actions }: { data: any; actions: WsActions }) {
   );
 }
 
-/* ---- 血缘 / 问数 API 清单 ---- */
-function LineageList({ lines }: { lines: string[] }) {
-  return (
-    <div>
-      {lines.map((l, i) => {
-        const [field, src] = l.split("←").map((s) => s.trim());
-        return (
-          <div key={i} className="api-row">
-            <span className="ln-field">{field}</span>
-            <span className="ln-arrow">←</span>
-            <span className="ln-src">{src}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+/* ---- 问数 API 清单 ---- */
 function ApiAssetList({ apis }: { apis: any[] }) {
   if (!apis?.length) return <div className="empty" style={{ padding: 24 }}>还没有问数 API——每问一个新问题，编译出的结构化查询会命名保存在这里</div>;
   return (
@@ -568,12 +552,15 @@ function AppView({ data }: { data: any }) {
     return () => { dead = true; };
   }, [obj?.name, data.ontology]);
 
-  // 血缘直接从本体算：对象字段 ← 源列
+  // 血缘直接从本体算：对象字段 ← 源列；代理主键（无源 uuid pk）不进血缘
   const lineage = objs.flatMap((o) =>
-    o.properties.map((p: any) => {
-      const from = o.sources.filter((s: any) => s.fields[p.name]).map((s: any) => `${s.connection}.${s.table}.${s.fields[p.name]}`).join("  +  ");
-      return `${o.name}.${p.name}  ←  ${from || `派生：${p.derived ?? "—"}`}`;
-    }),
+    o.properties
+      .filter((p: any) => !p.pk || o.sources.some((s: any) => s.fields[p.name]))
+      .map((p: any) => ({
+        label: `${o.label} · ${p.label ?? p.name}`,
+        derived: p.derived as string | undefined,
+        from: o.sources.filter((s: any) => s.fields[p.name]).map((s: any) => `${s.connection}.${s.table}.${s.fields[p.name]}`),
+      })),
   );
   const hasDept = (rows ?? []).some((r) => r.dept !== undefined);
   const cols = obj ? [...obj.properties.map((p: any) => ({ name: p.name, label: p.label ?? p.name })), ...(hasDept ? [{ name: "dept", label: "部门" }] : [])] : [];
@@ -616,7 +603,20 @@ function AppView({ data }: { data: any }) {
           <ApiAssetList apis={data.apiAssets ?? []} />
         </>
       )}
-      {tab === "血缘" && <LineageList lines={lineage} />}
+      {tab === "血缘" && (
+        <>
+          <div className="hint" style={{ marginBottom: 8 }}>每个字段的数据从哪来：对象字段 ← 源表列；「派生」字段按规则计算，不直接来自任何一列</div>
+          {lineage.map((r, i) => (
+            <div key={i} className="api-row" style={{ alignItems: "baseline" }}>
+              <span className="ln-field">{r.label}</span>
+              <span className="ln-arrow">←</span>
+              <span className="api-desc" style={{ fontFamily: r.derived ? undefined : "var(--mono)", fontSize: 11 }}>
+                {r.derived ? `派生：${r.derived}` : r.from.join("  +  ")}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

@@ -47,7 +47,7 @@ export function draftFor(connection: string): Ontology {
           label: "候选人",
           identity: "id_card",
           properties: [
-            { name: "id", type: "int", pk: true },
+            { name: "id", type: "int", pk: true, label: "ID" },
             { name: "name", type: "string", label: "姓名" },
             { name: "id_card", type: "string", label: "身份证" },
             { name: "mobile", type: "string", label: "手机号" },
@@ -67,7 +67,7 @@ export function draftFor(connection: string): Ontology {
           name: "job_posting",
           label: "招聘职位",
           properties: [
-            { name: "id", type: "int", pk: true },
+            { name: "id", type: "int", pk: true, label: "ID" },
             { name: "title", type: "string", label: "职位名" },
             { name: "jd_text", type: "string", label: "JD描述" },
           ],
@@ -78,7 +78,7 @@ export function draftFor(connection: string): Ontology {
           label: "部门",
           identity: "name",
           properties: [
-            { name: "code", type: "string", pk: true },
+            { name: "code", type: "string", pk: true, label: "部门编号" },
             { name: "name", type: "string", label: "部门名" },
           ],
           sources: [{ connection: "recruiting", table: "department", pk: "dept_code", fields: { code: "dept_code", name: "dept_name" } }],
@@ -115,7 +115,7 @@ export function draftFor(connection: string): Ontology {
         label: "部门",
         identity: "name",
         properties: [
-          { name: "code", type: "string", pk: true },
+          { name: "code", type: "string", pk: true, label: "部门编号" },
           { name: "name", type: "string", label: "部门名" },
         ],
         sources: [{ connection: "hr", table: "department", pk: "dept_id", fields: { code: "dept_id", name: "dept_name" } }],
@@ -124,7 +124,7 @@ export function draftFor(connection: string): Ontology {
         name: "headcount_position",
         label: "岗位编制",
         properties: [
-          { name: "id", type: "int", pk: true },
+          { name: "id", type: "int", pk: true, label: "ID" },
           { name: "title", type: "string", label: "岗位名" },
           { name: "headcount", type: "int", label: "编制数" },
         ],
@@ -210,7 +210,7 @@ export function buildMergedOntology(
       name: "candidate",
       label: "候选人",
       properties: [
-        { name: "id", type: "int", pk: true },
+        { name: "id", type: "int", pk: true, label: "ID" },
         { name: "applied_position", type: "string", label: "应聘职位" },
         { name: "interview_score", type: "int", label: "面试评分" },
       ],
@@ -238,7 +238,7 @@ export function buildMergedOntology(
       label: "部门",
       identity: "name",
       properties: [
-        { name: "code", type: "string", pk: true },
+        { name: "code", type: "string", pk: true, label: "部门编号" },
         { name: "name", type: "string", label: "部门名" },
       ],
       sources: [
@@ -268,7 +268,7 @@ export function buildMergedOntology(
       name: "job_posting",
       label: "招聘职位",
       properties: [
-        { name: "id", type: "int", pk: true },
+        { name: "id", type: "int", pk: true, label: "ID" },
         { name: "jd_text", type: "text", label: "JD描述" },
       ],
       sources: [{ connection: "recruiting", table: "job_posting", pk: "job_id", fields: { id: "job_id", jd_text: "jd_text" } }],
@@ -277,7 +277,7 @@ export function buildMergedOntology(
       name: "headcount_position",
       label: "岗位编制",
       properties: [
-        { name: "id", type: "int", pk: true },
+        { name: "id", type: "int", pk: true, label: "ID" },
         { name: "headcount", type: "int", label: "编制数" },
       ],
       sources: [{ connection: "hr", table: "headcount_position", pk: "pos_id", fields: { id: "pos_id", headcount: "headcount" } }],
