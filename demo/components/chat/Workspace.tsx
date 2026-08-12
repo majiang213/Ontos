@@ -785,16 +785,6 @@ export default function Workspace({
                 ))}
               </select>
             )}
-            {data.schemas && (
-              <button className={`ghost sm ${drawer === "schema" ? "tool-active" : ""}`} onClick={() => onDrawer(drawer === "schema" ? null : "schema")}>
-                <Database size={11} className="i-inline" />表结构
-              </button>
-            )}
-            {data.merged && (
-              <button className={`ghost sm ${drawer === "code" ? "tool-active" : ""}`} onClick={() => onDrawer(drawer === "code" ? null : "code")}>
-                <Code size={11} className="i-inline" />新系统
-              </button>
-            )}
             <button
               className={`ghost sm ${maximized ? "tool-active" : ""}`}
               onClick={() => setMaximized(!maximized)}
@@ -908,7 +898,7 @@ export default function Workspace({
             )}
           </div>
 
-          {/* 底部抽屉：表结构 / 出码产物 */}
+          {/* 底部抽屉：表结构 / 新系统 */}
           {drawer && (
             <div className="ws-drawer">
               <div className="wd-head">
@@ -929,6 +919,22 @@ export default function Workspace({
                   <AppView data={{ ontology: (data.history?.at(-1)?.ontology ?? data.merged.ontology), version: data.history?.at(-1)?.version ?? badges.version, apiAssets: data.apis }} />
                 )}
               </div>
+            </div>
+          )}
+
+          {/* 底部标签条：抽屉入口常驻这里，不占顶部工具条 */}
+          {(data.schemas || data.merged) && (
+            <div className="ws-tabs">
+              {data.schemas && (
+                <button className={`ws-tab ${drawer === "schema" ? "active" : ""}`} onClick={() => onDrawer(drawer === "schema" ? null : "schema")}>
+                  <Database size={12} className="i-inline" />表结构
+                </button>
+              )}
+              {data.merged && (
+                <button className={`ws-tab ${drawer === "code" ? "active" : ""}`} onClick={() => onDrawer(drawer === "code" ? null : "code")}>
+                  <Code size={12} className="i-inline" />新系统
+                </button>
+              )}
             </div>
           )}
         </>

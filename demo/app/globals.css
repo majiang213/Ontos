@@ -684,6 +684,19 @@ details.tbl-acc[open] summary { border-bottom: 1px solid var(--border); backgrou
 .ws-toolbar .grow { flex: 1; }
 .ws-toolbar .stepper { margin-bottom: 0; }
 .ws-toolbar .tool-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+/* 底部标签条：抽屉入口（表结构/新系统），常驻工作区底边 */
+.ws-tabs {
+  flex: none; display: flex; gap: 6px; padding: 7px 12px;
+  border-top: 1px solid var(--border); background: var(--panel);
+}
+.ws-tab {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  padding: 4px 12px; border-radius: 8px; border: 1px solid transparent;
+  background: none; color: var(--ink-3); cursor: pointer;
+  transition: background 0.18s var(--ease), color 0.18s var(--ease);
+}
+.ws-tab:hover { color: var(--ink); background: rgba(0, 0, 0, 0.04); }
+.ws-tab.active { color: var(--ink); background: #fff; border-color: var(--border); box-shadow: var(--shadow-sm); font-weight: 600; }
 .canvas-wrap {
   position: relative; flex: 1; min-height: 0; background: var(--bg);
   display: flex; flex-direction: column;
