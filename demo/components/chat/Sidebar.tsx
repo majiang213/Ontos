@@ -48,7 +48,7 @@ export default function Sidebar({
   const resources = [
     { kind: "schema" as const, icon: <Database size={14} />, label: "数据源", value: badges.sources ? `${badges.sources} 个` : "未连接", ok: !!badges.sources },
     { kind: "ontology" as const, icon: <ShareNetwork size={14} />, label: "本体对象", value: badges.objects ? `${badges.objects} 个${badges.version ? ` · v${badges.version}` : " · 草稿"}` : "—", ok: !!badges.objects },
-    { kind: "code" as const, icon: <Code size={14} />, label: "新系统", value: badges.generated ? "已生成" : "—", ok: badges.generated },
+    { kind: "code" as const, icon: <Code size={14} />, label: "新系统", value: badges.generated ? "运行中" : "—", ok: badges.generated },
   ];
 
   return (

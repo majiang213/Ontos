@@ -55,7 +55,6 @@ export default function Home() {
               model: e.actDraft,
               integrate: e.actIntegrate,
               publish: e.actPublish,
-              generate: e.actGenerate,
             }[key];
             f?.();
           }}
@@ -89,7 +88,6 @@ export default function Home() {
         actions={{
           applyObjectYaml: e.applyObjectYaml,
           updateObject: e.updateObject,
-          regenerate: () => e.ui(e.regenerate),
           replay: () => e.ui(e.replay),
           reopenDecisions: () => e.ui(e.reopenDecisions),
           confirmDrafts: () => e.ui(e.confirmDrafts),
@@ -101,7 +99,6 @@ export default function Home() {
           integrate: e.actIntegrate,
           decideAll: e.actDecideSuggested,
           publish: e.actPublish,
-          generate: e.actGenerate,
           rollback: (v) => e.ui(() => e.rollbackTo(v)),
           stage: e.stageTable,
           unstage: e.unstageTable,

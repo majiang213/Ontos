@@ -56,7 +56,6 @@ function emptyData() {
     evidence: null as any[] | null,
     decisions: {} as Record<string, string>,
     merged: null as any,
-    artifacts: null as any,
     apis: [] as any[], // 问数沉淀的 API 资产
     connectDone: false,
     version: 0,
@@ -324,27 +323,8 @@ export function useMockAgent() {
     push({
       role: "agent",
       kind: "published",
-      text: `已发布 ontology.yaml v${store.current.version}（右边）。「人员」不再是某个源库的表，而是两个源之上的统一语义。`,
+      text: `已发布 ontology.yaml v${store.current.version}（右边）。「人员」不再是某个源库的表，而是两个源之上的统一语义。新系统已就绪——本体即应用：侧栏「新系统」里的对象列表实时查源库，不落库、不出码。`,
       payload: { yaml: res.yaml },
-    });
-    // 出码不是独立关卡：首次发布即自动生成；之后本体再变则标过期、手动重出
-    if (!store.current.artifacts) await tGenerate();
-  }
-  async function tGenerate() {
-    store.current.artifacts = await (
-      await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ontology: store.current.merged.ontology }),
-      })
-    ).json();
-    store.current.artifactsVersion = store.current.version; // 产物基于的本体版本——不一致即过期
-    setWizardStep("generate");
-    push({
-      role: "agent",
-      kind: "generated",
-      text: "生成完毕：迁移 DDL（空库起步）、CRUD API、管理界面、字段血缘——右边分栏切换查看。",
-      payload: { artifacts: store.current.artifacts },
     });
   }
   async function tQuery(q: string) {
@@ -486,21 +466,12 @@ export function useMockAgent() {
       s.merged.yaml = toYaml(parsed);
       s.version += 1;
       s.history.push({ version: s.version, yaml: s.merged.yaml, ontology: parsed, merge_decisions: s.merged.merge_decisions, at: new Date().toISOString(), note: "手动编辑" });
-      say(
-        `已保存并发布 v${s.version}（手动编辑）。` +
-          (s.artifacts ? "注意：新系统基于旧版本，建议重新生成。" : ""),
-      );
+      say(`已保存并发布 v${s.version}（手动编辑）——新系统跟随本体即时生效，无需重新生成。`);
     } else {
       return "当前状态不支持该操作";
     }
     rerender();
     return null;
-  }
-
-  async function regenerate() {
-    if (!store.current.merged) return;
-    await tGenerate();
-    say("已按当前本体重新生成新系统。", { suggestions: suggestions() });
   }
 
   async function replay() {
@@ -572,7 +543,7 @@ export function useMockAgent() {
       `本体草稿：${s.drafts ? "已生成（recruiting 3 对象 / hr 3 对象）" : "未生成"}`,
       `裁决：${s.evidence ? `${Object.keys(s.decisions).length}/3 已完成` : "未开始"}`,
       `合并本体：${s.merged ? `已发布 v${s.version}` : "未发布"}`,
-      `新系统：${s.artifacts ? "已生成" : "未生成"}`,
+      `新系统：${s.merged ? "运行中（本体即应用 · 实时查源库）" : "未发布本体"}`,
       `问数：${s.queryCount} 次（query_logs 全量留痕）`,
       s.merged ? `裁决留痕：${s.merged.merge_decisions?.length ?? 0} 条 merge_decisions（含证据快照）` : "",
     ].filter(Boolean);
@@ -964,7 +935,6 @@ export function useMockAgent() {
     if (!s.drafts) return ["五类型是哪五种？", "交集率是什么意思？"];
     if (s.evidence && !allDecided()) return ["为什么建议按生命周期？", "五类型是哪五种？"];
     if (!s.merged) return ["裁决是什么？", "数据边界是什么？"];
-    if (!s.artifacts) return ["血缘是什么？", "数据边界是什么？"];
     return ["查所有从候选人转正的员工及其部门", "还有多少候选人？", "血缘是什么？"];
   }
 
@@ -1151,9 +1121,7 @@ export function useMockAgent() {
     // 8) 生成
     if (/生成|出码|新系统/.test(t)) {
       if (!(await ensurePublished())) return;
-      const had = !!s.artifacts;
-      await tGenerate();
-      say(had ? "已按当前本体重新生成。" : "现在可以直接问我业务问题了。", { suggestions: suggestions() });
+      say("新系统不需要生成——本体即应用：本体一发布，对象列表就实时查源库可直接用了（侧栏「新系统」里看）。没有新库、没有出码，数据永不迁移。", { suggestions: suggestions() });
       return;
     }
 
@@ -1170,7 +1138,7 @@ export function useMockAgent() {
     }
 
     // 10) 兜底
-    say("我是规则模拟，能理解的表达有限（正式版换真 LLM 就没这限制）。你可以让我：连接源库 / 生成草稿 / 裁决合并 / 发布本体 / 生成新系统 / 查数据，也可以随时插话问概念。", { suggestions: suggestions() });
+    say("我是规则模拟，能理解的表达有限（正式版换真 LLM 就没这限制）。你可以让我：连接源库 / 生成草稿 / 裁决合并 / 发布本体 / 查数据，也可以随时插话问概念。", { suggestions: suggestions() });
   }
 
   // 前置补齐：任何路径需要本体时，自动跑完能自动的，停在必须人的裁决
@@ -1251,13 +1219,6 @@ export function useMockAgent() {
       }
       await tPublish();
     });
-  const actGenerate = () =>
-    ui(async () => {
-      const had = !!store.current.artifacts;
-      if (!(await ensurePublished())) return;
-      await tGenerate();
-      say(had ? "已按当前本体重新生成。" : "现在可以直接问我业务问题了。", { suggestions: suggestions() });
-    });
 
   // ---------- 概念解释器 ----------
   function explain(t: string): string | null {
@@ -1272,11 +1233,11 @@ export function useMockAgent() {
     if (/生命周期|为什么建议/.test(t))
       return "候选人→员工是同一批人在不同时间的状态：招聘库 50 人、HR 库 40 人，17 人身份证重合——这 17 人就是“已转正”。建模为统一「人员」对象 + status 派生属性（仅招聘源→候选人；命中 HR 源→在职/离职）+ converted 转化关系，之后才能问“查所有转正的人”。";
     if (/本体/.test(t))
-      return "本体 = 业务对象/属性/关系的机器可读定义（YAML）。它是单一事实源：生成新系统以它为蓝图，Agent 问数以它为上下文，血缘从它出发。五个概念：对象类型、属性、关系、源映射、接口（V2）。";
+      return "本体 = 业务对象/属性/关系的机器可读定义（YAML）。它是单一事实源：新系统以它为运行蓝图（本体即应用，不出码），Agent 问数以它为上下文，血缘从它出发。五个概念：对象类型、属性、关系、源映射、接口（V2）。";
     if (/血缘/.test(t))
       return "血缘 = 字段级映射链：新系统任一字段 → 本体属性 → 源表列。问数时的“取数路径”是查询级血缘，复用同一份映射数据。它是审计和信任的基础。";
     if (/迁移|数据边界|落地/.test(t))
-      return "数据边界：平台不迁移、不复制业务数据。交集在内存算、标识集合不落地；问数实时查源库；新系统空库起步只承接增量。存量数据迁移是 V2 的事。";
+      return "数据边界：平台不迁移、不复制业务数据。交集内存算、标识集合不落地；问数实时查源库；新系统是本体驱动的活应用，数据始终留在源库。";
     if (/裁决/.test(t))
       return "裁决 = 对跨源同义对象选择关系类型。流程是：LLM 给建议+理由（软证据）→ 数据交集率（硬证据）→ 你拍板 + 业务测试问题集验证。裁决和证据快照全部留痕，可回滚——这是护城河“裁决知识库”的原始积累。";
     return null;
@@ -1354,20 +1315,20 @@ export function useMockAgent() {
       ? Object.keys(store.current.merged.ontology.object_types).length
       : (store.current.drafts?.reduce((n: number, x: any) => n + Object.keys(x.ontology.object_types).length, 0) ?? 0),
     version: store.current.merged ? store.current.version : null,
-    generated: !!store.current.artifacts,
+    generated: !!store.current.merged, // 新系统 = 本体驱动应用，发布即就绪
   };
 
   return {
     msgs, ws, busy, badges, turn, decisionOpen, setDecisionOpen, setDecision, notice,
     chats: buckets.current[activeWs].chats, activeChatId, newChat, switchChat,
-    applyYaml, updateObject, applyObjectYaml, regenerate, replay, reopenDecisions,
+    applyYaml, updateObject, applyObjectYaml, replay, reopenDecisions,
     wsList, activeWs, switchWorkspace, newWorkspace,
     steps, stepClick, lockedHint, openView,
     connectFlow, connectTest, connectSave, connectAddMore, connectFinish,
     confirmDrafts, toggleIgnore, ui, rollbackTo,
     pickerOpen, setPickerOpen, stageTable, unstageTable, stageAll, createObject,
     createLink, renameLink, deleteLink, deleteObject,
-    actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish, actGenerate,
+    actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish,
     convs: CONVS, activeConv, switchConv,
     replanObject,
     wizardStep, setWizardStep,

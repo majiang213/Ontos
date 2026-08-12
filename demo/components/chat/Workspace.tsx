@@ -4,8 +4,8 @@
 // 步骤动作是画布上的浮动卡，表结构/出码产物在底部抽屉，画布可最大化。
 import { useEffect, useState } from "react";
 import {
-  Database, PencilRuler, ShareNetwork, Code, Scales, RocketLaunch, GitMerge,
-  X, ArrowCounterClockwise, ArrowClockwise, DownloadSimple, Key,
+  Database, PencilRuler, ShareNetwork, Code, Scales, GitMerge,
+  X, ArrowCounterClockwise, Key,
   CaretLeft, CaretRight, Lightbulb, Plus, CheckCircle, LockSimple, Circle,
   CornersOut, CornersIn,
 } from "@phosphor-icons/react";
@@ -25,7 +25,6 @@ export interface Badges {
 export interface WsActions {
   applyObjectYaml: (kind: "draft" | "merged", conn: string | null, objName: string, text: string) => string | null;
   updateObject: (kind: "draft" | "merged", conn: string | null, objName: string, updated: any) => string | null;
-  regenerate: () => void;
   replay: () => void;
   reopenDecisions: () => void;
   confirmDrafts: () => void;
@@ -38,7 +37,6 @@ export interface WsActions {
   integrate: () => void;
   decideAll: () => void;
   publish: () => void;
-  generate: () => void;
   rollback: (v: number) => void;
   // 选表上画布
   stage: (conn: string, table: string) => void;
@@ -512,25 +510,7 @@ function PublishPanel({ data, actions }: { data: any; actions: WsActions }) {
   );
 }
 
-/* ---- 出码产物 ---- */
-const MCLS: Record<string, string> = { GET: "m-get", POST: "m-post", PATCH: "m-patch", DELETE: "m-del" };
-function ApiList({ lines }: { lines: string[] }) {
-  return (
-    <div>
-      {lines.map((l, i) => {
-        const m = l.match(/^(\S+)\s+(\S+)\s+(.*)$/);
-        if (!m) return <div key={i} className="api-row">{l}</div>;
-        return (
-          <div key={i} className="api-row">
-            <span className={`m ${MCLS[m[1]] ?? "m-get"}`}>{m[1]}</span>
-            <span className="api-path">{m[2]}</span>
-            <span className="api-desc">{m[3]}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+/* ---- 血缘 / 问数 API 清单 ---- */
 function LineageList({ lines }: { lines: string[] }) {
   return (
     <div>
@@ -541,21 +521,6 @@ function LineageList({ lines }: { lines: string[] }) {
             <span className="ln-field">{field}</span>
             <span className="ln-arrow">←</span>
             <span className="ln-src">{src}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-function PageList({ lines }: { lines: string[] }) {
-  return (
-    <div>
-      {lines.map((l, i) => {
-        const m = l.match(/^(\/\S*)\s+(.*)$/);
-        return (
-          <div key={i} className="api-row">
-            <span className="api-path">{m ? m[1] : l}</span>
-            <span className="api-desc">{m ? m[2] : ""}</span>
           </div>
         );
       })}
@@ -576,44 +541,82 @@ function ApiAssetList({ apis }: { apis: any[] }) {
     </div>
   );
 }
-function download(filename: string, content: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-function CodeView({ data, actions }: { data: any; actions: WsActions }) {
-  const [tab, setTab] = useState("迁移 DDL");
-  const TABS: Record<string, React.ReactNode> = {
-    "迁移 DDL": <CodeBlock file="0001_init.sql" tag="drizzle-kit migration">{data.ddl}</CodeBlock>,
-    "CRUD API": <ApiList lines={data.apis} />,
-    "管理界面": <PageList lines={data.pages} />,
-    "字段血缘": <LineageList lines={data.lineage} />,
-    "问数 API": (
-      <>
-        <div className="hint" style={{ marginBottom: 8 }}>问数 API 只读、实时查源库；「CRUD API」读写的是新库——两套 API 别混淆</div>
-        <ApiAssetList apis={data.apiAssets ?? []} />
-      </>
-    ),
-  };
-  const tableCount = (String(data.ddl).match(/create table/g) ?? []).length;
+
+/* ---- 新系统（本体即应用）：对象数据实时查源库，无出码、无新库、数据永不迁移 ---- */
+function AppView({ data }: { data: any }) {
+  const objs = Object.values<any>(data.ontology.object_types).filter((o) => !o._ignored);
+  const [tab, setTab] = useState(objs[0]?.name ?? "");
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [srcNote, setSrcNote] = useState("");
+  const obj = objs.find((o) => o.name === tab);
+  useEffect(() => {
+    if (!obj) return;
+    let dead = false;
+    setRows(null);
+    fetch("/api/objects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ontology: data.ontology, object: obj.name }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (dead) return;
+        setRows(res.rows ?? []);
+        setSrcNote((res.sources ?? []).join(" + "));
+      })
+      .catch(() => { if (!dead) setRows([]); });
+    return () => { dead = true; };
+  }, [obj?.name, data.ontology]);
+
+  // 血缘直接从本体算：对象字段 ← 源列
+  const lineage = objs.flatMap((o) =>
+    o.properties.map((p: any) => {
+      const from = o.sources.filter((s: any) => s.fields[p.name]).map((s: any) => `${s.connection}.${s.table}.${s.fields[p.name]}`).join("  +  ");
+      return `${o.name}.${p.name}  ←  ${from || `派生：${p.derived ?? "—"}`}`;
+    }),
+  );
+  const hasDept = (rows ?? []).some((r) => r.dept !== undefined);
+  const cols = obj ? [...obj.properties.map((p: any) => ({ name: p.name, label: p.label ?? p.name })), ...(hasDept ? [{ name: "dept", label: "部门" }] : [])] : [];
+
   return (
     <div className="panel">
       <div className="hint" style={{ marginBottom: 8 }}>
-        基于本体 v{data.version} 生成 · {tableCount} 张表 · {data.apis.length} 个接口 · 空库起步、只承接增量，源数据永不复制
-      </div>
-      <div className="panel-actions">
-        <button className="ghost sm" onClick={actions.regenerate}><ArrowClockwise size={12} className="i-inline" />重新生成</button>
-        <button className="ghost sm" onClick={() => download("0001_init.sql", data.ddl)}><DownloadSimple size={12} className="i-inline" />下载 DDL</button>
+        本体 v{data.version} 驱动 · {objs.length} 个对象 · 数据实时查源库、永不迁移
       </div>
       <div className="gen-tabs">
-        {Object.keys(TABS).map((t) => (
-          <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>
+        {objs.map((o) => (
+          <button key={o.name} className={tab === o.name ? "active" : ""} onClick={() => setTab(o.name)}>{o.label}</button>
         ))}
+        <button className={tab === "问数 API" ? "active" : ""} onClick={() => setTab("问数 API")}>问数 API</button>
+        <button className={tab === "血缘" ? "active" : ""} onClick={() => setTab("血缘")}>血缘</button>
       </div>
-      {TABS[tab]}
+      {obj && (
+        <>
+          <div className="hint" style={{ margin: "2px 0 8px" }}>来源：{srcNote || "—"}（只读）</div>
+          <div className="scrollbox" style={{ maxHeight: 320 }}>
+            <table className="data">
+              <thead><tr>{cols.map((c) => <th key={c.name}>{c.label}</th>)}<th>来源</th></tr></thead>
+              <tbody>
+                {(rows ?? []).map((r, i) => (
+                  <tr key={i}>
+                    {cols.map((c) => <td key={c.name}>{r[c.name] ?? "—"}</td>)}
+                    <td><span className="tag gray">{r._src ?? (obj.sources.length > 1 ? obj.sources.map((s: any) => s.connection).join("+") : obj.sources[0]?.connection)}</span></td>
+                  </tr>
+                ))}
+                {rows === null && <tr><td colSpan={cols.length + 1} style={{ color: "var(--ink-3)" }}>查询中…</td></tr>}
+                {rows?.length === 0 && <tr><td colSpan={cols.length + 1} style={{ color: "var(--ink-3)" }}>无数据</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {tab === "问数 API" && (
+        <>
+          <div className="hint" style={{ marginBottom: 8 }}>应用的对外只读接口——每问一个新问题，编译出的结构化查询命名保存在这里，实时查源库</div>
+          <ApiAssetList apis={data.apiAssets ?? []} />
+        </>
+      )}
+      {tab === "血缘" && <LineageList lines={lineage} />}
     </div>
   );
 }
@@ -823,14 +826,9 @@ export default function Workspace({
                 <Database size={11} className="i-inline" />表结构
               </button>
             )}
-            {data.artifacts && (
+            {data.merged && (
               <button className={`ghost sm ${drawer === "code" ? "tool-active" : ""}`} onClick={() => onDrawer(drawer === "code" ? null : "code")}>
                 <Code size={11} className="i-inline" />新系统
-              </button>
-            )}
-            {data.merged && !data.artifacts && (
-              <button className="sm" onClick={actions.generate}>
-                <RocketLaunch size={11} className="i-inline" />生成新系统
               </button>
             )}
             <button
@@ -964,14 +962,13 @@ export default function Workspace({
             <div className="ws-drawer">
               <div className="wd-head">
                 <b>{drawer === "schema" ? "源库表结构" : "新系统"}</b>
-                {drawer === "code" && data.artifactsVersion != null && badges.version !== data.artifactsVersion && (
-                  <span className="tag warn">基于 v{data.artifactsVersion} · 本体已是 v{badges.version}，点「重新生成」</span>
-                )}
                 <button className="ghost sm" onClick={() => onDrawer(null)}><X size={12} /></button>
               </div>
               <div className="wd-body">
                 {drawer === "schema" && <SchemaView data={data.schemas ?? []} mapIndex={mapIndex} />}
-                {drawer === "code" && data.artifacts && <CodeView data={{ ...data.artifacts, apiAssets: data.apis, version: data.artifactsVersion ?? badges.version }} actions={actions} />}
+                {drawer === "code" && data.merged && (
+                  <AppView data={{ ontology: data.merged.ontology, version: badges.version, apiAssets: data.apis }} />
+                )}
               </div>
             </div>
           )}

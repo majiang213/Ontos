@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Plus, CaretDown, CaretRight, Circle, ArrowUp, ArrowClockwise,
-  PlugsConnected, PencilRuler, Scales, Code, ChatCircleText, ListChecks,
+  PlugsConnected, PencilRuler, Scales, ChatCircleText, ListChecks,
   Percent, GitBranch, ShieldCheck, Cube, LockSimple, CheckCircle, Database, ShareNetwork,
 } from "@phosphor-icons/react";
 import type { Msg } from "./mockAgent";
@@ -27,7 +27,6 @@ const CAP_MENU = [
       { icon: <PlugsConnected size={14} />, label: "连接源库", say: "先连上两个库看看", stepKey: null },
       { icon: <PencilRuler size={14} />, label: "逆向建模", say: "生成本体草稿", stepKey: null },
       { icon: <Scales size={14} />, label: "整合裁决", say: "开始裁决", stepKey: "integrate" },
-      { icon: <Code size={14} />, label: "正向生成", say: "生成新系统", stepKey: "generate" },
       { icon: <ChatCircleText size={14} />, label: "问数示例", say: "查所有从候选人转正的员工及其部门", stepKey: "ask" },
       { icon: <ListChecks size={14} />, label: "当前状态", say: "现在进行到哪一步了？", stepKey: null },
     ],
@@ -87,13 +86,12 @@ function Message({ m, onSubmit, onHero, steps, onLocked, onOpenArtifact, onRepla
             <span className="af-go">查看 →</span>
           </div>
         )}
-        {(m.kind === "drafts" || m.kind === "published" || m.kind === "generated") && (
-          <div className="artifact" onClick={() => onOpenArtifact(m.kind === "generated" ? "code" : "ontology")}>
-            {m.kind === "generated" ? <Code size={14} /> : <ShareNetwork size={14} />}
+        {(m.kind === "drafts" || m.kind === "published") && (
+          <div className="artifact" onClick={() => onOpenArtifact("ontology")}>
+            <ShareNetwork size={14} />
             <span className="af-t">
               {m.kind === "drafts" && `本体草稿 · ${m.payload.drafts.reduce((n: number, d: any) => n + Object.keys(d.ontology.object_types).length, 0)} 个对象类型`}
               {m.kind === "published" && "合并本体 · 已发布"}
-              {m.kind === "generated" && "新系统 · DDL / CRUD API / 界面 / 血缘"}
             </span>
             <span className="af-go">查看 →</span>
           </div>
