@@ -57,6 +57,7 @@ function emptyData() {
     decisions: {} as Record<string, string>,
     merged: null as any,
     pending: false, // 发布后有未发布的画布改动（工作副本 ≠ 已发布版本）
+    staging: [] as string[], // 表结构抽屉里勾选的表（conn.table）
     apis: [] as any[], // 问数沉淀的 API 资产
     connectDone: false,
     version: 0,
@@ -297,7 +298,18 @@ export function useMockAgent() {
     const all = await (await fetch("/api/overlap")).json();
     // 两端源都已连接、且两端的表都已加入画布，才算可裁决的候选对
     const backends = new Set((s.schemas ?? []).map((x: any) => x.backend ?? x.connection));
-    s.evidence = all.filter((e: any) => pairBackendsOf(e.pair).every((b) => backends.has(b)) && pairStaged(s, e.pair));
+    s.evidence = all
+      .filter((e: any) => pairBackendsOf(e.pair).every((b) => backends.has(b)) && pairStaged(s, e.pair))
+      .map((e: any) => {
+        // 任一端对象没设识别字段 → 数据层无法比对（"无可比对标识"）
+        const noIdentity = pairEndpointsOf(e.pair).some((t) => {
+          const [conn, table] = t.split(".");
+          const d = (s.drafts ?? []).find((x: any) => x.connection === conn);
+          const o = Object.values<any>(d?.ontology.object_types ?? {}).find((x) => x.sources.some((src: any) => src.table === table));
+          return o && !o.identity;
+        });
+        return noIdentity ? { ...e, rate: null, reason: `${e.reason ?? ""}（未设识别字段，无法比对）` } : e;
+      });
   }
   async function tPublish() {
     const res = await (
@@ -583,11 +595,66 @@ export function useMockAgent() {
     s.connectDone = true;
     setConnectFlow(null);
     setSchemaTick((n) => n + 1); // 打开表结构抽屉：点「加入画布」，表变成画布上的节点
-    say(`${cur.connection} 已连接，读取到 ${cur.tables} 张表的结构。在「表结构」里点「加入画布」，表就变成画布上的节点。`);
+    say(`${cur.connection} 已连接，读取到 ${cur.tables} 张表的结构。在「表结构」里勾选表，点「生成本体草稿」，我来读表建模。`);
     rerender();
   }
 
-  // ---------- 表加入画布（staging）：在表结构抽屉里操作，表 → 节点（AI 按表产草稿）----------
+  // ---------- 多选 staging + LLM 生成 ----------
+  // staging = 表结构抽屉里勾选的表（conn.table）；生成后清空
+  function toggleStageSelect(conn: string, table: string) {
+    const s = store.current;
+    s.staging = s.staging ?? [];
+    const k = `${conn}.${table}`;
+    s.staging = s.staging.includes(k) ? s.staging.filter((x: string) => x !== k) : [...s.staging, k];
+    rerender();
+  }
+  function selectAllTables() {
+    const s = store.current;
+    s.staging = (s.schemas ?? []).flatMap((sv: any) => sv.tables.map((t: any) => `${sv.connection}.${t.name}`)).filter((k: string) => !stagedTableSet(s).has(k));
+    rerender();
+  }
+  function clearStaging() {
+    store.current.staging = [];
+    rerender();
+  }
+
+  // 交给 LLM 生成（demo 为规则模拟）：勾选的表 → 草稿上画布；有需要判断的弹判断卡
+  const [generating, setGenerating] = useState(false);
+  const [identityAsk, setIdentityAsk] = useState(false);
+  async function generateFromStaging() {
+    const s = store.current;
+    const keys = s.staging ?? [];
+    if (!keys.length || generating) return;
+    setGenerating(true);
+    await sleep(1100); // LLM 读表结构中（模拟）
+    for (const k of keys) {
+      const [conn, table] = k.split(".");
+      await stageTable(conn, table);
+    }
+    s.staging = [];
+    setGenerating(false);
+    setWizardStep("model");
+    // 需要人判断的点：识别到身份证格式的列，准备设为识别字段——问一声
+    const hasIdCard = (s.drafts ?? []).some((d: any) => Object.values<any>(d.ontology.object_types).some((o) => o.identity === "id_card" && !o._ignored));
+    if (hasIdCard && !s.draftsConfirmed && !s.merged) setIdentityAsk(true);
+    rerender();
+  }
+
+  // 判断卡应答：身份证设为识别字段？「先不设」则交集率无从算起（候选对变"无可比对标识"）
+  function confirmIdentity(keep: boolean) {
+    const s = store.current;
+    if (!keep) {
+      for (const d of s.drafts ?? []) {
+        for (const o of Object.values<any>(d.ontology.object_types)) {
+          if (o.identity === "id_card") delete o.identity;
+        }
+        d.yaml = toYaml(d.ontology);
+      }
+    }
+    setIdentityAsk(false);
+    rerender();
+  }
+
   async function stageTable(conn: string, table: string) {
     const s = store.current;
     if (!s._draftAll) s._draftAll = await (await fetch("/api/draft")).json();
@@ -1286,6 +1353,7 @@ export function useMockAgent() {
     connectFlow, connectTest, connectSave,
     confirmDrafts, toggleIgnore, ui, rollbackTo,
     schemaTick, publishChanges, discardChanges, stageTable, unstageTable, stageAll, createObject,
+    generating, identityAsk, toggleStageSelect, selectAllTables, clearStaging, generateFromStaging, confirmIdentity,
     createLink, renameLink, deleteLink, deleteObject,
     actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish,
     convs: CONVS, activeConv, switchConv,

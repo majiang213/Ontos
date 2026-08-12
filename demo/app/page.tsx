@@ -83,6 +83,8 @@ export default function Home() {
         }}
         decisionOpen={e.decisionOpen}
         onDecisionOpen={e.setDecisionOpen}
+        generating={e.generating}
+        identityAsk={e.identityAsk}
         actions={{
           applyObjectYaml: e.applyObjectYaml,
           updateObject: e.updateObject,
@@ -103,6 +105,11 @@ export default function Home() {
           stage: e.stageTable,
           unstage: e.unstageTable,
           stageAll: e.stageAll,
+          toggleStage: e.toggleStageSelect,
+          selectAllTables: e.selectAllTables,
+          clearStaging: e.clearStaging,
+          generate: () => e.ui(e.generateFromStaging),
+          confirmIdentity: (keep) => e.ui(() => e.confirmIdentity(keep)),
           createObject: e.createObject,
           createLink: e.createLink,
           renameLink: e.renameLink,

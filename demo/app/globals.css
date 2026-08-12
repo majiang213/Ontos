@@ -746,6 +746,14 @@ details.tbl-acc[open] summary { border-bottom: 1px solid var(--border); backgrou
 .wd-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
 /* 抽屉里 schema 源块双列铺开，消灭右侧大片空白 */
 .wd-body > .grid { grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); align-items: start; }
+/* 多选 staging：动作条 + 勾选框 */
+.stage-bar { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; padding: 2px 2px 4px; }
+.sel-box {
+  width: 14px; height: 14px; border-radius: 4px; flex: none; cursor: pointer;
+  border: 1.5px solid var(--border-strong); background: #fff;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.sel-box.on { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2.5px #fff; }
 
 /* 选表器 */
 .pk-src { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }

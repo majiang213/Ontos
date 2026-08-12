@@ -40,10 +40,15 @@ export interface WsActions {
   publishChanges: () => void; // 发布工作副本 → 新版本
   discardChanges: () => void; // 放弃未发布改动
   rollback: (v: number) => void;
-  // 选表上画布
+  // 选表上画布（多选 → 生成）
   stage: (conn: string, table: string) => void;
   unstage: (conn: string, table: string) => void;
   stageAll: () => void;
+  toggleStage: (conn: string, table: string) => void;
+  selectAllTables: () => void;
+  clearStaging: () => void;
+  generate: () => void;
+  confirmIdentity: (keep: boolean) => void;
   // 手动新建对象（无源）
   createObject: () => string;
   // 画布连线与删除
@@ -168,16 +173,33 @@ function DecisionPanel({ data, merged, actions, onClose }: { data: any; merged: 
   );
 }
 
-/* ---- M1 Schema（只读原料列表：每列标出映射到哪个本体字段；「加入画布」把表变成画布节点）---- */
-function SchemaView({ data, mapIndex = {}, staged, locked, stageActions }: {
+/* ---- M1 Schema（只读原料列表：勾选表 → LLM 生成本体草稿；每列标出映射去向）---- */
+function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, stageActions }: {
   data: any[];
   mapIndex?: Record<string, string[]>;
-  staged?: Set<string>; // 已加入画布的表（草稿 ∪ 已发布本体的来源）
+  staged?: Set<string>; // 已在画布的表（草稿 ∪ 已发布本体的来源）
   locked?: boolean; // 已确认/已发布后不可移出，只能加
-  stageActions?: { stage: (c: string, t: string) => void; unstage: (c: string, t: string) => void; stageAll: () => void };
+  staging?: Set<string>; // 勾选了、还没生成草稿的表
+  generating?: boolean;
+  stageActions?: {
+    toggle: (c: string, t: string) => void; selectAll: () => void; clear: () => void; generate: () => void;
+    unstage: (c: string, t: string) => void;
+  };
 }) {
+  const selCount = staging?.size ?? 0;
   return (
     <div className="grid" style={{ gap: 12 }}>
+      {stageActions && (
+        <div className="stage-bar">
+          <span className="hint" style={{ margin: 0 }}>{selCount ? `已选 ${selCount} 张表` : "勾选表，交给 AI 生成本体草稿"}</span>
+          <span style={{ flex: 1 }} />
+          <button className="ghost sm" onClick={stageActions.selectAll}>全选</button>
+          <button className="ghost sm" onClick={stageActions.clear} disabled={!selCount}>清空</button>
+          <button className="sm" disabled={!selCount || generating} onClick={stageActions.generate}>
+            {generating ? "AI 正在读表结构…" : "生成本体草稿 →"}
+          </button>
+        </div>
+      )}
       {data.map((db: any) => (
         <div className="src-block" key={db.connection}>
           <div className="src-head">
@@ -189,22 +211,27 @@ function SchemaView({ data, mapIndex = {}, staged, locked, stageActions }: {
           <div className="src-body">
             {db.tables.map((t: any) => {
               const mapped = t.columns.filter((c: any) => mapIndex[`${db.connection}.${t.name}.${c.name}`]).length;
-              const on = staged?.has(`${db.connection}.${t.name}`);
+              const key = `${db.connection}.${t.name}`;
+              const on = staged?.has(key);
+              const sel = staging?.has(key);
               return (
                 <details key={t.name} className="tbl-acc">
                   <summary>
+                    {stageActions && !on && (
+                      <span
+                        className={`sel-box ${sel ? "on" : ""}`}
+                        title={sel ? "取消选择" : "选择"}
+                        onClick={(e) => { e.preventDefault(); stageActions.toggle(db.connection, t.name); }}
+                      />
+                    )}
                     <span className="mono">{t.name}</span>
                     <span className="tag gray">{t.comment}</span>
                     <span className="rows-n">{t.rowCount} 行 · {mapped}/{t.columns.length} 列已映射</span>
-                    {stageActions && (
-                      on ? (
-                        locked ? (
-                          <span className="tag ok" onClick={(e) => e.preventDefault()}>已加入</span>
-                        ) : (
-                          <button className="ghost sm" onClick={(e) => { e.preventDefault(); stageActions.unstage(db.connection, t.name); }}>移出</button>
-                        )
+                    {on && (
+                      locked ? (
+                        <span className="tag ok" onClick={(e) => e.preventDefault()}>已在画布</span>
                       ) : (
-                        <button className="sm" onClick={(e) => { e.preventDefault(); stageActions.stage(db.connection, t.name); }}>加入画布</button>
+                        <button className="ghost sm" onClick={(e) => { e.preventDefault(); stageActions?.unstage(db.connection, t.name); }}>移出</button>
                       )
                     )}
                   </summary>
@@ -623,7 +650,7 @@ export default function Workspace({
   mode, badges, data,
   connectFlow, connectActions, decisionOpen, onDecisionOpen,
   actions, collapsed, onToggleCollapse,
-  drawer, onDrawer,
+  drawer, onDrawer, generating, identityAsk,
 }: {
   mode: "wizard" | "editor";
   badges: Badges;
@@ -636,6 +663,8 @@ export default function Workspace({
   connectActions: { test: () => void; save: () => void };
   decisionOpen: boolean;
   onDecisionOpen: (open: boolean) => void;
+  generating: boolean;
+  identityAsk: boolean;
   actions: WsActions;
 }) {
   const [selObj, setSelObj] = useState<string | null>(null);
@@ -831,6 +860,22 @@ export default function Workspace({
               </div>
             )}
 
+            {/* 浮动卡：LLM 判断卡——生成草稿后需要人拍板的点（底中） */}
+            {identityAsk && (
+              <div className="cv-float cv-bc">
+                <div className="panel">
+                  <h3>草稿好了——有个判断需要你定</h3>
+                  <div className="hint" style={{ lineHeight: 1.7 }}>
+                    candidate.idcard_no 和 employee.id_card 都是身份证格式。我准备把<b>身份证</b>设为「识别字段」——跨源认人、算交集率都靠它。
+                  </div>
+                  <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0 }}>
+                    <button className="sm" onClick={() => actions.confirmIdentity(true)}>可以，设为识别字段</button>
+                    <button className="ghost sm" onClick={() => actions.confirmIdentity(false)} title="不设则跨源无法比对，候选对交集率会显示「无可比对标识」">先不设</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 浮动条：未发布改动——编辑→发布交互（画布=工作副本，应用=已发布版本） */}
             {data.pending && !(decisionOpen && data.merged) && (
               <div className="cv-float cv-bc">
@@ -919,7 +964,15 @@ export default function Workspace({
                     mapIndex={mapIndex}
                     staged={stagedSet}
                     locked={!!badges.confirmed || !!data.merged}
-                    stageActions={{ stage: actions.stage, unstage: actions.unstage, stageAll: actions.stageAll }}
+                    staging={new Set<string>(data.staging ?? [])}
+                    generating={generating}
+                    stageActions={{
+                      toggle: actions.toggleStage,
+                      selectAll: actions.selectAllTables,
+                      clear: actions.clearStaging,
+                      generate: actions.generate,
+                      unstage: actions.unstage,
+                    }}
                   />
                 )}
                 {drawer === "code" && data.merged && (
