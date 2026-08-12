@@ -130,6 +130,9 @@ export default function Sidebar({
               {s.name}
             </button>
           ))}
+          {steps.length > 0 && steps.every((s) => s.state === "done") && (
+            <div className="flow-note">流程走完了，本体没定死——画布上随时改，每次修改自动存为新版本</div>
+          )}
         </>
       )}
 
