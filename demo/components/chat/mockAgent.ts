@@ -56,6 +56,7 @@ function emptyData() {
     evidence: null as any[] | null,
     decisions: {} as Record<string, string>,
     merged: null as any,
+    pending: false, // 发布后有未发布的画布改动（工作副本 ≠ 已发布版本）
     apis: [] as any[], // 问数沉淀的 API 资产
     connectDone: false,
     version: 0,
@@ -311,6 +312,7 @@ export function useMockAgent() {
       })
     ).json();
     store.current.merged = res;
+    store.current.pending = false; // 发布即清待发布标记
     store.current.version += 1;
     store.current.history.push({
       version: store.current.version,
@@ -380,16 +382,7 @@ export function useMockAgent() {
       const d = s.drafts.find((x: any) => x.connection === conn);
       d.yaml = toYaml(d.ontology);
     } else if (kind === "merged" && s.merged) {
-      s.merged.yaml = toYaml(s.merged.ontology);
-      s.version += 1;
-      s.history.push({
-        version: s.version,
-        yaml: s.merged.yaml,
-        ontology: structuredClone(s.merged.ontology),
-        merge_decisions: s.merged.merge_decisions,
-        at: new Date().toISOString(),
-        note: `YAML 调整「${obj.label}」`,
-      });
+      touchMerged(`YAML 调整「${obj.label}」`);
     }
     rerender();
     return null;
@@ -412,16 +405,7 @@ export function useMockAgent() {
       const d = s.drafts.find((x: any) => x.connection === conn);
       d.yaml = toYaml(d.ontology);
     } else if (kind === "merged" && s.merged) {
-      s.merged.yaml = toYaml(s.merged.ontology);
-      s.version += 1;
-      s.history.push({
-        version: s.version,
-        yaml: s.merged.yaml,
-        ontology: structuredClone(s.merged.ontology),
-        merge_decisions: s.merged.merge_decisions,
-        at: new Date().toISOString(),
-        note: `画布调整「${updated.label}」`,
-      });
+      touchMerged(`画布调整「${updated.label}」`);
     }
     rerender();
     return null;
@@ -464,9 +448,8 @@ export function useMockAgent() {
     } else if (kind === "merged" && s.merged) {
       s.merged.ontology = parsed;
       s.merged.yaml = toYaml(parsed);
-      s.version += 1;
-      s.history.push({ version: s.version, yaml: s.merged.yaml, ontology: parsed, merge_decisions: s.merged.merge_decisions, at: new Date().toISOString(), note: "手动编辑" });
-      say(`已保存并发布 v${s.version}（手动编辑）——新系统跟随本体即时生效，无需重新生成。`);
+      touchMerged("手动编辑");
+      say(`已保存（待发布）——画布是工作副本，点工具条「发布 v${s.version + 1}」才生效到新系统。`);
     } else {
       return "当前状态不支持该操作";
     }
@@ -550,22 +533,19 @@ export function useMockAgent() {
     say("当前状态：\n" + lines.join("\n"), { suggestions: suggestions() });
   }
 
-  // ---------- 数据源配置（表单 → 测试 → 保存 → 再添加/继续，数量任意）----------
+  // ---------- 数据源配置（表单 → 测试 → 保存；数量任意，工具条随时再加）----------
   const [connectFlow, setConnectFlow] = useState<{
     idx: number;
     tested: boolean;
     testing?: boolean;
     saved: { connection: string; backend: string }[];
-    awaiting?: boolean;
   } | null>(null);
-  const connectBase = useRef<string[]>([]); // 追加模式：流程开始前已有的连接名
 
   function startConnectFlow() {
     const existing = (store.current.schemas ?? []).map((x: any) => ({
       connection: x.connection,
       backend: x.backend ?? x.connection,
     }));
-    connectBase.current = existing.map((x: any) => x.connection);
     setConnectFlow({ idx: existing.length, tested: false, saved: existing });
   }
 
@@ -585,8 +565,8 @@ export function useMockAgent() {
     setConnectFlow((f) => (f ? { ...f, testing: false, tested: true } : f));
   }
 
-  // 选表器开关（画布浮动卡）：保存连接后自动弹出；工具条可再开
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // 表结构抽屉信号：保存连接后自增，page 层监听并打开「表结构」抽屉（表在那里加入画布）
+  const [schemaTick, setSchemaTick] = useState(0);
 
   async function connectSave() {
     const f = connectFlow;
@@ -600,69 +580,14 @@ export function useMockAgent() {
       const b = s._all.find((x: any) => x.connection === sv.backend);
       return { ...b, connection: sv.connection, backend: sv.backend };
     });
-    setConnectFlow({ ...f, saved, tested: false, awaiting: true });
-    setPickerOpen(true); // 连上即选表——用户挑哪些表上画布
-    say(`${cur.connection} 已连接，读取到 ${cur.tables} 张表的结构。`);
-    rerender();
-  }
-
-  function connectAddMore() {
-    const f = connectFlow;
-    if (!f) return;
-    setConnectFlow({ idx: f.saved.length, tested: false, saved: f.saved });
-  }
-
-  async function connectFinish() {
-    const f = connectFlow;
-    const s = store.current;
-    if (!f || f.saved.length === 0) return;
     s.connectDone = true;
     setConnectFlow(null);
-    const multi = new Set(f.saved.map((x) => x.backend)).size > 1;
-    const newConns = f.saved.map((x) => x.connection).filter((c) => !connectBase.current.includes(c));
-
-    // 追加模式：为已加入画布的新表算新候选对，增量裁决后重新发布
-    if (connectBase.current.length > 0 && newConns.length > 0) {
-      say(`${newConns.join("、")} 已连接。`);
-      const oldPairs = s.evidence ?? [];
-      const all = await (await fetch("/api/overlap")).json();
-      const backends = new Set((s.schemas ?? []).map((x: any) => x.backend ?? x.connection));
-      const fresh = all.filter(
-        (e: any) =>
-          pairBackendsOf(e.pair).every((b) => backends.has(b)) &&
-          pairStaged(s, e.pair) &&
-          !oldPairs.some((o: any) => o.pair === e.pair),
-      );
-      s.evidence = [...oldPairs, ...fresh];
-      const hasNewObjects = (s.drafts ?? []).some((d: any) => newConns.includes(d.connection));
-      if (fresh.length > 0) {
-        say(`新表和现有对象产生了 ${fresh.length} 对新候选对——只需要裁决这些新对（已裁的保持原样）：`);
-        setWizardStep("integrate");
-        setDecisionOpen(true);
-      } else if (s.merged && hasNewObjects) {
-        say("新表没有产生新的候选对，直接重新发布，把新对象纳入本体。");
-        await tPublish();
-        say(`已发布 v${s.version}。`);
-      } else if (hasNewObjects) {
-        say("草稿集已更新。", { suggestions: suggestions() });
-      }
-      setPickerOpen(false);
-      rerender();
-      return;
-    }
-
-    say(
-      multi
-        ? `${f.saved.length} 个数据源已就绪（只读）。注意 candidate.mobile 是 +86 带连字符的脏格式——后面算交集前要先归一化。`
-        : "数据源已就绪（只读）。单个源没有跨源合并问题——流程会跳过「多源整合」这一步。",
-    );
-    // 表由人挑：从源里选表加入画布，AI 按表产草稿——人的关卡在确认与裁决
-    setWizardStep("model");
-    setPickerOpen(!(s.drafts?.length)); // 一张表都没加就留着选表器
+    setSchemaTick((n) => n + 1); // 打开表结构抽屉：点「加入画布」，表变成画布上的节点
+    say(`${cur.connection} 已连接，读取到 ${cur.tables} 张表的结构。在「表结构」里点「加入画布」，表就变成画布上的节点。`);
     rerender();
   }
 
-  // ---------- 选表上画布（staging）：用户挑表，AI 按表产草稿 ----------
+  // ---------- 表加入画布（staging）：在表结构抽屉里操作，表 → 节点（AI 按表产草稿）----------
   async function stageTable(conn: string, table: string) {
     const s = store.current;
     if (!s._draftAll) s._draftAll = await (await fetch("/api/draft")).json();
@@ -683,8 +608,31 @@ export function useMockAgent() {
       d.ontology.link_types = (base.ontology.link_types ?? []).filter((l: any) => d.ontology.object_types[l.from] && d.ontology.object_types[l.to]);
       d.yaml = toYaml(d.ontology);
       setWizardStep("model");
-      rerender();
     }
+    // 发布后加表：对象直接进工作副本（画布立即可见），标待发布；顺带算新候选对进裁决面板
+    if (s.merged) {
+      if (!s.merged.ontology.object_types[obj.name]) {
+        const m = structuredClone(obj);
+        for (const src of m.sources) src.connection = conn;
+        s.merged.ontology.object_types[obj.name] = m;
+      }
+      touchMerged("加入新源表");
+      const all = await (await fetch("/api/overlap")).json();
+      const backends = new Set((s.schemas ?? []).map((x: any) => x.backend ?? x.connection));
+      const oldPairs = s.evidence ?? [];
+      const fresh = all.filter(
+        (e: any) =>
+          pairBackendsOf(e.pair).every((b) => backends.has(b)) &&
+          pairStaged(s, e.pair) &&
+          !oldPairs.some((o: any) => o.pair === e.pair),
+      );
+      if (fresh.length > 0) {
+        s.evidence = [...oldPairs, ...fresh];
+        setWizardStep("integrate");
+        setDecisionOpen(true);
+      }
+    }
+    rerender();
   }
 
   function unstageTable(conn: string, table: string) {
@@ -723,16 +671,7 @@ export function useMockAgent() {
     };
     if (s.merged) {
       s.merged.ontology.object_types[name] = obj;
-      s.merged.yaml = toYaml(s.merged.ontology);
-      s.version += 1;
-      s.history.push({
-        version: s.version,
-        yaml: s.merged.yaml,
-        ontology: structuredClone(s.merged.ontology),
-        merge_decisions: s.merged.merge_decisions,
-        at: new Date().toISOString(),
-        note: "画布新建对象",
-      });
+      touchMerged("画布新建对象");
     } else {
       s.drafts = s.drafts ?? [];
       let d = s.drafts.find((x: any) => x.connection === "manual");
@@ -748,11 +687,18 @@ export function useMockAgent() {
     return name;
   }
 
-  // merged 本体的固定收尾：同步 YAML、版本 +1、入历史
-  function touchMerged(note: string) {
+  // 已发布后的画布修改：只改工作副本（合并本体），标 pending——显式「发布」才升版本
+  function touchMerged(_note: string) {
     const s = store.current;
     if (!s.merged) return;
     s.merged.yaml = toYaml(s.merged.ontology);
+    s.pending = true;
+  }
+
+  // 发布改动：工作副本 → 新版本（版本 +1 入历史，新系统同步到已发布版本）
+  function publishChanges() {
+    const s = store.current;
+    if (!s.merged || !s.pending) return;
     s.version += 1;
     s.history.push({
       version: s.version,
@@ -760,8 +706,11 @@ export function useMockAgent() {
       ontology: structuredClone(s.merged.ontology),
       merge_decisions: s.merged.merge_decisions,
       at: new Date().toISOString(),
-      note,
+      note: "画布修改",
     });
+    s.pending = false;
+    say(`已发布 v${s.version}——新系统同步到最新版本。`);
+    rerender();
   }
 
   // 画布连线建关系：已发布进合并本体（版本 +1）；草稿期同桶进桶、跨桶进 manual 桶
@@ -867,6 +816,7 @@ export function useMockAgent() {
     const snap = (s.history ?? []).find((h: any) => h.version === v);
     if (!snap || !s.merged || v === s.version) return;
     s.merged = { ...snap, ontology: structuredClone(snap.ontology) };
+    s.pending = false;
     s.version += 1;
     s.history.push({ ...structuredClone(snap), version: s.version, at: new Date().toISOString(), note: `回滚自 v${v}` });
     say(`已回滚到 v${v} 的内容——作为 v${s.version} 重新发布，历史链完整。`);
@@ -1028,14 +978,10 @@ export function useMockAgent() {
       if (hit) return;
     }
 
-    // 2.4) 连接流程中的选择：再添加 / 完成（必须在 2.5 之前——流程进行中优先匹配流程内选择）
+    // 2.4) 连接表单进行中：再添加一个数据源
     if (connectFlow) {
-      if (/完成|继续/.test(t) && connectFlow.awaiting) {
-        await connectFinish();
-        return;
-      }
       if (/再添加|再加一个|添加一个|再来一个/.test(t)) {
-        connectAddMore();
+        setConnectFlow({ idx: connectFlow.saved.length, tested: false, saved: connectFlow.saved });
         return;
       }
     }
@@ -1179,7 +1125,7 @@ export function useMockAgent() {
   const actDraft = () =>
     ui(async () => {
       if (!store.current.schemas) return startConnectFlow();
-      setPickerOpen(true); // 逆向建模 = 挑表上画布，AI 按表产草稿
+      setSchemaTick((n) => n + 1); // 逆向建模 = 把表加入画布（表结构抽屉里操作），AI 按表产草稿
     });
   const actIntegrate = () =>
     ui(async () => {
@@ -1324,9 +1270,9 @@ export function useMockAgent() {
     applyYaml, updateObject, applyObjectYaml, replay, reopenDecisions,
     wsList, activeWs, switchWorkspace, newWorkspace,
     steps, stepClick, lockedHint, openView,
-    connectFlow, connectTest, connectSave, connectAddMore, connectFinish,
+    connectFlow, connectTest, connectSave,
     confirmDrafts, toggleIgnore, ui, rollbackTo,
-    pickerOpen, setPickerOpen, stageTable, unstageTable, stageAll, createObject,
+    schemaTick, publishChanges, stageTable, unstageTable, stageAll, createObject,
     createLink, renameLink, deleteLink, deleteObject,
     actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish,
     convs: CONVS, activeConv, switchConv,

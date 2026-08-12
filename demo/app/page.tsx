@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMockAgent } from "@/components/chat/mockAgent";
 import Conversation from "@/components/chat/Conversation";
 import Workspace from "@/components/chat/Workspace";
@@ -10,6 +10,10 @@ export default function Home() {
   const e = useMockAgent();
   const [wsClosed, setWsClosed] = useState(false);
   const [drawer, setDrawer] = useState<null | "schema" | "code">(null);
+  // 保存连接后自动打开表结构抽屉（表在那里加入画布）
+  useEffect(() => {
+    if (e.schemaTick > 0) setDrawer("schema");
+  }, [e.schemaTick]);
   // 工作台模态：模型编辑器（已发布）> 初始化建模向导；问数页纯对话，取数详情融合在答案卡里
   const mode = e.badges.version ? "editor" : "wizard";
   const inChat = e.activeConv === "chat";
@@ -74,14 +78,10 @@ export default function Home() {
           onToggleCollapse={() => setWsClosed(!wsClosed)}
         drawer={drawer}
         onDrawer={setDrawer}
-        pickerOpen={e.pickerOpen}
-        onPicker={e.setPickerOpen}
         connectFlow={e.connectFlow}
         connectActions={{
           test: () => e.ui(e.connectTest),
           save: () => e.ui(e.connectSave),
-          addMore: () => e.ui(e.connectAddMore),
-          finish: () => e.ui(e.connectFinish),
         }}
         decisionOpen={e.decisionOpen}
         onDecisionOpen={e.setDecisionOpen}
@@ -99,6 +99,7 @@ export default function Home() {
           integrate: e.actIntegrate,
           decideAll: e.actDecideSuggested,
           publish: e.actPublish,
+          publishChanges: () => e.ui(e.publishChanges),
           rollback: (v) => e.ui(() => e.rollbackTo(v)),
           stage: e.stageTable,
           unstage: e.unstageTable,

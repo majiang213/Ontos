@@ -37,6 +37,7 @@ export interface WsActions {
   integrate: () => void;
   decideAll: () => void;
   publish: () => void;
+  publishChanges: () => void; // 发布后画布改动 → 显式发布升版本
   rollback: (v: number) => void;
   // 选表上画布
   stage: (conn: string, table: string) => void;
@@ -104,66 +105,6 @@ function ConnectPanel({ flow, onTest, onSave }: { flow: any; onTest: () => void;
   );
 }
 
-/* ---- 选表器：挑哪些表加入画布（AI 按表产草稿）---- */
-function PickerPanel({ schemas, drafts, locked, awaiting, stageActions, onClose }: {
-  schemas: any[];
-  drafts: any[] | null;
-  locked: boolean; // 已确认/已发布后不可移出，只能加
-  awaiting: { count: number; onAddMore: () => void; onFinish: () => void } | null;
-  stageActions: { stage: (c: string, t: string) => void; unstage: (c: string, t: string) => void; stageAll: () => void };
-  onClose: () => void;
-}) {
-  const staged = new Set(
-    (drafts ?? []).flatMap((d: any) =>
-      Object.values<any>(d.ontology.object_types).flatMap((o) => o.sources.map((s: any) => `${s.connection}.${s.table}`)),
-    ),
-  );
-  return (
-    <div className="panel">
-      <div className="oe-head" style={{ marginBottom: 4 }}>
-        <b>选择要加入画布的表</b>
-        {!awaiting && <button className="ghost sm" onClick={onClose}><X size={12} /></button>}
-      </div>
-      <div className="hint">加入画布的表会成为本体对象（AI 按表产草稿）；没加入的不进本体。</div>
-      {schemas.map((db: any) => (
-        <div key={db.connection} className="pk-src">
-          <div className="pk-src-h">
-            <Database size={12} className="i-inline" /><b>{db.connection}</b>
-            <span className="tag gray">{db.kind === "mysql" ? "MySQL" : "PostgreSQL"}</span>
-          </div>
-          {db.tables.map((t: any) => {
-            const key = `${db.connection}.${t.name}`;
-            const on = staged.has(key);
-            return (
-              <div key={t.name} className="pk-row">
-                <span className="mono">{t.name}</span>
-                <span className="tag gray">{t.comment}</span>
-                <span className="rows-n">{t.rowCount} 行</span>
-                {on ? (
-                  locked ? <span className="tag ok">已加入</span> : <button className="ghost sm" onClick={() => stageActions.unstage(db.connection, t.name)}>移出</button>
-                ) : (
-                  <button className="sm" onClick={() => stageActions.stage(db.connection, t.name)}>加入画布</button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
-      <div className="panel-actions" style={{ marginTop: 12, marginBottom: 0, alignItems: "center" }}>
-        <button className="ghost sm" onClick={stageActions.stageAll}>全部加入</button>
-        <span style={{ flex: 1 }} />
-        {awaiting && (
-          <>
-            <span className="hint" style={{ margin: 0 }}>已保存 {awaiting.count} 个数据源</span>
-            <button className="ghost sm" onClick={awaiting.onAddMore}><Plus size={11} className="i-inline" />再添加一个</button>
-            <button className="sm" onClick={awaiting.onFinish}>完成，继续 →</button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /* ---- 裁决面板：LLM 建议一次给全，人逐对审阅定案（裁决权在人，留痕可回滚）---- */
 const REL_OPTIONS = [
   { t: "①", name: "完全等价", desc: "同一业务概念，合并为单对象挂多源" },
@@ -226,8 +167,14 @@ function DecisionPanel({ data, merged, actions, onClose }: { data: any; merged: 
   );
 }
 
-/* ---- M1 Schema（只读原料列表：每列标出映射到哪个本体字段，未映射一眼可见）---- */
-function SchemaView({ data, mapIndex = {} }: { data: any[]; mapIndex?: Record<string, string[]> }) {
+/* ---- M1 Schema（只读原料列表：每列标出映射到哪个本体字段；「加入画布」把表变成画布节点）---- */
+function SchemaView({ data, mapIndex = {}, staged, locked, stageActions }: {
+  data: any[];
+  mapIndex?: Record<string, string[]>;
+  staged?: Set<string>; // 已加入画布的表（草稿 ∪ 已发布本体的来源）
+  locked?: boolean; // 已确认/已发布后不可移出，只能加
+  stageActions?: { stage: (c: string, t: string) => void; unstage: (c: string, t: string) => void; stageAll: () => void };
+}) {
   return (
     <div className="grid" style={{ gap: 12 }}>
       {data.map((db: any) => (
@@ -241,12 +188,24 @@ function SchemaView({ data, mapIndex = {} }: { data: any[]; mapIndex?: Record<st
           <div className="src-body">
             {db.tables.map((t: any) => {
               const mapped = t.columns.filter((c: any) => mapIndex[`${db.connection}.${t.name}.${c.name}`]).length;
+              const on = staged?.has(`${db.connection}.${t.name}`);
               return (
                 <details key={t.name} className="tbl-acc">
                   <summary>
                     <span className="mono">{t.name}</span>
                     <span className="tag gray">{t.comment}</span>
                     <span className="rows-n">{t.rowCount} 行 · {mapped}/{t.columns.length} 列已映射</span>
+                    {stageActions && (
+                      on ? (
+                        locked ? (
+                          <span className="tag ok" onClick={(e) => e.preventDefault()}>已加入</span>
+                        ) : (
+                          <button className="ghost sm" onClick={(e) => { e.preventDefault(); stageActions.unstage(db.connection, t.name); }}>移出</button>
+                        )
+                      ) : (
+                        <button className="sm" onClick={(e) => { e.preventDefault(); stageActions.stage(db.connection, t.name); }}>加入画布</button>
+                      )
+                    )}
                   </summary>
                   <div className="tbl-acc-body">
                     <table className="data">
@@ -663,7 +622,7 @@ export default function Workspace({
   mode, badges, data,
   connectFlow, connectActions, decisionOpen, onDecisionOpen,
   actions, collapsed, onToggleCollapse,
-  drawer, onDrawer, pickerOpen, onPicker,
+  drawer, onDrawer,
 }: {
   mode: "wizard" | "editor";
   badges: Badges;
@@ -672,10 +631,8 @@ export default function Workspace({
   onToggleCollapse: () => void;
   drawer: null | "schema" | "code";
   onDrawer: (d: null | "schema" | "code") => void;
-  pickerOpen: boolean;
-  onPicker: (open: boolean) => void;
   connectFlow: any;
-  connectActions: { test: () => void; save: () => void; addMore: () => void; finish: () => void };
+  connectActions: { test: () => void; save: () => void };
   decisionOpen: boolean;
   onDecisionOpen: (open: boolean) => void;
   actions: WsActions;
@@ -697,8 +654,8 @@ export default function Workspace({
     return () => window.removeEventListener("keydown", h);
   }, [maximized, decisionOpen, onDecisionOpen]);
 
-  // 连接表单仅在「填写中」浮出；保存后等待选择（awaiting）时回落为选表器
-  const formActive = !!connectFlow && !connectFlow.awaiting;
+  // 连接表单仅在「填写中」浮出；保存后自动打开表结构抽屉加表
+  const formActive = !!connectFlow;
 
   // 阶段完全由状态推导——没有"步骤条"这种东西；发布即自动出码，向导到 publish 为止（之后是模型编辑器）
   const ev = data.evidence ?? [];
@@ -716,7 +673,7 @@ export default function Workspace({
   const stepMeta = STEP_META[phase] ?? STEP_META.connect;
   const head =
     mode === "editor"
-      ? { icon: ShareNetwork, color: "var(--accent)", title: `模型编辑器 · v${badges.version}`, sub: "本体已发布 · 可持续演进" }
+      ? { icon: ShareNetwork, color: "var(--accent)", title: `模型编辑器 · v${badges.version}${data.pending ? " · 有未发布改动" : ""}`, sub: data.pending ? "画布是工作副本——发布后才生效到新系统" : "本体已发布 · 可持续演进" }
       : { icon: stepMeta.icon, color: "var(--accent)", title: `初始化建模 · ${PHASE_NAME[phase] ?? ""}`, sub: stepMeta.sub };
   const HeadIcon = head.icon;
 
@@ -735,6 +692,13 @@ export default function Workspace({
     : (union?.linkMeta ?? {});
   const editingLink = linkEdit?.name && canvasOnt ? (canvasOnt.link_types.find((l: any) => l.name === linkEdit.name) ?? null) : null;
   const objLabel = (k?: string) => (k && canvasOnt?.object_types[k]?.label) || k || "";
+  // 已加入画布的表 = 草稿来源 ∪ 已发布本体来源（表结构抽屉里的「已加入」态）
+  const stagedSet = new Set<string>([
+    ...(data.drafts ?? []).flatMap((d: any) =>
+      Object.values<any>(d.ontology.object_types).filter((o) => !o._ignored).flatMap((o) => o.sources.map((s: any) => `${s.connection}.${s.table}`)),
+    ),
+    ...Object.values<any>(data.merged?.ontology.object_types ?? {}).flatMap((o) => o.sources.map((s: any) => `${s.connection}.${s.table}`)),
+  ]);
   // 源列 → 本体字段 的映射索引：schema 抽屉标出每列的去向（多对多：一列可喂多个对象）
   const mapIndex: Record<string, string[]> = {};
   const ontObjs = data.merged
@@ -793,12 +757,12 @@ export default function Workspace({
             >
               <Plus size={11} className="i-inline" />新建对象
             </button>
-            {data.schemas && (
-              <button className={`ghost sm ${pickerOpen ? "tool-active" : ""}`} onClick={() => onPicker(!pickerOpen)}>
-                选择表
+            <span className="grow" />
+            {data.pending && (
+              <button className="sm" onClick={actions.publishChanges} title="画布是工作副本——发布后新系统才同步到最新版本">
+                发布 v{(badges.version ?? 0) + 1}
               </button>
             )}
-            <span className="grow" />
             {data.merged && (
               <button className="ghost sm" onClick={() => actions.reopenDecisions()} title="清空全部裁决，重新逐对裁决">
                 <ArrowCounterClockwise size={11} className="i-inline" />全部重裁
@@ -869,19 +833,6 @@ export default function Workspace({
             {formActive && (
               <div className="cv-float cv-tl"><ConnectPanel flow={connectFlow} onTest={connectActions.test} onSave={connectActions.save} /></div>
             )}
-            {/* 浮动卡：选表器（左上；保存连接后自动弹出，含再添加/完成） */}
-            {!formActive && pickerOpen && data.schemas && (
-              <div className="cv-float cv-tl">
-                <PickerPanel
-                  schemas={data.schemas}
-                  drafts={data.drafts}
-                  locked={!!badges.confirmed || !!data.merged}
-                  awaiting={connectFlow?.awaiting ? { count: connectFlow.saved.length, onAddMore: connectActions.addMore, onFinish: connectActions.finish } : null}
-                  stageActions={{ stage: actions.stage, unstage: actions.unstage, stageAll: actions.stageAll }}
-                  onClose={() => onPicker(false)}
-                />
-              </div>
-            )}
             {/* 浮动卡：裁决面板（底中；确认草稿后自动浮出直到发布，发布后由「全部重裁/重新规划」再开） */}
             {mode === "wizard" && ev.length > 0 && ((!data.merged && badges.confirmed) || (decisionOpen && data.merged)) && (
               <div className="cv-float cv-bc">
@@ -895,7 +846,7 @@ export default function Workspace({
             )}
 
             {/* 浮动卡：阶段动作（左下，全部由状态驱动） */}
-            {!formActive && !pickerOpen && mode === "wizard" && data.drafts?.length > 0 && !badges.confirmed && (
+            {!formActive && mode === "wizard" && data.drafts?.length > 0 && !badges.confirmed && (
               <div className="cv-float cv-bl">
                 <div className="panel">
                   <b style={{ fontSize: 13.5 }}>草稿已生成，等你确认</b>
@@ -965,9 +916,17 @@ export default function Workspace({
                 <button className="ghost sm" onClick={() => onDrawer(null)}><X size={12} /></button>
               </div>
               <div className="wd-body">
-                {drawer === "schema" && <SchemaView data={data.schemas ?? []} mapIndex={mapIndex} />}
+                {drawer === "schema" && (
+                  <SchemaView
+                    data={data.schemas ?? []}
+                    mapIndex={mapIndex}
+                    staged={stagedSet}
+                    locked={!!badges.confirmed || !!data.merged}
+                    stageActions={{ stage: actions.stage, unstage: actions.unstage, stageAll: actions.stageAll }}
+                  />
+                )}
                 {drawer === "code" && data.merged && (
-                  <AppView data={{ ontology: data.merged.ontology, version: badges.version, apiAssets: data.apis }} />
+                  <AppView data={{ ontology: (data.history?.at(-1)?.ontology ?? data.merged.ontology), version: data.history?.at(-1)?.version ?? badges.version, apiAssets: data.apis }} />
                 )}
               </div>
             </div>
