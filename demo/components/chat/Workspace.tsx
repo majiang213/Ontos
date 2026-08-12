@@ -591,10 +591,19 @@ function CodeView({ data, actions }: { data: any; actions: WsActions }) {
     "CRUD API": <ApiList lines={data.apis} />,
     "管理界面": <PageList lines={data.pages} />,
     "字段血缘": <LineageList lines={data.lineage} />,
-    "问数 API": <ApiAssetList apis={data.apis ?? []} />,
+    "问数 API": (
+      <>
+        <div className="hint" style={{ marginBottom: 8 }}>问数 API 只读、实时查源库；「CRUD API」读写的是新库——两套 API 别混淆</div>
+        <ApiAssetList apis={data.apiAssets ?? []} />
+      </>
+    ),
   };
+  const tableCount = (String(data.ddl).match(/create table/g) ?? []).length;
   return (
     <div className="panel">
+      <div className="hint" style={{ marginBottom: 8 }}>
+        基于本体 v{data.version} 生成 · {tableCount} 张表 · {data.apis.length} 个接口 · 空库起步、只承接增量，源数据永不复制
+      </div>
       <div className="panel-actions">
         <button className="ghost sm" onClick={actions.regenerate}><ArrowClockwise size={12} className="i-inline" />重新生成</button>
         <button className="ghost sm" onClick={() => download("0001_init.sql", data.ddl)}><DownloadSimple size={12} className="i-inline" />下载 DDL</button>
@@ -962,7 +971,7 @@ export default function Workspace({
               </div>
               <div className="wd-body">
                 {drawer === "schema" && <SchemaView data={data.schemas ?? []} mapIndex={mapIndex} />}
-                {drawer === "code" && data.artifacts && <CodeView data={{ ...data.artifacts, apis: data.apis }} actions={actions} />}
+                {drawer === "code" && data.artifacts && <CodeView data={{ ...data.artifacts, apiAssets: data.apis, version: data.artifactsVersion ?? badges.version }} actions={actions} />}
               </div>
             </div>
           )}
