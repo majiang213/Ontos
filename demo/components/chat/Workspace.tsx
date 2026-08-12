@@ -40,15 +40,16 @@ export interface WsActions {
   publishChanges: () => void; // 发布工作副本 → 新版本
   discardChanges: () => void; // 放弃未发布改动
   rollback: (v: number) => void;
-  // 选表上画布（多选 → 生成）
-  stage: (conn: string, table: string) => void;
+  // 选表上画布（字段级多选 → 生成 → 预览编辑 → 确认）
   unstage: (conn: string, table: string) => void;
-  stageAll: () => void;
-  toggleStage: (conn: string, table: string) => void;
+  toggleStage: (conn: string, table: string, allCols: string[]) => void;
+  toggleStageColumn: (conn: string, table: string, col: string, allCols: string[]) => void;
   selectAllTables: () => void;
   clearStaging: () => void;
   generate: () => void;
   confirmIdentity: (keep: boolean) => void;
+  confirmPreviewDrafts: (edited: any[]) => void;
+  cancelPreviewDrafts: () => void;
   // 手动新建对象（无源）
   createObject: () => string;
   // 画布连线与删除
@@ -173,25 +174,27 @@ function DecisionPanel({ data, merged, actions, onClose }: { data: any; merged: 
   );
 }
 
-/* ---- M1 Schema（只读原料列表：勾选表 → LLM 生成本体草稿；每列标出映射去向）---- */
+/* ---- M1 Schema（只读原料列表：字段级勾选 → LLM 生成预览；每列标出映射去向）---- */
 function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, stageActions }: {
   data: any[];
   mapIndex?: Record<string, string[]>;
   staged?: Set<string>; // 已在画布的表（草稿 ∪ 已发布本体的来源）
   locked?: boolean; // 已确认/已发布后不可移出，只能加
-  staging?: Set<string>; // 勾选了、还没生成草稿的表
+  staging?: Record<string, string[]>; // "conn.table" → 选中的列名
   generating?: boolean;
   stageActions?: {
-    toggle: (c: string, t: string) => void; selectAll: () => void; clear: () => void; generate: () => void;
+    toggle: (c: string, t: string, allCols: string[]) => void;
+    toggleCol: (c: string, t: string, col: string, allCols: string[]) => void;
+    selectAll: () => void; clear: () => void; generate: () => void;
     unstage: (c: string, t: string) => void;
   };
 }) {
-  const selCount = staging?.size ?? 0;
+  const selCount = Object.keys(staging ?? {}).length;
   return (
     <div className="grid" style={{ gap: 12 }}>
       {stageActions && (
         <div className="stage-bar">
-          <span className="hint" style={{ margin: 0 }}>{selCount ? `已选 ${selCount} 张表` : "勾选表，交给 AI 生成本体草稿"}</span>
+          <span className="hint" style={{ margin: 0 }}>{selCount ? `已选 ${selCount} 张表 · 展开可逐列调整` : "勾选表（可字段级），交给 AI 生成本体草稿"}</span>
           <span style={{ flex: 1 }} />
           <button className="ghost sm" onClick={stageActions.selectAll}>全选</button>
           <button className="ghost sm" onClick={stageActions.clear} disabled={!selCount}>清空</button>
@@ -213,20 +216,24 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
               const mapped = t.columns.filter((c: any) => mapIndex[`${db.connection}.${t.name}.${c.name}`]).length;
               const key = `${db.connection}.${t.name}`;
               const on = staged?.has(key);
-              const sel = staging?.has(key);
+              const selCols = staging?.[key];
+              const allCols = t.columns.map((c: any) => c.name);
+              const pkCol = t.columns.find((c: any) => c.pk)?.name;
               return (
                 <details key={t.name} className="tbl-acc">
                   <summary>
                     {stageActions && !on && (
                       <span
-                        className={`sel-box ${sel ? "on" : ""}`}
-                        title={sel ? "取消选择" : "选择"}
-                        onClick={(e) => { e.preventDefault(); stageActions.toggle(db.connection, t.name); }}
+                        className={`sel-box ${selCols ? "on" : ""}`}
+                        title={selCols ? "取消选择" : "选择全表字段"}
+                        onClick={(e) => { e.preventDefault(); stageActions.toggle(db.connection, t.name, allCols); }}
                       />
                     )}
                     <span className="mono">{t.name}</span>
                     <span className="tag gray">{t.comment}</span>
-                    <span className="rows-n">{t.rowCount} 行 · {mapped}/{t.columns.length} 列已映射</span>
+                    <span className="rows-n">
+                      {selCols ? `已选 ${selCols.length}/${t.columns.length} 列` : `${t.rowCount} 行 · ${mapped}/${t.columns.length} 列已映射`}
+                    </span>
                     {on && (
                       locked ? (
                         <span className="tag ok" onClick={(e) => e.preventDefault()}>已在画布</span>
@@ -240,9 +247,20 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
                       <tbody>
                         {t.columns.map((c: any) => {
                           const to = mapIndex[`${db.connection}.${t.name}.${c.name}`];
+                          const colSel = selCols?.includes(c.name);
+                          const isPkAnchor = c.name === pkCol;
                           return (
                             <tr key={c.name}>
-                              <td>{c.pk ? <Key size={10} className="i-inline" /> : null}{c.name}</td>
+                              <td>
+                                {stageActions && !on && (
+                                  <span
+                                    className={`sel-box sm ${colSel ? "on" : ""} ${isPkAnchor && selCols ? "lock" : ""}`}
+                                    title={isPkAnchor ? "主键是来源锚，必选" : colSel ? "不选这列" : "选这列"}
+                                    onClick={(e) => { e.stopPropagation(); if (!(isPkAnchor && colSel)) stageActions.toggleCol(db.connection, t.name, c.name, allCols); }}
+                                  />
+                                )}
+                                {c.pk ? <Key size={10} className="i-inline" /> : null}{c.name}
+                              </td>
                               <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-2)" }}>{c.type}</td>
                               <td style={{ color: "var(--ink-3)" }}>{c.comment ?? ""}</td>
                               <td>
@@ -265,6 +283,69 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ---- 草稿预览：AI 生成后先编辑（改名/删字段/调识别字段），确认才上画布 ---- */
+function DraftPreview({ buckets, onConfirm, onCancel }: { buckets: any[]; onConfirm: (b: any[]) => void; onCancel: () => void }) {
+  const [bs, setBs] = useState<any[]>(() => structuredClone(buckets));
+  const setObj = (bi: number, name: string, patch: any) =>
+    setBs((arr) =>
+      arr.map((b, i) =>
+        i === bi ? { ...b, ontology: { ...b.ontology, object_types: { ...b.ontology.object_types, [name]: { ...b.ontology.object_types[name], ...patch } } } } : b,
+      ),
+    );
+  // 删字段：映射同步删；识别字段被删则清掉识别字段
+  const delProp = (bi: number, name: string, propName: string) =>
+    setBs((arr) =>
+      arr.map((b, i) => {
+        if (i !== bi) return b;
+        const o = b.ontology.object_types[name];
+        const sources = o.sources.map((s: any) => ({ ...s, fields: Object.fromEntries(Object.entries(s.fields).filter(([p]) => p !== propName)) }));
+        return {
+          ...b,
+          ontology: {
+            ...b.ontology,
+            object_types: {
+              ...b.ontology.object_types,
+              [name]: { ...o, identity: o.identity === propName ? undefined : o.identity, sources, properties: o.properties.filter((p: any) => p.name !== propName) },
+            },
+          },
+        };
+      }),
+    );
+  const objCount = bs.reduce((n, b) => n + Object.keys(b.ontology.object_types).length, 0);
+  return (
+    <div className="panel">
+      <h3>AI 读完了——先过一遍，改好再上画布</h3>
+      <div className="hint">改对象名、删不要的字段、调识别字段；主键字段不可删（来源锚）</div>
+      {bs.map((b, bi) =>
+        Object.values<any>(b.ontology.object_types).map((o) => (
+          <div key={`${b.connection}.${o.name}`} className="dc-pair">
+            <div className="oe-grid" style={{ marginTop: 0 }}>
+              <label>对象名</label>
+              <input value={o.label} onChange={(e) => setObj(bi, o.name, { label: e.target.value })} />
+              <label>识别字段</label>
+              <input value={o.identity ?? ""} placeholder="如 id_card" onChange={(e) => setObj(bi, o.name, { identity: e.target.value.trim() || undefined })} />
+            </div>
+            <div className="oe-props" style={{ marginTop: 6 }}>
+              {o.properties.map((p: any) => (
+                <div className="oe-prop" key={p.name}>
+                  <input value={p.label ?? ""} placeholder="显示名" onChange={(e) => setObj(bi, o.name, { properties: o.properties.map((x: any) => (x.name === p.name ? { ...x, label: e.target.value } : x)) })} />
+                  <input value={p.name} readOnly title="字段名锁定（源映射的键）" />
+                  <span className="tag gray" style={{ flex: "none" }}>{p.type}</span>
+                  <button className="ghost sm" disabled={!!p.pk} title={p.pk ? "主键是来源锚，不可删" : "删掉这个字段"} onClick={() => delProp(bi, o.name, p.name)}>删</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )),
+      )}
+      <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0 }}>
+        <button className="sm" onClick={() => onConfirm(bs)}>放上画布（{objCount} 个对象）</button>
+        <button className="ghost sm" onClick={onCancel}>返回重选</button>
+      </div>
     </div>
   );
 }
@@ -860,6 +941,13 @@ export default function Workspace({
               </div>
             )}
 
+            {/* 浮动卡：草稿预览编辑（左上；确认后才上画布） */}
+            {data.previewDrafts?.length > 0 && (
+              <div className="cv-float cv-tl">
+                <DraftPreview buckets={data.previewDrafts} onConfirm={(b) => actions.confirmPreviewDrafts(b)} onCancel={actions.cancelPreviewDrafts} />
+              </div>
+            )}
+
             {/* 浮动卡：LLM 判断卡——生成草稿后需要人拍板的点（底中） */}
             {identityAsk && (
               <div className="cv-float cv-bc">
@@ -964,10 +1052,11 @@ export default function Workspace({
                     mapIndex={mapIndex}
                     staged={stagedSet}
                     locked={!!badges.confirmed || !!data.merged}
-                    staging={new Set<string>(data.staging ?? [])}
+                    staging={data.staging ?? {}}
                     generating={generating}
                     stageActions={{
                       toggle: actions.toggleStage,
+                      toggleCol: actions.toggleStageColumn,
                       selectAll: actions.selectAllTables,
                       clear: actions.clearStaging,
                       generate: actions.generate,

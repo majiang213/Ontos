@@ -57,7 +57,8 @@ function emptyData() {
     decisions: {} as Record<string, string>,
     merged: null as any,
     pending: false, // 发布后有未发布的画布改动（工作副本 ≠ 已发布版本）
-    staging: [] as string[], // 表结构抽屉里勾选的表（conn.table）
+    staging: {} as Record<string, string[]>, // 表结构抽屉里勾选的表 → 选中列名
+    previewDrafts: null as any, // AI 生成的预览草稿——确认后才上画布
     apis: [] as any[], // 问数沉淀的 API 资产
     connectDone: false,
     version: 0,
@@ -599,45 +600,143 @@ export function useMockAgent() {
     rerender();
   }
 
-  // ---------- 多选 staging + LLM 生成 ----------
-  // staging = 表结构抽屉里勾选的表（conn.table）；生成后清空
-  function toggleStageSelect(conn: string, table: string) {
+  // ---------- 字段级多选 staging → LLM 生成 → 预览编辑 → 确认上画布 ----------
+  // staging: { "conn.table": 选中的列名[] }；预览草稿先不进画布，人改完确认才进
+  function toggleStageSelect(conn: string, table: string, allCols: string[]) {
     const s = store.current;
-    s.staging = s.staging ?? [];
+    s.staging = s.staging ?? {};
     const k = `${conn}.${table}`;
-    s.staging = s.staging.includes(k) ? s.staging.filter((x: string) => x !== k) : [...s.staging, k];
+    if (s.staging[k]) delete s.staging[k];
+    else s.staging[k] = allCols;
+    rerender();
+  }
+  function toggleStageColumn(conn: string, table: string, col: string, allCols: string[]) {
+    const s = store.current;
+    s.staging = s.staging ?? {};
+    const k = `${conn}.${table}`;
+    const cur = s.staging[k] ?? allCols;
+    const next = cur.includes(col) ? cur.filter((c: string) => c !== col) : [...cur, col];
+    if (next.length === 0) delete s.staging[k];
+    else s.staging[k] = next;
     rerender();
   }
   function selectAllTables() {
     const s = store.current;
-    s.staging = (s.schemas ?? []).flatMap((sv: any) => sv.tables.map((t: any) => `${sv.connection}.${t.name}`)).filter((k: string) => !stagedTableSet(s).has(k));
+    const staged = stagedTableSet(s);
+    s.staging = {};
+    for (const sv of s.schemas ?? []) {
+      for (const t of sv.tables) {
+        const k = `${sv.connection}.${t.name}`;
+        if (!staged.has(k)) s.staging[k] = t.columns.map((c: any) => c.name);
+      }
+    }
     rerender();
   }
   function clearStaging() {
-    store.current.staging = [];
+    store.current.staging = {};
     rerender();
   }
 
-  // 交给 LLM 生成（demo 为规则模拟）：勾选的表 → 草稿上画布；有需要判断的弹判断卡
   const [generating, setGenerating] = useState(false);
   const [identityAsk, setIdentityAsk] = useState(false);
+
+  // 交给 LLM 生成（demo 为规则模拟）：按选中字段产**预览草稿**——人编辑确认后才上画布
   async function generateFromStaging() {
     const s = store.current;
-    const keys = s.staging ?? [];
-    if (!keys.length || generating) return;
+    const entries = Object.entries(s.staging ?? {});
+    if (!entries.length || generating) return;
     setGenerating(true);
+    if (!s._draftAll) s._draftAll = await (await fetch("/api/draft")).json();
     await sleep(1100); // LLM 读表结构中（模拟）
-    for (const k of keys) {
+    const previews: any[] = [];
+    for (const [k, cols] of entries) {
       const [conn, table] = k.split(".");
-      await stageTable(conn, table);
+      const backend = (s.schemas ?? []).find((x: any) => x.connection === conn)?.backend ?? conn;
+      const base = s._draftAll.find((d: any) => d.connection === conn) ?? s._draftAll.find((d: any) => d.connection === backend) ?? s._draftAll[0];
+      const obj = Object.values<any>(base.ontology.object_types).find((o: any) => o.sources.some((src: any) => src.table === table));
+      if (!obj) continue;
+      let pv = previews.find((p) => p.connection === conn);
+      if (!pv) {
+        pv = { connection: conn, ontology: { object_types: {}, link_types: [] } };
+        previews.push(pv);
+      }
+      if (pv.ontology.object_types[obj.name]) continue;
+      const clone = structuredClone(obj);
+      for (const src of clone.sources) src.connection = conn;
+      // 字段级过滤：选中列才进草稿；源主键锚列始终保留（没它映射对不上）
+      const schema = (s.schemas ?? []).find((x: any) => x.connection === conn)?.tables.find((x: any) => x.name === table);
+      const pkCol = schema?.columns.find((c: any) => c.pk)?.name;
+      const keep = new Set<string>([...(cols as string[]), ...(pkCol ? [pkCol] : [])]);
+      clone.properties = clone.properties.filter((p: any) => {
+        const col = clone.sources[0]?.fields[p.name];
+        return col ? keep.has(col) : !!p.pk;
+      });
+      for (const src of clone.sources) src.fields = Object.fromEntries(Object.entries(src.fields).filter(([, col]) => keep.has(col as string)));
+      if (clone.identity && !clone.properties.some((p: any) => p.name === clone.identity)) delete clone.identity;
+      pv.ontology.object_types[obj.name] = clone;
+      pv.ontology.link_types = (base.ontology.link_types ?? []).filter((l: any) => pv.ontology.object_types[l.from] && pv.ontology.object_types[l.to]);
     }
-    s.staging = [];
+    s.staging = {};
+    s.previewDrafts = previews;
     setGenerating(false);
+    rerender();
+  }
+
+  function cancelPreviewDrafts() {
+    store.current.previewDrafts = null;
+    rerender();
+  }
+
+  // 预览编辑确认 → 草稿上画布（发布后进工作副本标待发布）；需要判断的弹判断卡
+  async function confirmPreviewDrafts(edited: any[]) {
+    const s = store.current;
+    s.drafts = s.drafts ?? [];
+    for (const pv of edited) {
+      let d = s.drafts.find((x: any) => x.connection === pv.connection);
+      if (!d) {
+        d = { connection: pv.connection, ontology: { object_types: {}, link_types: [] }, yaml: "" };
+        s.drafts.push(d);
+      }
+      for (const [name, o] of Object.entries<any>(pv.ontology.object_types)) {
+        if (!d.ontology.object_types[name]) d.ontology.object_types[name] = o;
+      }
+      d.ontology.link_types = [...d.ontology.link_types, ...(pv.ontology.link_types ?? [])].filter(
+        (l: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.name === l.name) === i && d.ontology.object_types[l.from] && d.ontology.object_types[l.to],
+      );
+      d.yaml = toYaml(d.ontology);
+      if (s.merged) {
+        for (const [name, o] of Object.entries<any>(pv.ontology.object_types)) {
+          if (!s.merged.ontology.object_types[name]) s.merged.ontology.object_types[name] = structuredClone(o);
+        }
+        touchMerged("新源表入画布");
+      }
+    }
+    s.previewDrafts = null;
     setWizardStep("model");
-    // 需要人判断的点：识别到身份证格式的列，准备设为识别字段——问一声
+    if (s.merged) await addNewPairs();
+    // 需要人判断的点：识别到身份证格式的列，准备设为识别字段——问一声（仅首次发布前）
     const hasIdCard = (s.drafts ?? []).some((d: any) => Object.values<any>(d.ontology.object_types).some((o) => o.identity === "id_card" && !o._ignored));
     if (hasIdCard && !s.draftsConfirmed && !s.merged) setIdentityAsk(true);
     rerender();
+  }
+
+  // 发布后加表：增量计算新候选对并打开裁决面板
+  async function addNewPairs() {
+    const s = store.current;
+    const all = await (await fetch("/api/overlap")).json();
+    const backends = new Set((s.schemas ?? []).map((x: any) => x.backend ?? x.connection));
+    const oldPairs = s.evidence ?? [];
+    const fresh = all.filter(
+      (e: any) =>
+        pairBackendsOf(e.pair).every((b) => backends.has(b)) &&
+        pairStaged(s, e.pair) &&
+        !oldPairs.some((o: any) => o.pair === e.pair),
+    );
+    if (fresh.length > 0) {
+      s.evidence = [...oldPairs, ...fresh];
+      setWizardStep("integrate");
+      setDecisionOpen(true);
+    }
   }
 
   // 判断卡应答：身份证设为识别字段？「先不设」则交集率无从算起（候选对变"无可比对标识"）
@@ -655,53 +754,6 @@ export function useMockAgent() {
     rerender();
   }
 
-  async function stageTable(conn: string, table: string) {
-    const s = store.current;
-    if (!s._draftAll) s._draftAll = await (await fetch("/api/draft")).json();
-    const backend = (s.schemas ?? []).find((x: any) => x.connection === conn)?.backend ?? conn;
-    const base = s._draftAll.find((d: any) => d.connection === conn) ?? s._draftAll.find((d: any) => d.connection === backend) ?? s._draftAll[0];
-    const obj = Object.values<any>(base.ontology.object_types).find((o: any) => o.sources.some((src: any) => src.table === table));
-    if (!obj) return;
-    s.drafts = s.drafts ?? [];
-    let d = s.drafts.find((x: any) => x.connection === conn);
-    if (!d) {
-      d = { connection: conn, ontology: { object_types: {}, link_types: [] }, yaml: "" };
-      s.drafts.push(d);
-    }
-    if (!d.ontology.object_types[obj.name]) {
-      const clone = structuredClone(obj);
-      for (const src of clone.sources) src.connection = conn;
-      d.ontology.object_types[obj.name] = clone;
-      d.ontology.link_types = (base.ontology.link_types ?? []).filter((l: any) => d.ontology.object_types[l.from] && d.ontology.object_types[l.to]);
-      d.yaml = toYaml(d.ontology);
-      setWizardStep("model");
-    }
-    // 发布后加表：对象直接进工作副本（画布立即可见），标待发布；顺带算新候选对进裁决面板
-    if (s.merged) {
-      if (!s.merged.ontology.object_types[obj.name]) {
-        const m = structuredClone(obj);
-        for (const src of m.sources) src.connection = conn;
-        s.merged.ontology.object_types[obj.name] = m;
-      }
-      touchMerged("加入新源表");
-      const all = await (await fetch("/api/overlap")).json();
-      const backends = new Set((s.schemas ?? []).map((x: any) => x.backend ?? x.connection));
-      const oldPairs = s.evidence ?? [];
-      const fresh = all.filter(
-        (e: any) =>
-          pairBackendsOf(e.pair).every((b) => backends.has(b)) &&
-          pairStaged(s, e.pair) &&
-          !oldPairs.some((o: any) => o.pair === e.pair),
-      );
-      if (fresh.length > 0) {
-        s.evidence = [...oldPairs, ...fresh];
-        setWizardStep("integrate");
-        setDecisionOpen(true);
-      }
-    }
-    rerender();
-  }
-
   function unstageTable(conn: string, table: string) {
     const s = store.current;
     const d = s.drafts?.find((x: any) => x.connection === conn);
@@ -714,10 +766,6 @@ export function useMockAgent() {
     if (Object.keys(d.ontology.object_types).length === 0) s.drafts = s.drafts.filter((x: any) => x.connection !== conn);
     s.drafts = [...s.drafts];
     rerender();
-  }
-
-  async function stageAll() {
-    for (const sv of store.current.schemas ?? []) for (const t of sv.tables) await stageTable(sv.connection, t.name);
   }
 
   // 手动新建对象（无源）：进 manual 草稿桶；已发布则直接进合并本体（版本 +1）。返回对象名。
@@ -1352,8 +1400,9 @@ export function useMockAgent() {
     steps, stepClick, lockedHint, openView,
     connectFlow, connectTest, connectSave,
     confirmDrafts, toggleIgnore, ui, rollbackTo,
-    schemaTick, publishChanges, discardChanges, stageTable, unstageTable, stageAll, createObject,
-    generating, identityAsk, toggleStageSelect, selectAllTables, clearStaging, generateFromStaging, confirmIdentity,
+    schemaTick, publishChanges, discardChanges, unstageTable, createObject,
+    generating, identityAsk, toggleStageSelect, toggleStageColumn, selectAllTables, clearStaging, generateFromStaging, confirmIdentity,
+    confirmPreviewDrafts, cancelPreviewDrafts,
     createLink, renameLink, deleteLink, deleteObject,
     actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish,
     convs: CONVS, activeConv, switchConv,
