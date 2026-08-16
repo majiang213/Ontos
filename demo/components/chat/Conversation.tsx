@@ -13,10 +13,10 @@ import type { Msg } from "./mockAgent";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const HERO = [
-  { n: "1", t: "连接数据源", d: "配置只读连接，选表加入画布", say: "连接数据源", key: "connect" },
-  { n: "2", t: "逆向建模", d: "AI 读 schema 生成本体草稿，人修订确认", say: "生成本体草稿", key: "model" },
-  { n: "3", t: "多源整合", d: "五关系类型裁决 + 数据交集硬证据", say: "开始裁决", key: "integrate" },
-  { n: "4", t: "发布本体", d: "合并为单一事实源，自动产出新系统", say: "发布合并本体", key: "publish" },
+  { n: "1", t: "连接数据源", d: "只读账号接入，选表加入画布", say: "连接数据源", key: "connect" },
+  { n: "2", t: "逆向建模", d: "勾选表生成对象上画布，有抉择再拍板", say: "生成对象", key: "model" },
+  { n: "3", t: "多源整合", d: "候选对裁决 + 交集率硬证据", say: "开始裁决", key: "integrate" },
+  { n: "4", t: "发布本体", d: "合并为单一事实源，映射就绪", say: "发布合并本体", key: "publish" },
 ];
 
 // 输入区 + 菜单：能力与概念的归属地。stepKey 关联流程门控。
@@ -25,7 +25,7 @@ const CAP_MENU = [
     group: "能力",
     items: [
       { icon: <PlugsConnected size={14} />, label: "连接源库", say: "先连上两个库看看", stepKey: null },
-      { icon: <PencilRuler size={14} />, label: "逆向建模", say: "生成本体草稿", stepKey: null },
+      { icon: <PencilRuler size={14} />, label: "逆向建模", say: "生成对象", stepKey: null },
       { icon: <Scales size={14} />, label: "整合裁决", say: "开始裁决", stepKey: "integrate" },
       { icon: <ChatCircleText size={14} />, label: "问数示例", say: "查所有从候选人转正的员工及其部门", stepKey: "ask" },
       { icon: <ListChecks size={14} />, label: "当前状态", say: "现在进行到哪一步了？", stepKey: null },
@@ -180,7 +180,7 @@ export default function Conversation({
   return (
     <div className="chat-col">
       <div className="chat-head">
-        <div className="title">Ontos 演示 <span>规则模拟 · LLM 驱动占位</span></div>
+        <div className="title">对话 <span>规则模拟 · 演示数据</span></div>
         <div className="spacer" />
         <button className="ghost sm" onClick={() => location.reload()}>重新开始</button>
       </div>

@@ -7,7 +7,7 @@ const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono", display: 
 
 export const metadata: Metadata = {
   title: "Ontos 安托斯 — 对话式本体工作台",
-  description: "逆向建模 → 多源整合 → 生成新系统 → 问数",
+  description: "逆向建模 → 多源整合 → 发布映射 → 问数",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

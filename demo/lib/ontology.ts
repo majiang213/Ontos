@@ -18,23 +18,55 @@ export interface SourceMapping {
   pk: string;
   fields: Record<string, string>; // 本体属性 → 源列
 }
+export interface FnDef {
+  name: string;
+  label: string;
+  rule: string; // 白话：怎么算
+}
+export interface AxiomDef {
+  name: string;
+  rule: string; // 白话：必须遵守什么
+}
+export interface ActionDef {
+  name: string;
+  label: string;
+  does: string; // 白话：做什么
+  record?: string; // 系统的记录，如 hr.employee
+  mode?: string; // insert-or-update 等
+  from_fields?: string; // 从对象带过去的字段名，逗号分隔
+}
+export interface PermDef {
+  field: string; // 空 = 整个对象
+  who: string; // 白话：谁能看
+}
 export interface ObjectDef {
   name: string;
   label: string;
-  identity?: string; // 匹配键（V1.4）
+  identity?: string; // 匹配键：实例怎么认
+  kind?: "thing" | "event"; // 事物 / 事件
+  parent?: string; // 子类型：属于哪个上位对象
+  equivalent?: string; // 同义：和哪个对象是一回事
   properties: PropDef[];
   sources: SourceMapping[];
-  _ignored?: boolean; // 人工标记为噪音表，不纳入本体
+  functions?: FnDef[];
+  axioms?: AxiomDef[];
+  actions?: ActionDef[];
+  permissions?: PermDef[];
+  _ignored?: boolean;
 }
 export interface LinkDef {
   name: string;
+  label?: string;
   from: string;
   to: string;
+  inverse?: string; // 逆关系名，如 属于 ↔ 下辖
+  card?: "1:1" | "1:n" | "n:1" | "n:n";
   via: unknown;
 }
 export interface Ontology {
   object_types: Record<string, ObjectDef>;
   link_types: LinkDef[];
+  questions?: string[]; // 能力测试题：用来验收模型
 }
 
 // ---- M2 罐头草稿：对两个源库各自逆向 --------------------------
@@ -184,6 +216,7 @@ export function buildMergedOntology(
     merged.object_types.person = {
       name: "person",
       label: "人员",
+      kind: "thing",
       identity: "id_card",
       properties: [
         { name: "id", type: "uuid", pk: true },
@@ -196,8 +229,23 @@ export function buildMergedOntology(
         { connection: "recruiting", table: "candidate", pk: "cand_id", fields: { name: "candidate_name", id_card: "idcard_no" } },
         { connection: "hr", table: "employee", pk: "emp_no", fields: { name: "emp_name", id_card: "id_card", hired_at: "hired_at" } },
       ],
+      functions: [{ name: "is_converted", label: "是否已转正", rule: "状态从候选人变成在职" }],
+      axioms: [{ name: "status_one", rule: "同一个人同一时刻只能有一个状态" }],
+      actions: [{
+        name: "hire",
+        label: "录用",
+        does: "候选人转为在职",
+        record: "hr.employee",
+        mode: "insert-or-update",
+        from_fields: "name,id_card",
+      }],
+      permissions: [{ field: "id_card", who: "人事可看，其他人不可见" }],
     };
-    merged.link_types.push({ name: "converted", from: "person", to: "person", via: { transition: { status: ["候选人", "在职"] } } });
+    merged.link_types.push({ name: "converted", label: "转正", from: "person", to: "person", inverse: "converted_from", card: "1:1", via: { transition: { status: ["候选人", "在职"] } } });
+    merged.questions = [
+      "查所有从候选人转正的员工及其部门",
+      "现在还有多少候选人",
+    ];
     covered.add("candidate").add("employee");
   } else if (decisions.person === "①") {
     // ① 完全等价：合并为单对象挂多源（公共属性并集，无状态派生）
@@ -305,7 +353,10 @@ export function buildMergedOntology(
   }
   // 人员↔部门任职关系：两对象都在本体时建立
   if (merged.object_types.person && merged.object_types.department && !merged.link_types.some((l) => l.name === "works_in")) {
-    merged.link_types.push({ name: "works_in", from: "person", to: "department", via: { fk: "hr.employee.dept_id → hr.department.dept_id" } });
+    merged.link_types.push({ name: "works_in", label: "任职于", from: "person", to: "department", inverse: "staffed_by", card: "n:1", via: { fk: "hr.employee.dept_id → hr.department.dept_id" } });
+  }
+  if (!merged.questions?.length) {
+    merged.questions = ["查所有从候选人转正的员工及其部门", "现在还有多少候选人"];
   }
   return merged;
 }
@@ -346,13 +397,26 @@ function positionHub(): ObjectDef {
 }
 
 // ---- 极简 YAML 渲染（够 demo 用即可）--------------------------
+function yamlList(key: string, items: Record<string, string>[] | undefined, indent = "    ") {
+  if (!items?.length) return [];
+  const lines = [`${indent}${key}:`];
+  for (const it of items) {
+    const body = Object.entries(it).filter(([, v]) => v).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ");
+    lines.push(`${indent}  - { ${body} }`);
+  }
+  return lines;
+}
+
 export function toYaml(ont: Ontology): string {
   const lines: string[] = ["object_types:"];
   for (const o of Object.values(ont.object_types)) {
-    if (o._ignored) continue; // 被忽略的对象不进 YAML
+    if (o._ignored) continue;
     lines.push(`  ${o.name}:`);
     lines.push(`    label: ${o.label}`);
+    lines.push(`    kind: ${o.kind ?? "thing"}`);
     if (o.identity) lines.push(`    identity: ${o.identity}`);
+    if (o.parent) lines.push(`    parent: ${o.parent}`);
+    if (o.equivalent) lines.push(`    equivalent: ${o.equivalent}`);
     lines.push(`    properties:`);
     for (const p of o.properties) {
       const extras = [p.pk ? "pk: true" : "", p.label ? `label: ${p.label}` : "", p.values ? `values: [${p.values.join(", ")}]` : "", p.derived ? `derived: "${p.derived}"` : ""].filter(Boolean).join(", ");
@@ -364,10 +428,23 @@ export function toYaml(ont: Ontology): string {
       const fields = Object.entries(s.fields).map(([k, v]) => `${k}: ${v}`).join(", ");
       lines.push(`          fields: { ${fields} } }`);
     }
+    lines.push(...yamlList("functions", o.functions as Record<string, string>[] | undefined));
+    lines.push(...yamlList("axioms", o.axioms as Record<string, string>[] | undefined));
+    lines.push(...yamlList("actions", o.actions as Record<string, string>[] | undefined));
+    lines.push(...yamlList("permissions", o.permissions as Record<string, string>[] | undefined));
   }
   lines.push("link_types:");
   for (const l of ont.link_types) {
-    lines.push(`  - { name: ${l.name}, from: ${l.from}, to: ${l.to}, via: ${JSON.stringify(l.via)} }`);
+    const extra = [
+      l.label ? `label: ${l.label}` : "",
+      l.inverse ? `inverse: ${l.inverse}` : "",
+      l.card ? `card: ${l.card}` : "",
+    ].filter(Boolean).join(", ");
+    lines.push(`  - { name: ${l.name}, from: ${l.from}, to: ${l.to}${extra ? ", " + extra : ""}, via: ${JSON.stringify(l.via)} }`);
+  }
+  if (ont.questions?.length) {
+    lines.push("questions:");
+    for (const q of ont.questions) lines.push(`  - ${JSON.stringify(q)}`);
   }
   return lines.join("\n");
 }

@@ -8,7 +8,6 @@ import Sidebar from "@/components/chat/Sidebar";
 
 export default function Home() {
   const e = useMockAgent();
-  const [wsClosed, setWsClosed] = useState(false);
   const [drawer, setDrawer] = useState<null | "schema" | "code">(null);
   // 保存连接后自动打开表结构抽屉（表在那里加入画布）
   useEffect(() => {
@@ -29,7 +28,7 @@ export default function Home() {
   };
 
   return (
-    <div className={`app3 always-ws ${wsClosed ? "ws-closed" : ""} ${inChat ? "no-ws" : "no-conv"}`}>
+    <div className={`app3 always-ws ${inChat ? "no-ws" : "no-conv"}`}>
       {e.notice && <div className="toast">{e.notice}</div>}
       <Sidebar
         wsList={e.wsList}
@@ -72,10 +71,8 @@ export default function Home() {
           mode={mode}
           badges={e.badges}
           data={e.data}
-          collapsed={wsClosed}
-          onToggleCollapse={() => setWsClosed(!wsClosed)}
-        drawer={drawer}
-        onDrawer={setDrawer}
+          drawer={drawer}
+          onDrawer={setDrawer}
         connectFlow={e.connectFlow}
         connectActions={{
           test: () => e.ui(e.connectTest),
@@ -89,7 +86,6 @@ export default function Home() {
           applyObjectYaml: e.applyObjectYaml,
           updateObject: e.updateObject,
           replay: () => e.ui(e.replay),
-          reopenDecisions: () => e.ui(e.reopenDecisions),
           confirmDrafts: () => e.ui(e.confirmDrafts),
           setDecision: (k, t) => e.ui(() => e.setDecision(k, t)),
           toggleIgnore: e.toggleIgnore,
@@ -107,13 +103,16 @@ export default function Home() {
           toggleStageColumn: e.toggleStageColumn,
           selectAllTables: e.selectAllTables,
           clearStaging: e.clearStaging,
-          generate: () => e.ui(e.generateFromStaging),
+          generate: () =>
+            e.ui(async () => {
+              await e.generateFromStaging();
+              setDrawer(null); // 生成完收起表结构，画面只剩画布 + 至多一张抉择卡
+            }),
           confirmIdentity: (keep) => e.ui(() => e.confirmIdentity(keep)),
-          confirmPreviewDrafts: (b) => e.ui(() => e.confirmPreviewDrafts(b)),
-          cancelPreviewDrafts: () => e.ui(e.cancelPreviewDrafts),
           createObject: e.createObject,
           createLink: e.createLink,
-          renameLink: e.renameLink,
+          updateLink: e.updateLink,
+          setQuestions: e.setQuestions,
           deleteLink: e.deleteLink,
           deleteObject: e.deleteObject,
         }}

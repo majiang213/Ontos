@@ -58,7 +58,6 @@ function emptyData() {
     merged: null as any,
     pending: false, // 发布后有未发布的画布改动（工作副本 ≠ 已发布版本）
     staging: {} as Record<string, string[]>, // 表结构抽屉里勾选的表 → 选中列名
-    previewDrafts: null as any, // AI 生成的预览草稿——确认后才上画布
     apis: [] as any[], // 问数沉淀的 API 资产
     connectDone: false,
     version: 0,
@@ -74,7 +73,7 @@ function makeWelcome(): Msg {
     id: nid(),
     role: "agent",
     kind: "text",
-    text: "我是 Ontos（当前是规则模拟，正式版由 LLM 驱动）。我把老数据库逆向成业务本体，整合多源同义对象，生成新系统——全程只读源库，不迁移数据。\n\n构建流程顺序：连接→建模→整合→发布，发布成功即自动生成新系统。只有一件事必须你来——跨源对象怎么合并，裁决权在你。对话在顶部「对话」页，随时可去。",
+    text: "我是 Ontos（当前是规则模拟，正式版由 LLM 驱动）。我把老数据库逆向成业务本体，整合多源同义对象——全程只读源库，不搬业务数据。\n\n构建流程：连接→建模→整合→发布。表结构和映射里只看字段怎么对应，不取行。只有一件事必须你来——跨源对象怎么合并。对话在顶部「对话」页。",
     payload: { hero: true, suggestions: ["交集率是什么意思？", "本体是什么？"] },
   };
 }
@@ -266,7 +265,7 @@ export function useMockAgent() {
     push({
       role: "agent",
       kind: "schema",
-      text: "用预置的只读配置把两个库连上了（跳步时免表单）。6 张表，结构和采样在右边。注意 candidate.mobile 是 +86 带连字符的脏格式——后面算交集前要先归一化。",
+      text: "用预置的只读配置把两个库连上了。6 张表的结构在「表结构」里，只看列定义，不取行。",
       payload: { sources: store.current.schemas },
     });
     return true;
@@ -338,7 +337,7 @@ export function useMockAgent() {
     push({
       role: "agent",
       kind: "published",
-      text: `已发布 ontology.yaml v${store.current.version}（右边）。「人员」不再是某个源库的表，而是两个源之上的统一语义。新系统已就绪——本体即应用：侧栏「新系统」里的对象列表实时查源库，不落库、不出码。`,
+      text: `已发布 ontology.yaml v${store.current.version}。「人员」不再是某张源表，而是两边之上的统一语义。侧栏「映射」里能看字段从哪来；这里不取业务行。要查数去「对话」。`,
       payload: { yaml: res.yaml },
     });
   }
@@ -366,7 +365,7 @@ export function useMockAgent() {
     say(
       res.api.reused
         ? `复用已保存的 API \`${res.api.name}\`——问过的问题不重复生成。`
-        : `已生成并保存新 API \`${res.api.name}\`，下次同问题直接复用（在「新系统 · 问数 API」台账里）。`,
+        : `已生成并保存新 API \`${res.api.name}\`，下次同问题直接复用（在「映射 · 问数 API」里）。`,
     );
     rerender();
   }
@@ -387,6 +386,10 @@ export function useMockAgent() {
     obj.label = obj.label ?? objName;
     obj.properties = Array.isArray(obj.properties) ? obj.properties : [];
     obj.sources = Array.isArray(obj.sources) ? obj.sources : [];
+    obj.functions = Array.isArray(obj.functions) ? obj.functions : [];
+    obj.axioms = Array.isArray(obj.axioms) ? obj.axioms : [];
+    obj.actions = Array.isArray(obj.actions) ? obj.actions : [];
+    obj.permissions = Array.isArray(obj.permissions) ? obj.permissions : [];
     const s = store.current;
     const ont = kind === "draft" ? s.drafts?.find((x: any) => x.connection === conn)?.ontology : s.merged?.ontology;
     if (!ont?.object_types?.[objName]) return "对象不存在（可能刚被移除）";
@@ -447,8 +450,13 @@ export function useMockAgent() {
       o.label = o.label ?? key;
       o.properties = Array.isArray(o.properties) ? o.properties : [];
       o.sources = Array.isArray(o.sources) ? o.sources : [];
+      o.functions = Array.isArray(o.functions) ? o.functions : [];
+      o.axioms = Array.isArray(o.axioms) ? o.axioms : [];
+      o.actions = Array.isArray(o.actions) ? o.actions : [];
+      o.permissions = Array.isArray(o.permissions) ? o.permissions : [];
     }
     parsed.link_types = Array.isArray(parsed.link_types) ? parsed.link_types : [];
+    parsed.questions = Array.isArray(parsed.questions) ? parsed.questions : [];
 
     const s = store.current;
     if (kind === "draft" && conn && s.drafts) {
@@ -462,7 +470,7 @@ export function useMockAgent() {
       s.merged.ontology = parsed;
       s.merged.yaml = toYaml(parsed);
       touchMerged("手动编辑");
-      say(`已保存（待发布）——画布是工作副本，点工具条「发布 v${s.version + 1}」才生效到新系统。`);
+      say(`已保存（待发布）——画布是工作副本，点「发布 v${s.version + 1}」才进已发布映射。`);
     } else {
       return "当前状态不支持该操作";
     }
@@ -504,20 +512,30 @@ export function useMockAgent() {
     setDecisionOpen(true);
   }
 
-  // 草稿确认：人工修订（忽略噪音对象/编辑 YAML）后确认，草稿才成为整合输入
-  async function confirmDrafts() {
+  // 建模收口：对象已在画布上 → 自动确认 → 有跨源候选对则只剩裁决，否则可发布。
+  // 不再单独弹「确认草稿」卡；人改对象随时点节点，不必再点一次确认。
+  async function settleAfterModel() {
     const s = store.current;
-    if (!s.drafts || s.draftsConfirmed) return;
-    s.draftsConfirmed = true;
-    await tEvidence(); // 先算证据，再决定去整合步还是发布步
+    if (!s.drafts) return;
+    // 先算完证据再改 confirmed：否则「已确认 + 证据还空」会闪出发布框
+    await tEvidence();
+    if (!s.draftsConfirmed) s.draftsConfirmed = true;
     const n = liveEvidence()?.length ?? 0;
-    setWizardStep(n > 0 ? "integrate" : "publish");
-    say(
-      n > 0
-        ? `草稿已确认——${n} 对跨源候选对等你裁决，这是唯一必须你来的环节。`
-        : "草稿已确认。单源无候选对，可以直接发布本体。",
-    );
+    if (n > 0) {
+      setWizardStep("integrate");
+      setDecisionOpen(true);
+      say(`${n} 对跨源候选对需要你裁决——这是必须你来的环节。`);
+    } else {
+      setWizardStep("publish");
+      setDecisionOpen(false);
+    }
     rerender();
+  }
+
+  // 对话/旧入口仍可「确认草稿」——等价于收口
+  async function confirmDrafts() {
+    if (!store.current.drafts || store.current.draftsConfirmed) return;
+    await settleAfterModel();
   }
 
   function toggleIgnore(conn: string, objName: string) {
@@ -539,7 +557,7 @@ export function useMockAgent() {
       `本体草稿：${s.drafts ? "已生成（recruiting 3 对象 / hr 3 对象）" : "未生成"}`,
       `裁决：${s.evidence ? `${Object.keys(s.decisions).length}/3 已完成` : "未开始"}`,
       `合并本体：${s.merged ? `已发布 v${s.version}` : "未发布"}`,
-      `新系统：${s.merged ? "运行中（本体即应用 · 实时查源库）" : "未发布本体"}`,
+      `映射：${s.merged ? "已发布（只看字段去向，不取行）" : "未发布本体"}`,
       `问数：${s.queryCount} 次（query_logs 全量留痕）`,
       s.merged ? `裁决留痕：${s.merged.merge_decisions?.length ?? 0} 条 merge_decisions（含证据快照）` : "",
     ].filter(Boolean);
@@ -596,25 +614,35 @@ export function useMockAgent() {
     s.connectDone = true;
     setConnectFlow(null);
     setSchemaTick((n) => n + 1); // 打开表结构抽屉：点「加入画布」，表变成画布上的节点
-    say(`${cur.connection} 已连接，读取到 ${cur.tables} 张表的结构。在「表结构」里勾选表，点「生成本体草稿」，我来读表建模。`);
+    say(`${cur.connection} 已连接，读取到 ${cur.tables} 张表的结构。在「表结构」里勾选表，点「生成对象」——对象直接上画布，表只是原料不上画布。`);
     rerender();
   }
 
-  // ---------- 字段级多选 staging → LLM 生成 → 预览编辑 → 确认上画布 ----------
-  // staging: { "conn.table": 选中的列名[] }；预览草稿先不进画布，人改完确认才进
+  // ---------- 字段级多选 staging → LLM 生成对象 → 直接上画布 ----------
+  // 表永远是原料（抽屉里），不上画布；只有本体对象成节点。
+  // 中间不拦预览确认——有真正抉择（识别字段、跨源裁决）才弹判断卡。
   function toggleStageSelect(conn: string, table: string, allCols: string[]) {
     const s = store.current;
-    s.staging = s.staging ?? {};
+    s.staging = { ...(s.staging ?? {}) };
     const k = `${conn}.${table}`;
     if (s.staging[k]) delete s.staging[k];
-    else s.staging[k] = allCols;
+    else s.staging[k] = [...allCols];
     rerender();
   }
   function toggleStageColumn(conn: string, table: string, col: string, allCols: string[]) {
     const s = store.current;
-    s.staging = s.staging ?? {};
+    s.staging = { ...(s.staging ?? {}) };
     const k = `${conn}.${table}`;
-    const cur = s.staging[k] ?? allCols;
+    // 表尚未勾选时点某一列：只选这一列（+ 主键锚），绝不能默认成「全选再反选」
+    if (!s.staging[k]) {
+      const schema = (s.schemas ?? []).find((x: any) => x.connection === conn)?.tables.find((x: any) => x.name === table);
+      const pkCol = schema?.columns.find((c: any) => c.pk)?.name;
+      const next = pkCol && pkCol !== col ? [pkCol, col] : [col];
+      s.staging[k] = next.filter((c) => allCols.includes(c));
+      rerender();
+      return;
+    }
+    const cur = s.staging[k];
     const next = cur.includes(col) ? cur.filter((c: string) => c !== col) : [...cur, col];
     if (next.length === 0) delete s.staging[k];
     else s.staging[k] = next;
@@ -640,58 +668,11 @@ export function useMockAgent() {
   const [generating, setGenerating] = useState(false);
   const [identityAsk, setIdentityAsk] = useState(false);
 
-  // 交给 LLM 生成（demo 为规则模拟）：按选中字段产**预览草稿**——人编辑确认后才上画布
-  async function generateFromStaging() {
-    const s = store.current;
-    const entries = Object.entries(s.staging ?? {});
-    if (!entries.length || generating) return;
-    setGenerating(true);
-    if (!s._draftAll) s._draftAll = await (await fetch("/api/draft")).json();
-    await sleep(1100); // LLM 读表结构中（模拟）
-    const previews: any[] = [];
-    for (const [k, cols] of entries) {
-      const [conn, table] = k.split(".");
-      const backend = (s.schemas ?? []).find((x: any) => x.connection === conn)?.backend ?? conn;
-      const base = s._draftAll.find((d: any) => d.connection === conn) ?? s._draftAll.find((d: any) => d.connection === backend) ?? s._draftAll[0];
-      const obj = Object.values<any>(base.ontology.object_types).find((o: any) => o.sources.some((src: any) => src.table === table));
-      if (!obj) continue;
-      let pv = previews.find((p) => p.connection === conn);
-      if (!pv) {
-        pv = { connection: conn, ontology: { object_types: {}, link_types: [] } };
-        previews.push(pv);
-      }
-      if (pv.ontology.object_types[obj.name]) continue;
-      const clone = structuredClone(obj);
-      for (const src of clone.sources) src.connection = conn;
-      // 字段级过滤：选中列才进草稿；源主键锚列始终保留（没它映射对不上）
-      const schema = (s.schemas ?? []).find((x: any) => x.connection === conn)?.tables.find((x: any) => x.name === table);
-      const pkCol = schema?.columns.find((c: any) => c.pk)?.name;
-      const keep = new Set<string>([...(cols as string[]), ...(pkCol ? [pkCol] : [])]);
-      clone.properties = clone.properties.filter((p: any) => {
-        const col = clone.sources[0]?.fields[p.name];
-        return col ? keep.has(col) : !!p.pk;
-      });
-      for (const src of clone.sources) src.fields = Object.fromEntries(Object.entries(src.fields).filter(([, col]) => keep.has(col as string)));
-      if (clone.identity && !clone.properties.some((p: any) => p.name === clone.identity)) delete clone.identity;
-      pv.ontology.object_types[obj.name] = clone;
-      pv.ontology.link_types = (base.ontology.link_types ?? []).filter((l: any) => pv.ontology.object_types[l.from] && pv.ontology.object_types[l.to]);
-    }
-    s.staging = {};
-    s.previewDrafts = previews;
-    setGenerating(false);
-    rerender();
-  }
-
-  function cancelPreviewDrafts() {
-    store.current.previewDrafts = null;
-    rerender();
-  }
-
-  // 预览编辑确认 → 草稿上画布（发布后进工作副本标待发布）；需要判断的弹判断卡
-  async function confirmPreviewDrafts(edited: any[]) {
+  // 把生成好的对象桶并入草稿/合并本体（画布读草稿并集或合并本体）
+  function applyObjectBuckets(buckets: any[]) {
     const s = store.current;
     s.drafts = s.drafts ?? [];
-    for (const pv of edited) {
+    for (const pv of buckets) {
       let d = s.drafts.find((x: any) => x.connection === pv.connection);
       if (!d) {
         d = { connection: pv.connection, ontology: { object_types: {}, link_types: [] }, yaml: "" };
@@ -708,15 +689,70 @@ export function useMockAgent() {
         for (const [name, o] of Object.entries<any>(pv.ontology.object_types)) {
           if (!s.merged.ontology.object_types[name]) s.merged.ontology.object_types[name] = structuredClone(o);
         }
-        touchMerged("新源表入画布");
+        touchMerged("新对象入画布");
       }
     }
-    s.previewDrafts = null;
+  }
+
+  // 选表 → AI 读表 → 对象直接上画布 → 至多一张抉择卡（识别字段）→ 自动收口进裁决/发布
+  // 一条链路，不再叠「预览 + 确认草稿 + 判断」多卡
+  async function generateFromStaging() {
+    const s = store.current;
+    const entries = Object.entries(s.staging ?? {});
+    if (!entries.length || generating) return;
+    setGenerating(true);
+    if (!s._draftAll) s._draftAll = await (await fetch("/api/draft")).json();
+    await sleep(1100); // LLM 读表结构中（模拟）
+    const buckets: any[] = [];
+    for (const [k, cols] of entries) {
+      const [conn, table] = k.split(".");
+      const backend = (s.schemas ?? []).find((x: any) => x.connection === conn)?.backend ?? conn;
+      const base = s._draftAll.find((d: any) => d.connection === conn) ?? s._draftAll.find((d: any) => d.connection === backend) ?? s._draftAll[0];
+      // 表 → 对象：按源表映射找本体对象，不是把表本身当节点
+      const obj = Object.values<any>(base.ontology.object_types).find((o: any) => o.sources.some((src: any) => src.table === table));
+      if (!obj) continue;
+      let pv = buckets.find((p) => p.connection === conn);
+      if (!pv) {
+        pv = { connection: conn, ontology: { object_types: {}, link_types: [] } };
+        buckets.push(pv);
+      }
+      if (pv.ontology.object_types[obj.name]) continue;
+      const clone = structuredClone(obj);
+      for (const src of clone.sources) src.connection = conn;
+      // 字段级过滤：选中列才进对象；源主键锚列始终保留
+      const schema = (s.schemas ?? []).find((x: any) => x.connection === conn)?.tables.find((x: any) => x.name === table);
+      const pkCol = schema?.columns.find((c: any) => c.pk)?.name;
+      const keep = new Set<string>([...(cols as string[]), ...(pkCol ? [pkCol] : [])]);
+      clone.properties = clone.properties.filter((p: any) => {
+        const col = clone.sources[0]?.fields[p.name];
+        return col ? keep.has(col) : !!p.pk;
+      });
+      for (const src of clone.sources) src.fields = Object.fromEntries(Object.entries(src.fields).filter(([, col]) => keep.has(col as string)));
+      if (clone.identity && !clone.properties.some((p: any) => p.name === clone.identity)) delete clone.identity;
+      pv.ontology.object_types[obj.name] = clone;
+      pv.ontology.link_types = (base.ontology.link_types ?? []).filter((l: any) => pv.ontology.object_types[l.from] && pv.ontology.object_types[l.to]);
+    }
+    s.staging = {};
+    applyObjectBuckets(buckets);
     setWizardStep("model");
-    if (s.merged) await addNewPairs();
-    // 需要人判断的点：识别到身份证格式的列，准备设为识别字段——问一声（仅首次发布前）
-    const hasIdCard = (s.drafts ?? []).some((d: any) => Object.values<any>(d.ontology.object_types).some((o) => o.identity === "id_card" && !o._ignored));
-    if (hasIdCard && !s.draftsConfirmed && !s.merged) setIdentityAsk(true);
+    if (s.merged) {
+      await addNewPairs();
+      setGenerating(false);
+      rerender();
+      return;
+    }
+    // 有抉择才打断一张卡；否则直接收口（自动确认 + 裁决/发布）
+    const hasIdCard = (s.drafts ?? []).some((d: any) =>
+      Object.values<any>(d.ontology.object_types).some((o) => o.identity === "id_card" && !o._ignored),
+    );
+    if (hasIdCard && !s.draftsConfirmed) {
+      setIdentityAsk(true);
+      setGenerating(false);
+      rerender();
+      return;
+    }
+    await settleAfterModel();
+    setGenerating(false);
     rerender();
   }
 
@@ -739,8 +775,8 @@ export function useMockAgent() {
     }
   }
 
-  // 判断卡应答：身份证设为识别字段？「先不设」则交集率无从算起（候选对变"无可比对标识"）
-  function confirmIdentity(keep: boolean) {
+  // 判断卡应答：身份证设为识别字段？答完立刻收口进裁决/发布（不再弹确认草稿）
+  async function confirmIdentity(keep: boolean) {
     const s = store.current;
     if (!keep) {
       for (const d of s.drafts ?? []) {
@@ -750,8 +786,9 @@ export function useMockAgent() {
         d.yaml = toYaml(d.ontology);
       }
     }
+    // 先收口再关判断卡，避免中间一帧「没判断、没证据、已确认」闪出发布框
+    await settleAfterModel();
     setIdentityAsk(false);
-    rerender();
   }
 
   function unstageTable(conn: string, table: string) {
@@ -781,8 +818,13 @@ export function useMockAgent() {
     const obj = {
       name,
       label: "新对象",
+      kind: "thing" as const,
       properties: [{ name: "id", type: "uuid", pk: true, label: "ID" }],
       sources: [] as any[],
+      functions: [],
+      axioms: [],
+      actions: [],
+      permissions: [],
     };
     if (s.merged) {
       s.merged.ontology.object_types[name] = obj;
@@ -824,7 +866,7 @@ export function useMockAgent() {
       note: "画布修改",
     });
     s.pending = false;
-    say(`已发布 v${s.version}——新系统同步到最新版本。`);
+    say(`已发布 v${s.version}——映射已跟上。`);
     rerender();
   }
 
@@ -843,15 +885,16 @@ export function useMockAgent() {
 
   // 画布连线建关系：已发布进合并本体（版本 +1）；草稿期同桶进桶、跨桶进 manual 桶
   // （manual 桶的 link 用对象原名，发布时两端都在才带入——buildMergedOntology 同一规则）
-  function createLink(from: { conn: string | null; name: string }, to: { conn: string | null; name: string }, linkName: string): string | null {
+  function createLink(from: { conn: string | null; name: string }, to: { conn: string | null; name: string }, linkName: string, extra?: { label?: string; inverse?: string; card?: string }): string | null {
     const name = linkName.trim();
     if (!name) return "关系名不能为空";
     const s = store.current;
+    const rec = { name, from: from.name, to: to.name, via: { manual: true }, label: extra?.label?.trim() || undefined, inverse: extra?.inverse?.trim() || undefined, card: extra?.card || "n:1" };
     if (s.merged) {
       const ont = s.merged.ontology;
       if (!ont.object_types[from.name] || !ont.object_types[to.name]) return "对象不存在（可能刚被移除）";
       if (ont.link_types.some((l: any) => l.name === name)) return `关系名重复：${name}`;
-      ont.link_types.push({ name, from: from.name, to: to.name, via: { manual: true } });
+      ont.link_types.push(rec);
       touchMerged(`画布连线 ${name}`);
     } else {
       if (from.conn !== to.conn && from.name === to.name) return "两个源里的同名对象，跨源连线请先各自改名";
@@ -864,7 +907,7 @@ export function useMockAgent() {
         d = { connection: "manual", ontology: { object_types: {}, link_types: [] }, yaml: "" };
         s.drafts.push(d);
       }
-      d.ontology.link_types.push({ name, from: from.name, to: to.name, via: { manual: true } });
+      d.ontology.link_types.push(rec);
       d.yaml = toYaml(d.ontology);
       s.drafts = [...s.drafts];
     }
@@ -872,30 +915,56 @@ export function useMockAgent() {
     return null;
   }
 
-  // 关系改名：按所在本体定位（merged 或某个草稿桶）
-  function renameLink(conn: string | null, orig: string, next: string): string | null {
-    const name = next.trim();
+  function updateLink(conn: string | null, orig: string, patch: { name?: string; label?: string; inverse?: string; card?: string }): string | null {
+    const name = (patch.name ?? orig).trim();
     if (!name) return "关系名不能为空";
     const s = store.current;
-    if (s.merged) {
-      const ls = s.merged.ontology.link_types;
+    const apply = (ls: any[]) => {
       const l = ls.find((x: any) => x.name === orig);
       if (!l) return "关系不存在（可能刚被移除）";
       if (name !== orig && ls.some((x: any) => x.name === name)) return `关系名重复：${name}`;
       l.name = name;
-      touchMerged(`关系改名 ${orig} → ${name}`);
+      l.label = patch.label?.trim() || undefined;
+      l.inverse = patch.inverse?.trim() || undefined;
+      if (patch.card) l.card = patch.card;
+      return null;
+    };
+    if (s.merged) {
+      const err = apply(s.merged.ontology.link_types);
+      if (err) return err;
+      touchMerged(`关系调整 ${orig}`);
     } else {
       const d = s.drafts?.find((x: any) => x.connection === conn);
-      const l = d?.ontology.link_types.find((x: any) => x.name === orig);
-      if (!l) return "关系不存在（可能刚被移除）";
+      if (!d) return "关系不存在（可能刚被移除）";
       const all = (s.drafts ?? []).flatMap((x: any) => x.ontology.link_types);
       if (name !== orig && all.some((x: any) => x.name === name)) return `关系名重复：${name}`;
-      l.name = name;
+      const err = apply(d.ontology.link_types);
+      if (err) return err;
       d.yaml = toYaml(d.ontology);
       s.drafts = [...s.drafts!];
     }
     rerender();
     return null;
+  }
+
+  function setQuestions(qs: string[]) {
+    const s = store.current;
+    const clean = qs.map((q) => q.trim()).filter(Boolean);
+    if (s.merged) {
+      s.merged.ontology.questions = clean;
+      touchMerged("调整测试题");
+    } else {
+      s.drafts = s.drafts ?? [];
+      let d = s.drafts.find((x: any) => x.connection === "manual");
+      if (!d) {
+        d = { connection: "manual", ontology: { object_types: {}, link_types: [], questions: [] }, yaml: "" };
+        s.drafts.push(d);
+      }
+      d.ontology.questions = clean;
+      d.yaml = toYaml(d.ontology);
+      s.drafts = [...s.drafts];
+    }
+    rerender();
   }
 
   function deleteLink(conn: string | null, orig: string) {
@@ -957,7 +1026,8 @@ export function useMockAgent() {
 
   // 面板点选：即时写入，静音；业务警示（①丢时间维度等）由面板按当前选择展示
   function setDecision(key: string, type: string) {
-    store.current.decisions[key] = type;
+    if (!type) delete store.current.decisions[key];
+    else store.current.decisions[key] = type;
     rerender();
   }
 
@@ -1144,7 +1214,7 @@ export function useMockAgent() {
     if (/表结构|看看表|有哪些表|schema/i.test(t)) {
       if (await tConnect()) await sleep(200);
       setWizardStep("connect");
-      say("结构和采样都在右边。注意到什么再问。", { suggestions: suggestions() });
+      say("表结构在底部抽屉里，只列字段，不取行。", { suggestions: suggestions() });
       return;
     }
 
@@ -1155,7 +1225,7 @@ export function useMockAgent() {
     }
 
     // 5) 草稿/建模（未连接先走配置表单，连完自动建模）
-    if (/草稿|建模|逆向|生成本体/.test(t) && !s.drafts) {
+    if (/草稿|建模|逆向|生成本体|生成对象/.test(t) && !s.drafts) {
       if (!s.schemas) {
         sayConnectIntro();
         startConnectFlow();
@@ -1193,9 +1263,9 @@ export function useMockAgent() {
     }
 
     // 8) 生成
-    if (/生成|出码|新系统/.test(t)) {
+    if (/生成|出码|新系统|映射/.test(t)) {
       if (!(await ensurePublished())) return;
-      say("新系统不需要生成——本体即应用：本体一发布，对象列表就实时查源库可直接用了（侧栏「新系统」里看）。没有新库、没有出码，数据永不迁移。", { suggestions: suggestions() });
+      say("没有新库、也不出码。本体一发布，侧栏「映射」里能看字段从哪来；业务行不在这里取，要查数去「对话」。", { suggestions: suggestions() });
       return;
     }
 
@@ -1260,13 +1330,8 @@ export function useMockAgent() {
       const s = store.current;
       if (!s.schemas) return startConnectFlow();
       await tDraft();
-      await tEvidence();
-      if ((liveEvidence()?.length ?? 0) === 0) {
-        setWizardStep("publish"); // 无候选对（单源/无跨源同义对象）——整合步本就跳过，直接去发布
-        return;
-      }
-      setWizardStep("integrate");
-      setDecisionOpen(true);
+      // 与生成后同一条收口：证据算完再切状态，避免闪发布框
+      await settleAfterModel();
     });
   const actDecideSuggested = () =>
     ui(async () => {
@@ -1307,11 +1372,11 @@ export function useMockAgent() {
     if (/生命周期|为什么建议/.test(t))
       return "候选人→员工是同一批人在不同时间的状态：招聘库 50 人、HR 库 40 人，17 人身份证重合——这 17 人就是“已转正”。建模为统一「人员」对象 + status 派生属性（仅招聘源→候选人；命中 HR 源→在职/离职）+ converted 转化关系，之后才能问“查所有转正的人”。";
     if (/本体/.test(t))
-      return "本体 = 业务对象/属性/关系的机器可读定义（YAML）。它是单一事实源：新系统以它为运行蓝图（本体即应用，不出码），Agent 问数以它为上下文，血缘从它出发。五个概念：对象类型、属性、关系、源映射、接口（V2）。";
+      return "本体 = 业务对象/字段/关系的机器可读定义（YAML）。它是单一事实源：映射以它为蓝图，问数以它为上下文，血缘从它出发。";
     if (/血缘/.test(t))
-      return "血缘 = 字段级映射链：新系统任一字段 → 本体属性 → 源表列。问数时的“取数路径”是查询级血缘，复用同一份映射数据。它是审计和信任的基础。";
+      return "血缘 = 字段怎么对上源表：对象字段 ← 源表列。问数时的「取数路径」是同一份映射。这里不展示业务行。";
     if (/迁移|数据边界|落地/.test(t))
-      return "数据边界：平台不迁移、不复制业务数据。交集内存算、标识集合不落地；问数实时查源库；新系统是本体驱动的活应用，数据始终留在源库。";
+      return "数据边界：平台不迁移、不复制业务数据。表结构和映射里不取行；交集内存算、标识集合不落地。要查数只走「对话」。";
     if (/裁决/.test(t))
       return "裁决 = 对跨源同义对象选择关系类型。流程是：LLM 给建议+理由（软证据）→ 数据交集率（硬证据）→ 你拍板 + 业务测试问题集验证。裁决和证据快照全部留痕，可回滚——这是护城河“裁决知识库”的原始积累。";
     return null;
@@ -1402,8 +1467,7 @@ export function useMockAgent() {
     confirmDrafts, toggleIgnore, ui, rollbackTo,
     schemaTick, publishChanges, discardChanges, unstageTable, createObject,
     generating, identityAsk, toggleStageSelect, toggleStageColumn, selectAllTables, clearStaging, generateFromStaging, confirmIdentity,
-    confirmPreviewDrafts, cancelPreviewDrafts,
-    createLink, renameLink, deleteLink, deleteObject,
+    createLink, updateLink, setQuestions, deleteLink, deleteObject,
     actConnect, actDraft, actIntegrate, actDecideSuggested, actPublish,
     convs: CONVS, activeConv, switchConv,
     replanObject,

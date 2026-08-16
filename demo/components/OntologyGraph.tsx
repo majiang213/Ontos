@@ -18,45 +18,58 @@ export default function OntologyGraph({ ontology, onSelect, selected, onConnect,
   onEdgeSelect?: (name: string) => void;
 }) {
   const objects = Object.values(ontology.object_types);
-  const built: Node[] = objects.map((o, i) => ({
-    id: o.name,
-    position: { x: 80 + (i % 2) * 320, y: 60 + Math.floor(i / 2) * 190 },
-    data: {
-      label: (
-        <div style={{ textAlign: "left", fontSize: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>
-            {o.label} <span style={{ color: "#9ca3af", fontFamily: "monospace", fontSize: 11 }}>{o.name}</span>
-          </div>
-          <div style={{ color: "#4b5563", marginTop: 4 }}>
-            {o.properties.map((p) => p.label ?? p.name).slice(0, 4).join(" · ")}
-          </div>
-          <div style={{ marginTop: 6, display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {o.identity && (
-              <span className="tag gray" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                <Key size={9} />{o.identity}
-              </span>
+  const built: Node[] = objects.map((o, i) => {
+    const props = o.properties.map((p) => p.label ?? p.name).slice(0, 4);
+    const more = o.properties.length - props.length;
+    return {
+      id: o.name,
+      position: { x: 80 + (i % 2) * 320, y: 60 + Math.floor(i / 2) * 200 },
+      data: {
+        label: (
+          <div className={`ont-node ${selected === o.name ? "sel" : ""} ${o._ignored ? "ignored" : ""}`}>
+            <div className="on-title">
+              {o.label}
+              <span className="on-name">{o.name}</span>
+              {o.kind === "event" && <span className="tag gray" style={{ marginLeft: 6 }}>事件</span>}
+            </div>
+            {props.length > 0 && (
+              <div className="on-props">
+                {props.join(" · ")}{more > 0 ? ` · +${more}` : ""}
+              </div>
             )}
-            {o.sources.map((s) => (
-              <span key={s.connection} className="tag gray" style={{ fontSize: 10, padding: "0 6px", opacity: 0.75 }} title="来源表（只读映射，schema 在「表结构」抽屉里看）">
-                {s.connection}.{s.table}
-              </span>
-            ))}
+            <div className="on-meta">
+              {o.identity && (
+                <span className="tag gray" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                  <Key size={9} />{o.identity}
+                </span>
+              )}
+              {o.sources.length === 0 && <span className="tag gray">手动</span>}
+              {/* 节点是本体对象，不是表——来源只作轻量标注，完整路径在 title */}
+              {[...new Set(o.sources.map((s) => s.connection))].map((conn) => (
+                <span
+                  key={conn}
+                  className="tag gray"
+                  style={{ fontSize: 10, padding: "0 6px", opacity: 0.75 }}
+                  title={o.sources.filter((s) => s.connection === conn).map((s) => `${s.connection}.${s.table}`).join("、")}
+                >
+                  {conn}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      ),
-    },
-    style: {
-      width: 280,
-      background: "#fff",
-      border: selected === o.name ? "1.5px solid #4341c9" : "1px solid #e8e6e1",
-      borderRadius: 12,
-      padding: "12px 14px",
-      fontSize: 12,
-      boxShadow: selected === o.name ? "0 4px 16px rgba(67,65,201,0.18)" : "0 2px 8px rgba(24,24,28,0.06)",
-      cursor: onSelect ? "pointer" : "default",
-      opacity: o._ignored ? 0.45 : 1,
-    },
-  }));
+        ),
+      },
+      style: {
+        width: "auto",
+        padding: 0,
+        background: "transparent",
+        border: "none",
+        borderRadius: 0,
+        boxShadow: "none",
+        cursor: onSelect ? "pointer" : "default",
+      },
+    };
+  });
 
   const [nodes, setNodes] = useNodesState(built);
   // 内容签名：本体被编辑（改名/加属性等）时重建节点内容，但保留拖拽位置
@@ -78,7 +91,7 @@ export default function OntologyGraph({ ontology, onSelect, selected, onConnect,
   const [rf, setRf] = useState<{ fitView: (o?: any) => void } | null>(null);
   const objCount = objects.length;
   useEffect(() => {
-    rf?.fitView({ padding: 0.2, duration: 200 });
+    rf?.fitView({ padding: 0.22, duration: 220 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objCount]);
 
@@ -88,10 +101,13 @@ export default function OntologyGraph({ ontology, onSelect, selected, onConnect,
       id: l.name,
       source: l.from,
       target: l.to,
-      label: l.name,
-      labelStyle: { fontSize: 11, fill: "#4f46e5" },
-      style: { stroke: "#a5b4fc" },
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#a5b4fc" },
+      label: l.label || l.name,
+      labelStyle: { fontSize: 11, fill: "#3a38b8", fontWeight: 600 },
+      labelBgStyle: { fill: "#f4f4ef", fillOpacity: 0.92 },
+      labelBgPadding: [4, 6] as [number, number],
+      labelBgBorderRadius: 4,
+      style: { stroke: "#9b99d4", strokeWidth: 1.6 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "#9b99d4", width: 16, height: 16 },
       animated: l.name === "converted",
     }));
   return (
@@ -116,7 +132,7 @@ export default function OntologyGraph({ ontology, onSelect, selected, onConnect,
       }}
       onEdgeClick={(_, e) => onEdgeSelect?.(e.id)}
     >
-      <Background gap={18} color="#f0f1f3" />
+      <Background gap={18} size={1} color="rgba(24, 24, 28, 0.07)" />
       <Controls showInteractive={false} />
     </ReactFlow>
   );

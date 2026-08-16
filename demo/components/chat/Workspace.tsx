@@ -4,9 +4,9 @@
 // 步骤动作是画布上的浮动卡，表结构/出码产物在底部抽屉，画布可最大化。
 import { useEffect, useState } from "react";
 import {
-  Database, PencilRuler, ShareNetwork, Code, Scales, GitMerge,
+  Database, PencilRuler, ShareNetwork, TreeStructure, Code, Scales, GitMerge,
   X, ArrowCounterClockwise, Key,
-  CaretLeft, CaretRight, Lightbulb, Plus, CheckCircle, LockSimple, Circle,
+  Lightbulb, Plus, CheckCircle, LockSimple, Circle,
   CornersOut, CornersIn,
 } from "@phosphor-icons/react";
 import OntologyGraph from "@/components/OntologyGraph";
@@ -26,7 +26,6 @@ export interface WsActions {
   applyObjectYaml: (kind: "draft" | "merged", conn: string | null, objName: string, text: string) => string | null;
   updateObject: (kind: "draft" | "merged", conn: string | null, objName: string, updated: any) => string | null;
   replay: () => void;
-  reopenDecisions: () => void;
   confirmDrafts: () => void;
   setDecision: (key: string, t: string) => void;
   toggleIgnore: (conn: string, objName: string) => void;
@@ -40,7 +39,7 @@ export interface WsActions {
   publishChanges: () => void; // 发布工作副本 → 新版本
   discardChanges: () => void; // 放弃未发布改动
   rollback: (v: number) => void;
-  // 选表上画布（字段级多选 → 生成 → 预览编辑 → 确认）
+  // 选表 → 生成对象直接上画布（字段级多选）；表本身不上画布
   unstage: (conn: string, table: string) => void;
   toggleStage: (conn: string, table: string, allCols: string[]) => void;
   toggleStageColumn: (conn: string, table: string, col: string, allCols: string[]) => void;
@@ -48,22 +47,21 @@ export interface WsActions {
   clearStaging: () => void;
   generate: () => void;
   confirmIdentity: (keep: boolean) => void;
-  confirmPreviewDrafts: (edited: any[]) => void;
-  cancelPreviewDrafts: () => void;
   // 手动新建对象（无源）
   createObject: () => string;
   // 画布连线与删除
-  createLink: (from: { conn: string | null; name: string }, to: { conn: string | null; name: string }, name: string) => string | null;
-  renameLink: (conn: string | null, orig: string, next: string) => string | null;
+  createLink: (from: { conn: string | null; name: string }, to: { conn: string | null; name: string }, name: string, extra?: { label?: string; inverse?: string; card?: string }) => string | null;
+  updateLink: (conn: string | null, orig: string, patch: { name?: string; label?: string; inverse?: string; card?: string }) => string | null;
+  setQuestions: (qs: string[]) => void;
   deleteLink: (conn: string | null, orig: string) => void;
   deleteObject: (kind: "draft" | "merged", conn: string | null, objName: string) => string | null;
 }
 
 const STEP_META: Record<string, { icon: React.ComponentType<{ size?: number }>; sub: string }> = {
-  connect: { icon: Database, sub: "M1 连接器 · 只读" },
-  model: { icon: PencilRuler, sub: "M2 AI 逆向建模" },
-  integrate: { icon: Scales, sub: "M3 整合裁决" },
-  publish: { icon: GitMerge, sub: "M4 · 单一事实源" },
+  connect: { icon: Database, sub: "只读接入 · 永不写源库" },
+  model: { icon: PencilRuler, sub: "选表生成对象 · 有抉择再拍板" },
+  integrate: { icon: Scales, sub: "候选对裁决 · 权在你" },
+  publish: { icon: GitMerge, sub: "合并为单一事实源" },
 };
 const PHASE_NAME: Record<string, string> = {
   connect: "连接数据源",
@@ -73,27 +71,14 @@ const PHASE_NAME: Record<string, string> = {
 };
 
 /* ---- 通用小块 ---- */
-function CodeBlock({ file, tag, children, maxH = 260 }: { file: string; tag?: string; children: string; maxH?: number }) {
-  return (
-    <div className="codeblock">
-      <div className="cb-head">
-        <span className="cb-file">{file}</span>
-        {tag && <span className="cb-tag">{tag}</span>}
-      </div>
-      <pre className="cb-body" style={{ maxHeight: maxH }}>{children}</pre>
-    </div>
-  );
-}
-
 /* ---- 连接表单（工作台面板版）---- */
 function ConnectPanel({ flow, onTest, onSave }: { flow: any; onTest: () => void; onSave: () => void }) {
   const c = connFor(flow.idx);
   return (
     <div className="panel">
       <h3>配置数据源 · {c.connection} <span className="tag gray">第 {flow.idx + 1} 个</span></h3>
-      <div className="hint">只读账号 · 永不写源库 · 采样仅用于语义判断</div>
-      <div className="hint" style={{ marginTop: -8 }}>演示配置已预填——先测试，再保存；可以只连一个，也可以任意加。</div>
-      {c.reused && <div className="hint" style={{ color: "var(--warn)" }}>演示后端将复用「{c.backend}」的数据（仅演示环境）</div>}
+      <div className="hint">只读账号 · 永不写源库 · 演示配置已预填，先测通再保存</div>
+      {c.reused && <div className="hint" style={{ color: "var(--warn)", marginTop: -6 }}>演示环境将复用「{c.backend}」的数据</div>}
       <div className="conn-grid">
         <label>类型</label><input defaultValue={c.label} readOnly />
         <label>主机</label><input defaultValue={c.host} />
@@ -102,83 +87,156 @@ function ConnectPanel({ flow, onTest, onSave }: { flow: any; onTest: () => void;
         <label>只读账号</label><input defaultValue={c.user} />
         <label>密码</label><input type="password" defaultValue={c.password} />
       </div>
-      <div className="panel-actions" style={{ marginTop: 12, marginBottom: 0 }}>
+      <div className="panel-actions" style={{ marginTop: 14, marginBottom: 0 }}>
         <button className="ghost sm" onClick={onTest} disabled={flow.testing || flow.tested}>
-          {flow.testing ? "测试中…" : flow.tested ? "✓ 连接成功" : "测试连接"}
+          {flow.testing ? "测试中…" : flow.tested ? "已连通" : "测试连接"}
         </button>
-        <button className="sm" disabled={!flow.tested} onClick={onSave}>保存 →</button>
+        <button className="sm" disabled={!flow.tested} onClick={onSave}>保存并读取表结构</button>
       </div>
     </div>
   );
 }
 
-/* ---- 裁决面板：LLM 建议一次给全，人逐对审阅定案（裁决权在人，留痕可回滚）---- */
+/* ---- 裁决：一次一问。点完自动下一题；全答完再给发布 ---- */
 const REL_OPTIONS = [
-  { t: "①", name: "完全等价", desc: "同一业务概念，合并为单对象挂多源" },
-  { t: "②", name: "部分重叠", desc: "上位对象承载公共属性，各自保留特有属性" },
-  { t: "③", name: "生命周期阶段", desc: "统一对象 + 状态属性 + 阶段转化关系" },
-  { t: "⑤", name: "仅名字像", desc: "语义不同，不合并，各自独立" },
+  { t: "①", name: "完全等价", desc: "同一概念，合并成一个对象，两边都挂上" },
+  { t: "②", name: "部分重叠", desc: "有公共部分，也各有自己的字段" },
+  { t: "③", name: "生命周期", desc: "同一个人，只是前后两个阶段" },
+  { t: "⑤", name: "只是名字像", desc: "不是一回事，各自独立" },
 ];
 const PAIR_LABEL: Record<string, string> = { person: "人员", department: "部门", position: "职位" };
+const END_LABEL: Record<string, string> = {
+  candidate: "候选人", employee: "员工", department: "部门",
+  job_posting: "招聘职位", headcount_position: "岗位编制",
+};
+const REL_NAME: Record<string, string> = Object.fromEntries(REL_OPTIONS.map((o) => [o.t, o.name]));
+const SKIP = "\u293c";
+
+function pairEnds(pair: string) {
+  return pair.split(/\s*↔\s*/).map((side) => {
+    const [conn, table] = side.split(".");
+    return { conn, table, label: END_LABEL[table] ?? table };
+  });
+}
 
 function DecisionPanel({ data, merged, actions, onClose }: { data: any; merged: boolean; actions: WsActions; onClose?: () => void }) {
   const ev = data.evidence ?? [];
   const decisions = data.decisions ?? {};
-  const allDone = ev.length > 0 && ev.every((e: any) => decisions[pairKey(e)]);
-  // 业务警示：裁决的业务判断即时提示，不发消息
-  const warn =
-    decisions.person === "①"
-      ? "人员按①等价合并会丢掉“转正”的时间维度——“查转正员工”将答不上来。"
-      : decisions.person === "⤼"
-        ? "人员这对暂不合并——两源各自独立进本体，随时可重裁。"
-        : null;
+  const idx = ev.findIndex((e: any) => !decisions[pairKey(e)]);
+  const allDone = ev.length > 0 && idx < 0;
+  const step = allDone ? ev.length : Math.max(idx, 0);
+  const cur = allDone ? null : ev[step];
+  const key = cur ? pairKey(cur) : "";
+  const ends = cur ? pairEnds(cur.pair) : [];
+
+  const pick = (t: string) => {
+    if (!key) return;
+    actions.setDecision(key, t);
+  };
+  const prev = () => {
+    if (step <= 0) return;
+    actions.setDecision(pairKey(ev[step - 1]), "");
+  };
+
   return (
-    <div className="panel">
-      <h3>
-        候选对裁决
-        {onClose && <button className="ghost sm" style={{ float: "right" }} onClick={onClose} title="收起面板"><X size={12} /></button>}
-      </h3>
-      <div className="hint">每对都带 LLM 建议（「建议」标）和交集率硬证据——逐对过目点选，裁决权在你</div>
-      {ev.map((e: any) => {
-        const key = pairKey(e);
-        const sel = decisions[key];
-        return (
-          <div key={e.pair} className="dc-pair">
-            <div className="dc-head">
-              <b>{PAIR_LABEL[key] ?? key}</b>
-              <span className="dc-pairname">{e.pair}</span>
-            </div>
-            <div className="q-ev">
-              {e.rate === null
-                ? "无可比对标识字段——数据层无法证明是同一批实体"
-                : <>交集率 <b>{(e.rate * 100).toFixed(0)}%</b>（{e.rule}）· A={e.countA} 行 / B={e.countB} 行 / ∩={e.intersection} · 内存计算不落地</>}
-            </div>
-            <div className="q-ev hint2"><Lightbulb size={12} className="i-inline" />{e.reason}</div>
-            <div className="dc-opts">
-              {REL_OPTIONS.map((o) => (
-                <button key={o.t} className={`dc-opt ${sel === o.t ? "sel" : ""}`} title={`${o.name}：${o.desc}`} onClick={() => actions.setDecision(key, o.t)}>
-                  {o.t} {o.name}{o.t === e.suggestion && <span className="dsug">建议</span>}
-                </button>
-              ))}
-              <button className={`dc-opt ${sel === "⤼" ? "sel" : ""}`} title="暂不合并，各自独立，随时可重裁" onClick={() => actions.setDecision(key, "⤼")}>跳过</button>
-            </div>
-          </div>
-        );
-      })}
-      {warn && <div className="hint" style={{ color: "var(--warn)" }}>{warn}</div>}
-      <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0 }}>
-        {!allDone && <button className="ghost sm" onClick={actions.decideAll}>都按建议</button>}
-        <button className="sm" disabled={!allDone} onClick={actions.publish}>{merged ? "按新裁决重新发布" : "发布合并本体 →"}</button>
+    <div className="ask">
+      <div className="ask-top">
+        <div className="ask-dots" aria-label={`第 ${allDone ? ev.length : step + 1} 题，共 ${ev.length} 题`}>
+          {ev.map((e: any, i: number) => (
+            <i key={e.pair} className={allDone || i < step ? "done" : i === step ? "on" : ""} />
+          ))}
+        </div>
+        {step > 0 && !allDone && <button type="button" className="ask-nav" onClick={prev}>上一对</button>}
+        {onClose && <button type="button" className="ask-nav" onClick={onClose} title="收起"><X size={13} /></button>}
       </div>
+
+      {!allDone && cur && (
+        <>
+          <h3 className="ask-q">这两边是什么关系？</h3>
+          <div className="ask-sides">
+            {ends[0] && (
+              <div className="ask-end">
+                <b>{ends[0].label}</b>
+                <em>{ends[0].conn}</em>
+              </div>
+            )}
+            <span className="ask-x" aria-hidden>{"\u2194"}</span>
+            {ends[1] && (
+              <div className="ask-end">
+                <b>{ends[1].label}</b>
+                <em>{ends[1].conn}</em>
+              </div>
+            )}
+          </div>
+          <div className="ask-rate">
+            {cur.rate === null ? (
+              <div className="ask-na">两边对不上号，数据没法证明是同一批</div>
+            ) : (
+              <>
+                <span className="ask-pct">{(cur.rate * 100).toFixed(0)}%</span>
+                <div className="ask-rate-meta">
+                  <div>两库同一批人的比例</div>
+                  <div className="ask-rate-s">{cur.countA} 对 {cur.countB}，交 {cur.intersection}</div>
+                </div>
+              </>
+            )}
+          </div>
+          {cur.reason && <p className="ask-why"><Lightbulb size={13} />{cur.reason}</p>}
+          <div className="ask-opts">
+            {REL_OPTIONS.map((o) => (
+              <button
+                key={o.t}
+                type="button"
+                className={`ask-opt ${o.t === cur.suggestion ? "sug" : ""}`}
+                onClick={() => pick(o.t)}
+              >
+                <span className="ask-opt-n">{o.name}</span>
+                <span className="ask-opt-d">{o.desc}</span>
+                {o.t === cur.suggestion && <span className="ask-sug">建议</span>}
+              </button>
+            ))}
+            <button type="button" className="ask-opt skip" onClick={() => pick(SKIP)}>
+              <span className="ask-opt-n">先跳过</span>
+              <span className="ask-opt-d">暂不合并，以后还能改</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {allDone && (
+        <>
+          <h3 className="ask-q">这几对都定了</h3>
+          <p className="ask-lead">不对的点「改」，回到那一题。</p>
+          {decisions.person === "①" && (
+            <p className="ask-warn">人员若按「完全等价」合并，会丢掉「转正」的时间，查转正员工会答不上来。</p>
+          )}
+          <ul className="ask-sum">
+            {ev.map((e: any) => {
+              const k = pairKey(e);
+              const t = decisions[k];
+              return (
+                <li key={e.pair}>
+                  <b>{PAIR_LABEL[k] ?? k}</b>
+                  <span>{t === SKIP ? "先跳过" : (REL_NAME[t] ?? t)}</span>
+                  <button type="button" className="ask-nav" onClick={() => actions.setDecision(k, "")}>改</button>
+                </li>
+              );
+            })}
+          </ul>
+          <button type="button" className="ask-go" onClick={actions.publish}>
+            {merged ? "按新裁决重新发布" : "发布合并本体"}
+          </button>
+        </>
+      )}
     </div>
   );
 }
 
-/* ---- M1 Schema（只读原料列表：字段级勾选 → LLM 生成预览；每列标出映射去向）---- */
+/* ---- M1 Schema（只读原料：勾选表 → 生成对象直接上画布；表本身永不当节点）---- */
 function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, stageActions }: {
   data: any[];
   mapIndex?: Record<string, string[]>;
-  staged?: Set<string>; // 已在画布的表（草稿 ∪ 已发布本体的来源）
+  staged?: Set<string>; // 已映射到画布对象的表（草稿 ∪ 已发布本体的来源）
   locked?: boolean; // 已确认/已发布后不可移出，只能加
   staging?: Record<string, string[]>; // "conn.table" → 选中的列名
   generating?: boolean;
@@ -194,12 +252,12 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
     <div className="grid" style={{ gap: 12 }}>
       {stageActions && (
         <div className="stage-bar">
-          <span className="hint" style={{ margin: 0 }}>{selCount ? `已选 ${selCount} 张表 · 展开可逐列调整` : "勾选表（可字段级），交给 AI 生成本体草稿"}</span>
+          <span className="hint" style={{ margin: 0 }}>{selCount ? `已选 ${selCount} 张表 · 展开可逐列调整` : "勾选表（可字段级），生成对象到画布——表只是原料"}</span>
           <span style={{ flex: 1 }} />
           <button className="ghost sm" onClick={stageActions.selectAll}>全选</button>
           <button className="ghost sm" onClick={stageActions.clear} disabled={!selCount}>清空</button>
           <button className="sm" disabled={!selCount || generating} onClick={stageActions.generate}>
-            {generating ? "AI 正在读表结构…" : "生成本体草稿 →"}
+            {generating ? "AI 正在读表…" : "生成对象 →"}
           </button>
         </div>
       )}
@@ -219,26 +277,41 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
               const selCols = staging?.[key];
               const allCols = t.columns.map((c: any) => c.name);
               const pkCol = t.columns.find((c: any) => c.pk)?.name;
+              const tableOn = !!selCols;
               return (
-                <details key={t.name} className="tbl-acc">
+                <details key={key} className="tbl-acc">
                   <summary>
                     {stageActions && !on && (
                       <span
-                        className={`sel-box ${selCols ? "on" : ""}`}
-                        title={selCols ? "取消选择" : "选择全表字段"}
-                        onClick={(e) => { e.preventDefault(); stageActions.toggle(db.connection, t.name, allCols); }}
+                        role="checkbox"
+                        aria-checked={tableOn}
+                        tabIndex={0}
+                        className={`sel-box ${tableOn ? "on" : ""}`}
+                        title={tableOn ? "取消选择" : "选择全表字段"}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          stageActions.toggle(db.connection, t.name, allCols);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === " " || e.key === "Enter") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            stageActions.toggle(db.connection, t.name, allCols);
+                          }
+                        }}
                       />
                     )}
                     <span className="mono">{t.name}</span>
                     <span className="tag gray">{t.comment}</span>
                     <span className="rows-n">
-                      {selCols ? `已选 ${selCols.length}/${t.columns.length} 列` : `${t.rowCount} 行 · ${mapped}/${t.columns.length} 列已映射`}
+                      {selCols ? `已选 ${selCols.length}/${t.columns.length} 列` : `${mapped}/${t.columns.length} 列已映射`}
                     </span>
                     {on && (
                       locked ? (
-                        <span className="tag ok" onClick={(e) => e.preventDefault()}>已在画布</span>
+                        <span className="tag ok" onClick={(e) => e.preventDefault()}>已映射</span>
                       ) : (
-                        <button className="ghost sm" onClick={(e) => { e.preventDefault(); stageActions?.unstage(db.connection, t.name); }}>移出</button>
+                        <button className="ghost sm" onClick={(e) => { e.preventDefault(); e.stopPropagation(); stageActions?.unstage(db.connection, t.name); }} title="移除由这张表生成的对象">移出对象</button>
                       )
                     )}
                   </summary>
@@ -247,16 +320,30 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
                       <tbody>
                         {t.columns.map((c: any) => {
                           const to = mapIndex[`${db.connection}.${t.name}.${c.name}`];
-                          const colSel = selCols?.includes(c.name);
+                          const colSel = !!selCols?.includes(c.name);
                           const isPkAnchor = c.name === pkCol;
                           return (
                             <tr key={c.name}>
                               <td>
                                 {stageActions && !on && (
                                   <span
-                                    className={`sel-box sm ${colSel ? "on" : ""} ${isPkAnchor && selCols ? "lock" : ""}`}
-                                    title={isPkAnchor ? "主键是来源锚，必选" : colSel ? "不选这列" : "选这列"}
-                                    onClick={(e) => { e.stopPropagation(); if (!(isPkAnchor && colSel)) stageActions.toggleCol(db.connection, t.name, c.name, allCols); }}
+                                    role="checkbox"
+                                    aria-checked={colSel}
+                                    tabIndex={0}
+                                    className={`sel-box sm ${colSel ? "on" : ""} ${isPkAnchor && tableOn ? "lock" : ""}`}
+                                    title={isPkAnchor && tableOn ? "主键是来源锚，必选" : colSel ? "不选这列" : "选这列"}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      if (!(isPkAnchor && colSel)) stageActions.toggleCol(db.connection, t.name, c.name, allCols);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === " " || e.key === "Enter") {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (!(isPkAnchor && colSel)) stageActions.toggleCol(db.connection, t.name, c.name, allCols);
+                                      }
+                                    }}
                                   />
                                 )}
                                 {c.pk ? <Key size={10} className="i-inline" /> : null}{c.name}
@@ -273,9 +360,6 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
                         })}
                       </tbody>
                     </table>
-                    <CodeBlock file={`采样 · 前 ${t.sample.length} 行`} maxH={120}>
-                      {t.sample.map((r: any) => Object.values(r).join(" | ")).join("\n")}
-                    </CodeBlock>
                   </div>
                 </details>
               );
@@ -287,77 +371,26 @@ function SchemaView({ data, mapIndex = {}, staged, locked, staging, generating, 
   );
 }
 
-/* ---- 草稿预览：AI 生成后先编辑（改名/删字段/调识别字段），确认才上画布 ---- */
-function DraftPreview({ buckets, onConfirm, onCancel }: { buckets: any[]; onConfirm: (b: any[]) => void; onCancel: () => void }) {
-  const [bs, setBs] = useState<any[]>(() => structuredClone(buckets));
-  const setObj = (bi: number, name: string, patch: any) =>
-    setBs((arr) =>
-      arr.map((b, i) =>
-        i === bi ? { ...b, ontology: { ...b.ontology, object_types: { ...b.ontology.object_types, [name]: { ...b.ontology.object_types[name], ...patch } } } } : b,
-      ),
-    );
-  // 删字段：映射同步删；识别字段被删则清掉识别字段
-  const delProp = (bi: number, name: string, propName: string) =>
-    setBs((arr) =>
-      arr.map((b, i) => {
-        if (i !== bi) return b;
-        const o = b.ontology.object_types[name];
-        const sources = o.sources.map((s: any) => ({ ...s, fields: Object.fromEntries(Object.entries(s.fields).filter(([p]) => p !== propName)) }));
-        return {
-          ...b,
-          ontology: {
-            ...b.ontology,
-            object_types: {
-              ...b.ontology.object_types,
-              [name]: { ...o, identity: o.identity === propName ? undefined : o.identity, sources, properties: o.properties.filter((p: any) => p.name !== propName) },
-            },
-          },
-        };
-      }),
-    );
-  const objCount = bs.reduce((n, b) => n + Object.keys(b.ontology.object_types).length, 0);
-  return (
-    <div className="panel">
-      <h3>AI 读完了——先过一遍，改好再上画布</h3>
-      <div className="hint">改对象名、删不要的字段、调识别字段；主键字段不可删（来源锚）</div>
-      {bs.map((b, bi) =>
-        Object.values<any>(b.ontology.object_types).map((o) => (
-          <div key={`${b.connection}.${o.name}`} className="dc-pair">
-            <div className="oe-grid" style={{ marginTop: 0 }}>
-              <label>对象名</label>
-              <input value={o.label} onChange={(e) => setObj(bi, o.name, { label: e.target.value })} />
-              <label>识别字段</label>
-              <input value={o.identity ?? ""} placeholder="如 id_card" onChange={(e) => setObj(bi, o.name, { identity: e.target.value.trim() || undefined })} />
-            </div>
-            <div className="oe-props" style={{ marginTop: 6 }}>
-              {o.properties.map((p: any) => (
-                <div className="oe-prop" key={p.name}>
-                  <input value={p.label ?? ""} placeholder="显示名" onChange={(e) => setObj(bi, o.name, { properties: o.properties.map((x: any) => (x.name === p.name ? { ...x, label: e.target.value } : x)) })} />
-                  <input value={p.name} readOnly title="字段名锁定（源映射的键）" />
-                  <span className="tag gray" style={{ flex: "none" }}>{p.type}</span>
-                  <button className="ghost sm" disabled={!!p.pk} title={p.pk ? "主键是来源锚，不可删" : "删掉这个字段"} onClick={() => delProp(bi, o.name, p.name)}>删</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )),
-      )}
-      <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0 }}>
-        <button className="sm" onClick={() => onConfirm(bs)}>放上画布（{objCount} 个对象）</button>
-        <button className="ghost sm" onClick={onCancel}>返回重选</button>
-      </div>
-    </div>
-  );
+/* ---- 画布内对象编辑（点节点弹出；YAML 进阶编辑收在这里）---- */
+function rowsOf<T>(v: T[] | undefined, empty: T): T[] {
+  return (v && v.length ? v : []).map((x) => ({ ...x })) as T[];
 }
 
-/* ---- 画布内对象编辑（点节点弹出；YAML 进阶编辑收在这里）---- */
-function ObjectEditor({ obj, schemas, onSave, onSaveYaml, onClose, ignored, onToggleIgnore, onReplan, onDelete }: {
-  obj: any; schemas: any[]; onSave: (o: any) => string | null; onSaveYaml: (text: string) => string | null; onClose: () => void;
+function ObjectEditor({ obj, schemas, peers, onSave, onSaveYaml, onClose, ignored, onToggleIgnore, onReplan, onDelete }: {
+  obj: any; schemas: any[]; peers: { name: string; label: string }[];
+  onSave: (o: any) => string | null; onSaveYaml: (text: string) => string | null; onClose: () => void;
   ignored?: boolean; onToggleIgnore?: () => void; onReplan?: () => void; onDelete?: () => void;
 }) {
   const [label, setLabel] = useState(obj.label ?? "");
   const [identity, setIdentity] = useState(obj.identity ?? "");
+  const [kind, setKind] = useState<"thing" | "event">(obj.kind === "event" ? "event" : "thing");
+  const [parent, setParent] = useState(obj.parent ?? "");
+  const [equivalent, setEquivalent] = useState(obj.equivalent ?? "");
   const [props, setProps] = useState<any[]>(obj.properties.map((p: any) => ({ ...p })));
+  const [fns, setFns] = useState<any[]>(rowsOf(obj.functions, { name: "", label: "", rule: "" }));
+  const [axioms, setAxioms] = useState<any[]>(rowsOf(obj.axioms, { name: "", rule: "" }));
+  const [acts, setActs] = useState<any[]>(rowsOf(obj.actions, { name: "", label: "", does: "" }));
+  const [perms, setPerms] = useState<any[]>(rowsOf(obj.permissions, { field: "", who: "" }));
   const [srcs, setSrcs] = useState<any[]>(obj.sources.map((s: any) => ({ ...s, fields: { ...s.fields } })));
   const [err, setErr] = useState<string | null>(null);
   const [yamlMode, setYamlMode] = useState(false);
@@ -373,8 +406,15 @@ function ObjectEditor({ obj, schemas, onSave, onSaveYaml, onClose, ignored, onTo
     const e = onSave({
       label: label.trim(),
       identity: identity.trim() || undefined,
+      kind,
+      parent: parent.trim() || undefined,
+      equivalent: equivalent.trim() || undefined,
       properties: props.map(({ _new, ...p }) => p),
       sources,
+      functions: fns.filter((x) => x.label || x.rule),
+      axioms: axioms.filter((x) => x.rule),
+      actions: acts.filter((x) => x.label || x.does),
+      permissions: perms.filter((x) => x.who),
     });
     if (e) setErr(e);
     else onClose();
@@ -416,21 +456,22 @@ function ObjectEditor({ obj, schemas, onSave, onSaveYaml, onClose, ignored, onTo
           {obj.sources.length === 0 && <span className="tag gray">手动 · 无源</span>}
           {obj.sources.map((s: any) => <span key={`${s.connection}.${s.table}`} className="tag gray">{s.connection}.{s.table}</span>)}
         </span>
-        {!yamlMode && (
-          <button
-            className="ghost sm"
-            style={{ marginLeft: "auto" }}
-            title="以 YAML 编辑这个对象"
-            onClick={() => {
-              setYamlText(toYaml({ object_types: { [obj.name]: obj }, link_types: [] }));
-              setErr(null);
-              setYamlMode(true);
-            }}
-          >
-            <Code size={12} className="i-inline" />YAML
-          </button>
-        )}
-        <button className="ghost sm" style={yamlMode ? { marginLeft: "auto" } : undefined} onClick={onClose}><X size={12} /></button>
+        <span className="oe-actions">
+          {!yamlMode && (
+            <button
+              className="ghost sm"
+              title="以 YAML 编辑这个对象"
+              onClick={() => {
+                setYamlText(toYaml({ object_types: { [obj.name]: obj }, link_types: [] }));
+                setErr(null);
+                setYamlMode(true);
+              }}
+            >
+              <Code size={12} className="i-inline" />YAML
+            </button>
+          )}
+          <button className="ghost sm" onClick={onClose} title="关闭"><X size={12} /></button>
+        </span>
       </div>
       {yamlMode ? (
         <div style={{ marginTop: 10 }}>
@@ -446,8 +487,28 @@ function ObjectEditor({ obj, schemas, onSave, onSaveYaml, onClose, ignored, onTo
         <>
           <div className="oe-grid">
             <label>显示名</label><input value={label} onChange={(e) => setLabel(e.target.value)} />
-            <label>识别字段</label><input value={identity} placeholder="跨源认人的属性，如 id_card" onChange={(e) => setIdentity(e.target.value)} />
+            <label>种类</label>
+            <select value={kind} onChange={(e) => setKind(e.target.value as "thing" | "event")}>
+              <option value="thing">事物（一直存在）</option>
+              <option value="event">事件（发生过一桩）</option>
+            </select>
+            <label>识别字段</label><input value={identity} placeholder="实例怎么认，如 id_card" onChange={(e) => setIdentity(e.target.value)} />
+            <label>上位对象</label>
+            <select value={parent} onChange={(e) => setParent(e.target.value)}>
+              <option value="">无（不是谁的子类）</option>
+              {peers.filter((p) => p.name !== obj.name).map((p) => (
+                <option key={p.name} value={p.name}>{p.label}</option>
+              ))}
+            </select>
+            <label>同义于</label>
+            <select value={equivalent} onChange={(e) => setEquivalent(e.target.value)}>
+              <option value="">无</option>
+              {peers.filter((p) => p.name !== obj.name).map((p) => (
+                <option key={p.name} value={p.name}>{p.label}</option>
+              ))}
+            </select>
           </div>
+          <div className="oe-note">实例不落库：按识别字段现查源库，这里只设「怎么认」。</div>
           <div className="oe-props">
             {props.map((p, i) => (
               <div className="oe-prop" key={i}>
@@ -477,6 +538,51 @@ function ObjectEditor({ obj, schemas, onSave, onSaveYaml, onClose, ignored, onTo
                 <button className="ghost sm" disabled={!pull.col} onClick={addPulled}>拉入</button>
               </div>
             )}
+          </div>
+          <div className="oe-sec">
+            <div className="oe-sec-t">怎么算（函数）</div>
+            {fns.map((f, i) => (
+              <div className="oe-prop" key={i}>
+                <input value={f.label} placeholder="名称" onChange={(e) => setFns((xs) => xs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+                <input value={f.rule} placeholder="怎么算，如 状态从候选人变成在职" onChange={(e) => setFns((xs) => xs.map((x, j) => (j === i ? { ...x, rule: e.target.value, name: x.name || `fn_${i + 1}` } : x)))} />
+                <button className="ghost sm" onClick={() => setFns((xs) => xs.filter((_, j) => j !== i))}>删</button>
+              </div>
+            ))}
+            <button className="ghost sm" onClick={() => setFns((xs) => [...xs, { name: `fn_${xs.length + 1}`, label: "", rule: "" }])}>添加算法</button>
+          </div>
+          <div className="oe-sec">
+            <div className="oe-sec-t">必须遵守（公理）</div>
+            {axioms.map((a, i) => (
+              <div className="oe-prop" key={i}>
+                <input value={a.rule} placeholder="如 同一个人同一时刻只能有一个状态" onChange={(e) => setAxioms((xs) => xs.map((x, j) => (j === i ? { ...x, rule: e.target.value, name: x.name || `ax_${i + 1}` } : x)))} />
+                <button className="ghost sm" onClick={() => setAxioms((xs) => xs.filter((_, j) => j !== i))}>删</button>
+              </div>
+            ))}
+            <button className="ghost sm" onClick={() => setAxioms((xs) => [...xs, { name: `ax_${xs.length + 1}`, rule: "" }])}>添加约束</button>
+          </div>
+          <div className="oe-sec">
+            <div className="oe-sec-t">能做什么（动作）</div>
+            {acts.map((a, i) => (
+              <div className="oe-prop" key={i} style={{ flexWrap: "wrap" }}>
+                <input value={a.label} placeholder="名称，如 录用" onChange={(e) => setActs((xs) => xs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+                <input value={a.does} placeholder="做什么" onChange={(e) => setActs((xs) => xs.map((x, j) => (j === i ? { ...x, does: e.target.value, name: x.name || `act_${i + 1}` } : x)))} />
+                <input value={a.record ?? ""} placeholder="写回哪，如 hr.employee" onChange={(e) => setActs((xs) => xs.map((x, j) => (j === i ? { ...x, record: e.target.value } : x)))} />
+                <input value={a.from_fields ?? ""} placeholder="带过去的字段，如 name,id_card" onChange={(e) => setActs((xs) => xs.map((x, j) => (j === i ? { ...x, from_fields: e.target.value } : x)))} />
+                <button className="ghost sm" onClick={() => setActs((xs) => xs.filter((_, j) => j !== i))}>删</button>
+              </div>
+            ))}
+            <button className="ghost sm" onClick={() => setActs((xs) => [...xs, { name: `act_${xs.length + 1}`, label: "", does: "" }])}>添加动作</button>
+          </div>
+          <div className="oe-sec">
+            <div className="oe-sec-t">谁能看（权限）</div>
+            {perms.map((p, i) => (
+              <div className="oe-prop" key={i}>
+                <input value={p.field} placeholder="字段，空=整个对象" onChange={(e) => setPerms((xs) => xs.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))} />
+                <input value={p.who} placeholder="谁能看，如 人事可看" onChange={(e) => setPerms((xs) => xs.map((x, j) => (j === i ? { ...x, who: e.target.value } : x)))} />
+                <button className="ghost sm" onClick={() => setPerms((xs) => xs.filter((_, j) => j !== i))}>删</button>
+              </div>
+            ))}
+            <button className="ghost sm" onClick={() => setPerms((xs) => [...xs, { field: "", who: "" }])}>添加权限</button>
           </div>
           {err && <div className="editor-err">{err}</div>}
           <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0, alignItems: "center" }}>
@@ -513,16 +619,22 @@ function ObjectEditor({ obj, schemas, onSave, onSaveYaml, onClose, ignored, onTo
   );
 }
 
-/* ---- 关系卡：连线后命名；点已有边可改名/删除 ---- */
-function LinkCard({ fromLabel, toLabel, link, onClose, onCreate, onRename, onDelete }: {
+/* ---- 关系卡：名、显示名、基数、逆关系 ---- */
+function LinkCard({ fromLabel, toLabel, link, onClose, onCreate, onUpdate, onDelete }: {
   fromLabel: string; toLabel: string; link: any | null;
-  onClose: () => void; onCreate: (name: string) => string | null;
-  onRename: (next: string) => string | null; onDelete: () => void;
+  onClose: () => void;
+  onCreate: (name: string, extra: { label?: string; inverse?: string; card?: string }) => string | null;
+  onUpdate: (next: { name: string; label?: string; inverse?: string; card?: string }) => string | null;
+  onDelete: () => void;
 }) {
   const [name, setName] = useState(link?.name ?? "");
+  const [lab, setLab] = useState(link?.label ?? "");
+  const [inverse, setInverse] = useState(link?.inverse ?? "");
+  const [card, setCard] = useState(link?.card ?? "n:1");
   const [err, setErr] = useState<string | null>(null);
+  const extra = () => ({ label: lab, inverse, card });
   const submit = () => {
-    const e = link ? onRename(name) : onCreate(name);
+    const e = link ? onUpdate({ name, ...extra() }) : onCreate(name, extra());
     if (e) setErr(e);
     else onClose();
   };
@@ -531,13 +643,18 @@ function LinkCard({ fromLabel, toLabel, link, onClose, onCreate, onRename, onDel
       <h3>{link ? "编辑关系" : "新建关系"}<span className="tag gray" style={{ marginLeft: 6 }}>{fromLabel} → {toLabel}</span></h3>
       <div className="oe-grid" style={{ marginTop: 6 }}>
         <label>关系名</label>
-        <input
-          autoFocus
-          value={name}
-          placeholder="如 works_in"
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-        />
+        <input autoFocus value={name} placeholder="如 works_in" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+        <label>显示名</label>
+        <input value={lab} placeholder="如 任职于" onChange={(e) => setLab(e.target.value)} />
+        <label>几个对几个</label>
+        <select value={card} onChange={(e) => setCard(e.target.value)}>
+          <option value="1:1">一对一</option>
+          <option value="1:n">一对多</option>
+          <option value="n:1">多对一</option>
+          <option value="n:n">多对多</option>
+        </select>
+        <label>反过来叫</label>
+        <input value={inverse} placeholder="如 下辖（可空）" onChange={(e) => setInverse(e.target.value)} />
       </div>
       {err && <div className="editor-err">{err}</div>}
       <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0, alignItems: "center" }}>
@@ -548,6 +665,29 @@ function LinkCard({ fromLabel, toLabel, link, onClose, onCreate, onRename, onDel
             删除关系
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function QuestionsCard({ questions, onSave, onClose }: { questions: string[]; onSave: (qs: string[]) => void; onClose: () => void }) {
+  const [qs, setQs] = useState<string[]>(questions.length ? [...questions] : [""]);
+  return (
+    <div className="panel">
+      <h3>能力测试题</h3>
+      <div className="hint">模型答得对不对，用这几句业务问题验收。发布后可在对话里直接问。</div>
+      <div className="oe-props">
+        {qs.map((q, i) => (
+          <div className="oe-prop" key={i}>
+            <input value={q} placeholder="如 查从候选人转正的员工及部门" onChange={(e) => setQs((xs) => xs.map((x, j) => (j === i ? e.target.value : x)))} />
+            <button className="ghost sm" onClick={() => setQs((xs) => xs.filter((_, j) => j !== i))}>删</button>
+          </div>
+        ))}
+        <button className="ghost sm" onClick={() => setQs((xs) => [...xs, ""])}>添加问题</button>
+      </div>
+      <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0 }}>
+        <button className="sm" onClick={() => { onSave(qs); onClose(); }}>保存</button>
+        <button className="ghost sm" onClick={onClose}>取消</button>
       </div>
     </div>
   );
@@ -594,33 +734,12 @@ function ApiAssetList({ apis }: { apis: any[] }) {
   );
 }
 
-/* ---- 新系统（本体即应用）：对象数据实时查源库，无出码、无新库、数据永不迁移 ---- */
+/* ---- 映射：已发布本体的字段去向。不取业务行，只展示「字段 ← 源列」。---- */
 function AppView({ data }: { data: any }) {
   const objs = Object.values<any>(data.ontology.object_types).filter((o) => !o._ignored);
-  const [tab, setTab] = useState(objs[0]?.name ?? "");
-  const [rows, setRows] = useState<any[] | null>(null);
-  const [srcNote, setSrcNote] = useState("");
+  const [tab, setTab] = useState(objs[0]?.name ?? "血缘");
   const obj = objs.find((o) => o.name === tab);
-  useEffect(() => {
-    if (!obj) return;
-    let dead = false;
-    setRows(null);
-    fetch("/api/objects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ontology: data.ontology, object: obj.name }),
-    })
-      .then((r) => r.json())
-      .then((res) => {
-        if (dead) return;
-        setRows(res.rows ?? []);
-        setSrcNote((res.sources ?? []).join(" + "));
-      })
-      .catch(() => { if (!dead) setRows([]); });
-    return () => { dead = true; };
-  }, [obj?.name, data.ontology]);
 
-  // 血缘直接从本体算：对象字段 ← 源列；代理主键（无源 uuid pk）不进血缘
   const lineage = objs.flatMap((o) =>
     o.properties
       .filter((p: any) => !p.pk || o.sources.some((s: any) => s.fields[p.name]))
@@ -630,13 +749,11 @@ function AppView({ data }: { data: any }) {
         from: o.sources.filter((s: any) => s.fields[p.name]).map((s: any) => `${s.connection}.${s.table}.${s.fields[p.name]}`),
       })),
   );
-  const hasDept = (rows ?? []).some((r) => r.dept !== undefined);
-  const cols = obj ? [...obj.properties.map((p: any) => ({ name: p.name, label: p.label ?? p.name })), ...(hasDept ? [{ name: "dept", label: "部门" }] : [])] : [];
 
   return (
     <div className="panel">
       <div className="hint" style={{ marginBottom: 8 }}>
-        本体 v{data.version} 驱动 · {objs.length} 个对象 · 数据实时查源库、永不迁移
+        本体 v{data.version} · {objs.length} 个对象 · 这里只看字段从哪来，不取业务数据
       </div>
       <div className="gen-tabs">
         {objs.map((o) => (
@@ -647,19 +764,31 @@ function AppView({ data }: { data: any }) {
       </div>
       {obj && (
         <>
-          <div className="hint" style={{ margin: "2px 0 8px" }}>来源：{srcNote || "—"}（只读）</div>
+          <div className="hint" style={{ margin: "2px 0 8px" }}>
+            来源：{obj.sources.length ? obj.sources.map((s: any) => `${s.connection}.${s.table}`).join(" + ") : "手动 · 无源"}（只读，未取行）
+          </div>
           <div className="scrollbox" style={{ maxHeight: 320 }}>
             <table className="data">
-              <thead><tr>{cols.map((c) => <th key={c.name}>{c.label}</th>)}<th>来源</th></tr></thead>
+              <thead><tr><th>字段</th><th>类型</th><th>来自源列</th></tr></thead>
               <tbody>
-                {(rows ?? []).map((r, i) => (
-                  <tr key={i}>
-                    {cols.map((c) => <td key={c.name}>{r[c.name] ?? "—"}</td>)}
-                    <td><span className="tag gray">{r._src ?? (obj.sources.length > 1 ? obj.sources.map((s: any) => s.connection).join("+") : obj.sources[0]?.connection)}</span></td>
-                  </tr>
-                ))}
-                {rows === null && <tr><td colSpan={cols.length + 1} style={{ color: "var(--ink-3)" }}>查询中…</td></tr>}
-                {rows?.length === 0 && <tr><td colSpan={cols.length + 1} style={{ color: "var(--ink-3)" }}>无数据</td></tr>}
+                {obj.properties.map((p: any) => {
+                  const from = obj.sources
+                    .filter((s: any) => s.fields[p.name])
+                    .map((s: any) => `${s.connection}.${s.table}.${s.fields[p.name]}`);
+                  return (
+                    <tr key={p.name}>
+                      <td>{p.label ?? p.name}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-2)" }}>{p.type}</td>
+                      <td>
+                        {p.derived
+                          ? <span style={{ color: "var(--ink-3)" }}>派生：{p.derived}</span>
+                          : from.length
+                            ? from.map((x: string) => <span key={x} className="tag gray" style={{ marginRight: 4 }}>{x}</span>)
+                            : <span style={{ color: "var(--ink-3)" }}>—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -667,13 +796,13 @@ function AppView({ data }: { data: any }) {
       )}
       {tab === "问数 API" && (
         <>
-          <div className="hint" style={{ marginBottom: 8 }}>应用的对外只读接口——每问一个新问题，编译出的结构化查询命名保存在这里，实时查源库</div>
+          <div className="hint" style={{ marginBottom: 8 }}>问过的问题会在这里留下接口名。真正取数只发生在「对话」里，这里不拉行。</div>
           <ApiAssetList apis={data.apiAssets ?? []} />
         </>
       )}
       {tab === "血缘" && (
         <>
-          <div className="hint" style={{ marginBottom: 8 }}>每个字段的数据从哪来：对象字段 ← 源表列；「派生」字段按规则计算，不直接来自任何一列</div>
+          <div className="hint" style={{ marginBottom: 8 }}>每个字段从哪来：对象字段 ← 源表列。不展示任何一行业务数据。</div>
           {lineage.map((r, i) => (
             <div key={i} className="api-row" style={{ alignItems: "baseline" }}>
               <span className="ln-field">{r.label}</span>
@@ -717,7 +846,8 @@ function unionDrafts(drafts: any[]) {
       linkMeta[key] = { conn: d.connection, orig: l.name };
     }
   }
-  return { ont: { object_types, link_types }, meta, linkMeta };
+  const questions = drafts.flatMap((d) => d.ontology.questions ?? []).filter((q: string, i: number, a: string[]) => a.indexOf(q) === i);
+  return { ont: { object_types, link_types, questions }, meta, linkMeta };
 }
 
 // 合并对象名 → 所属候选对（用于「重新规划」入口的显隐）
@@ -730,14 +860,11 @@ const PAIR_OF: Record<string, string> = {
 export default function Workspace({
   mode, badges, data,
   connectFlow, connectActions, decisionOpen, onDecisionOpen,
-  actions, collapsed, onToggleCollapse,
-  drawer, onDrawer, generating, identityAsk,
+  actions, drawer, onDrawer, generating, identityAsk,
 }: {
   mode: "wizard" | "editor";
   badges: Badges;
   data: any;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
   drawer: null | "schema" | "code";
   onDrawer: (d: null | "schema" | "code") => void;
   connectFlow: any;
@@ -749,6 +876,7 @@ export default function Workspace({
   actions: WsActions;
 }) {
   const [selObj, setSelObj] = useState<string | null>(null);
+  const [qOpen, setQOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
   // 关系卡：{ from, to } = 连线后命名；{ name } = 点已有边编辑
   const [linkEdit, setLinkEdit] = useState<{ from?: string; to?: string; name?: string } | null>(null);
@@ -784,7 +912,7 @@ export default function Workspace({
   const stepMeta = STEP_META[phase] ?? STEP_META.connect;
   const head =
     mode === "editor"
-      ? { icon: ShareNetwork, color: "var(--accent)", title: `模型编辑器 · v${badges.version}${data.pending ? " · 有未发布改动" : ""}`, sub: data.pending ? "画布是工作副本——发布后才生效到新系统" : "本体已发布 · 可持续演进" }
+      ? { icon: ShareNetwork, color: "var(--accent)", title: `模型编辑器 · v${badges.version}${data.pending ? " · 有未发布改动" : ""}`, sub: data.pending ? "画布是工作副本——发布后才进映射" : "本体已发布 · 可持续演进" }
       : { icon: stepMeta.icon, color: "var(--accent)", title: `初始化建模 · ${PHASE_NAME[phase] ?? ""}`, sub: stepMeta.sub };
   const HeadIcon = head.icon;
 
@@ -829,18 +957,6 @@ export default function Workspace({
     (data.evidence ?? []).some((e: any) => pairKey(e) === PAIR_OF[selMeta.orig])
   );
 
-  // 收起态：右侧一条细栏，点击展开
-  if (collapsed) {
-    return (
-      <div className="ws-col always collapsed">
-        <button className="ws-rail" onClick={onToggleCollapse} title="展开工作台">
-          <CaretLeft size={14} />
-          <span className="ws-rail-label">工作台</span>
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="ws-col always">
       <div className="ws-head">
@@ -849,13 +965,12 @@ export default function Workspace({
           <div className="wt">{head.title}</div>
           <div className="ws">{head.sub}</div>
         </div>
-        <button className="ghost sm ws-collapse" onClick={onToggleCollapse} title="收起工作台"><CaretRight size={13} /></button>
       </div>
 
       <>
         {/* 工具条：加数据源导入 / 选表 / 手动新建——画布两种输入法并列 */}
           <div className="ws-toolbar">
-            <button className="ghost sm" onClick={actions.connect}>
+            <button className={`${data.schemas ? "ghost" : "primary"} sm`} onClick={actions.connect}>
               <Plus size={11} className="i-inline" />{data.schemas ? "添加数据源" : "连接数据源"}
             </button>
             <button
@@ -868,12 +983,10 @@ export default function Workspace({
             >
               <Plus size={11} className="i-inline" />新建对象
             </button>
+            <button className="ghost sm" onClick={() => setQOpen(true)} title="用业务问题验收这个本体">
+              测试题
+            </button>
             <span className="grow" />
-            {data.merged && (
-              <button className="ghost sm" onClick={() => actions.reopenDecisions()} title="清空全部裁决，重新逐对裁决">
-                <ArrowCounterClockwise size={11} className="i-inline" />全部重裁
-              </button>
-            )}
             {(data.history?.length ?? 0) > 1 && (
               <select
                 className="ver-rollback"
@@ -918,9 +1031,14 @@ export default function Workspace({
                 />
               ) : (
                 <div className="canvas-hint">
-                  <ShareNetwork size={22} weight="light" />
+                  <div className="ch-ic"><ShareNetwork size={22} weight="duotone" /></div>
                   <div className="ch-t">画布还是空的</div>
-                  <div className="ch-d">从上方工具条「连接数据源」导入，或「新建对象」手动搭建</div>
+                  <div className="ch-d">先连上源库让 AI 读表建模，或直接新建对象手动搭</div>
+                  <div className="ch-steps">
+                    <span className="ch-step"><b>1</b>连接数据源</span>
+                    <span className="ch-step"><b>2</b>勾选表</span>
+                    <span className="ch-step"><b>3</b>生成对象上画布</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -929,8 +1047,8 @@ export default function Workspace({
             {formActive && (
               <div className="cv-float cv-tl"><ConnectPanel flow={connectFlow} onTest={connectActions.test} onSave={connectActions.save} /></div>
             )}
-            {/* 浮动卡：裁决面板（底中；确认草稿后自动浮出直到发布，发布后由「全部重裁/重新规划」再开） */}
-            {mode === "wizard" && ev.length > 0 && ((!data.merged && badges.confirmed) || (decisionOpen && data.merged)) && (
+            {/* 裁决：与识别字段卡互斥，同一时间底中只一张 */}
+            {!identityAsk && mode === "wizard" && ev.length > 0 && ((!data.merged && badges.confirmed) || (decisionOpen && data.merged)) && (
               <div className="cv-float cv-bc">
                 <DecisionPanel
                   data={data}
@@ -941,20 +1059,13 @@ export default function Workspace({
               </div>
             )}
 
-            {/* 浮动卡：草稿预览编辑（左上；确认后才上画布） */}
-            {data.previewDrafts?.length > 0 && (
-              <div className="cv-float cv-tl">
-                <DraftPreview buckets={data.previewDrafts} onConfirm={(b) => actions.confirmPreviewDrafts(b)} onCancel={actions.cancelPreviewDrafts} />
-              </div>
-            )}
-
-            {/* 浮动卡：LLM 判断卡——生成草稿后需要人拍板的点（底中） */}
+            {/* 生成后至多一张抉择卡；答完自动进裁决/发布 */}
             {identityAsk && (
               <div className="cv-float cv-bc">
                 <div className="panel">
-                  <h3>草稿好了——有个判断需要你定</h3>
+                  <h3>有个判断需要你定</h3>
                   <div className="hint" style={{ lineHeight: 1.7 }}>
-                    candidate.idcard_no 和 employee.id_card 都是身份证格式。我准备把<b>身份证</b>设为「识别字段」——跨源认人、算交集率都靠它。
+                    对象已在画布上。candidate.idcard_no 和 employee.id_card 都是身份证格式——要把<b>身份证</b>设为「识别字段」吗？跨源认人、算交集率都靠它。
                   </div>
                   <div className="panel-actions" style={{ marginTop: 10, marginBottom: 0 }}>
                     <button className="sm" onClick={() => actions.confirmIdentity(true)}>可以，设为识别字段</button>
@@ -965,27 +1076,19 @@ export default function Workspace({
             )}
 
             {/* 浮动条：未发布改动——编辑→发布交互（画布=工作副本，应用=已发布版本） */}
-            {data.pending && !(decisionOpen && data.merged) && (
+            {data.pending && !(decisionOpen && data.merged) && !identityAsk && (
               <div className="cv-float cv-bc">
                 <div className="panel pub-bar">
-                  <span className="pb-t">画布有未发布改动 · 新系统还是 v{badges.version}</span>
+                  <span className="pb-dot" aria-hidden />
+                  <span className="pb-t">画布有未发布改动 · 已发布还是 v{badges.version}</span>
                   <button className="sm" onClick={actions.publishChanges}>发布 v{(badges.version ?? 0) + 1}</button>
                   <button className="ghost sm" onClick={actions.discardChanges}>放弃</button>
                 </div>
               </div>
             )}
 
-            {/* 浮动卡：阶段动作（左下，全部由状态驱动） */}
-            {!formActive && mode === "wizard" && data.drafts?.length > 0 && !badges.confirmed && (
-              <div className="cv-float cv-bl">
-                <div className="panel">
-                  <b style={{ fontSize: 13.5 }}>草稿已生成，等你确认</b>
-                  <div className="hint" style={{ margin: "4px 0 10px" }}>点画布上的对象核对语义、改字段；噪音对象在编辑卡里忽略（不进本体）。</div>
-                  <button className="sm" onClick={actions.confirmDrafts}>确认草稿</button>
-                </div>
-              </div>
-            )}
-            {!formActive && mode === "wizard" && badges.confirmed && ev.length === 0 && !data.merged && (
+            {/* 无候选对才出发布入口；evidence 必须已经算完（数组），避免请求中误闪 */}
+            {!formActive && !identityAsk && mode === "wizard" && badges.confirmed && Array.isArray(data.evidence) && data.evidence.length === 0 && !data.merged && (
               <div className="cv-float cv-bl"><PublishPanel data={data} actions={actions} /></div>
             )}
 
@@ -996,6 +1099,7 @@ export default function Workspace({
                   key={`${selMeta.orig}|${sel.label}|${sel.identity ?? ""}|${sel.properties.map((p: any) => `${p.name}:${p.label ?? ""}:${p.type}`).join(",")}`}
                   obj={{ ...sel, name: selMeta.orig }}
                   schemas={data.schemas ?? []}
+                  peers={Object.values<any>(canvasOnt?.object_types ?? {}).map((o) => ({ name: o.name, label: o.label }))}
                   onClose={() => setSelObj(null)}
                   onSave={(o) => actions.updateObject(selKind, selMeta.conn, selMeta.orig, o)}
                   onSaveYaml={(t) => actions.applyObjectYaml(selKind, selMeta.conn, selMeta.orig, t)}
@@ -1020,14 +1124,14 @@ export default function Workspace({
                   toLabel={objLabel(editingLink ? editingLink.to : linkEdit!.to)}
                   link={editingLink}
                   onClose={() => setLinkEdit(null)}
-                  onCreate={(name) => {
+                  onCreate={(name, extra) => {
                     const f = nodeMeta[linkEdit!.from!];
                     const t = nodeMeta[linkEdit!.to!];
-                    return actions.createLink({ conn: f.conn, name: f.orig }, { conn: t.conn, name: t.orig }, name);
+                    return actions.createLink({ conn: f.conn, name: f.orig }, { conn: t.conn, name: t.orig }, name, extra);
                   }}
-                  onRename={(next) => {
+                  onUpdate={(patch) => {
                     const m = linkMeta[linkEdit!.name!];
-                    return actions.renameLink(m?.conn ?? null, m?.orig ?? linkEdit!.name!, next);
+                    return actions.updateLink(m?.conn ?? null, m?.orig ?? linkEdit!.name!, patch);
                   }}
                   onDelete={() => {
                     const m = linkMeta[linkEdit!.name!];
@@ -1036,13 +1140,22 @@ export default function Workspace({
                 />
               </div>
             )}
+            {qOpen && (
+              <div className="cv-float cv-tl">
+                <QuestionsCard
+                  questions={canvasOnt?.questions ?? data.merged?.ontology.questions ?? []}
+                  onSave={actions.setQuestions}
+                  onClose={() => setQOpen(false)}
+                />
+              </div>
+            )}
           </div>
 
-          {/* 底部抽屉：表结构 / 新系统 */}
+          {/* 底部抽屉：表结构 / 映射 */}
           {drawer && (
             <div className="ws-drawer">
               <div className="wd-head">
-                <b>{drawer === "schema" ? "源库表结构" : "新系统"}</b>
+                <b>{drawer === "schema" ? "源库表结构" : "映射"}</b>
                 <button className="ghost sm" onClick={() => onDrawer(null)}><X size={12} /></button>
               </div>
               <div className="wd-body">
@@ -1081,7 +1194,7 @@ export default function Workspace({
               )}
               {data.merged && (
                 <button className={`ws-tab ${drawer === "code" ? "active" : ""}`} onClick={() => onDrawer(drawer === "code" ? null : "code")}>
-                  <Code size={12} className="i-inline" />新系统
+                  <TreeStructure size={12} className="i-inline" />映射
                 </button>
               )}
             </div>
