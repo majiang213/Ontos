@@ -37,7 +37,7 @@ flowchart LR
 
 本体的构成，阿松西翁·戈麦斯-佩雷斯（Asunción Gómez-Pérez）归为五样：概念、关系、函数、公理、实例。后来的实践把这张清单铺得更细，可以归成五类。
 
-**基本要素：类、属性、个体、同一性标准。** 类是对领域里事物的分类：人、设备、订单，各归为一种，每一种是一个类。属性附着于类，描述一类的个体长什么样——名称、颜色、注册日期，取值是字面值，一个数、一段文本、一个日期。个体是类所描述的具体事物：某一台设备，某一张订单。类是规定，个体是被规定的对象。同一性标准（identity criterion）是判定同一所凭的特征：凭什么说两条记录指向同一个东西。没有这条标准，同一性就无从判定。
+**基本要素：类、属性、个体、同一性标准。** 类是对领域里事物的分类：人、设备、订单，各归为一种，每一种是一个类。属性附着于类，描述一类的个体长什么样——名称、颜色、注册日期，取值是字面值，一个数、一段文本、一个日期。个体是类所描述的具体事物：某一台设备，某一张订单。类是规定，个体是被规定的对象。同一性标准（identity criterion）是判定同一所凭的特征：凭什么说两条记录指向同一个东西。没有这条标准，同一性就无从判定。能当识别字段的属性须能区分（不同个体不得同值）、能覆盖（每个个体都有值）、稳定（存续期间不改）。取值或是请求带来的已有键（出厂序列号、工号），或是插入时按属性上 `generate` 拼出的编号。源表主键 `pk` 只定位行，和识别字段可以不是同一个。
 
 **类间关系：关系、类等价、子类型、同形异义、部分与整体。** 关系把一类的个体连到另一类的个体上：设备「归属于」部门，每台设备连一个部门，一个部门可以连多台设备——从谁到谁是方向，允许连几个是基数。关系的取值是另一个体，这是它和属性的分界：属性的取值是字面值。类等价是两个名字指同一类。子类型是一类完全落在另一类里面：它的每个个体同时是上位类的个体，并继承上位类的全部属性——上位类就是这条关系的另一端，不是另一种关系。处理部分重叠时用的也是它：两类的公共部分抽出来立一个上位类，各自特有的留在原类，两个原类都成为它的子类型。同形异义是名字相同而所指不同：两个系统里都有「账户」，一个指资金账户，一个指登录账户，就不能并成一类。部分与整体是组成关系：发动机是车的一部分。它和子类型常被混淆，判别方法很简单：子类型的每个个体同时是上位类的个体，而一台发动机不是一台车，所以它是部分，不是子类型。
 
@@ -95,16 +95,16 @@ flowchart TD
     O --> Q["验收问题集 questions：本系统补充，供 3.2 裁决"]
     OT --> K["存在方式 kind：事物或事件"]
     OT --> AX["公理 axioms：必须成立的约束，写入时校验"]
-    OT --> P["属性 properties：源列属性 + 派生属性（when / eq / exists 三形式）"]
+    OT --> P["属性 properties：源列属性 + 派生属性（when 规则 / 布尔过滤）"]
     P --> ID["同一性标准 identity：默认配对键，某源可写 key"]
     P --> AC["动作 actions：前置 pre 落在属性上；效应 effect 改属性、写关系、生新对象"]
     AC -->|写入前校验| AX
-    AC --> PJ["写回 writeback：把变化写入源表"]
+    AC --> PJ["写回：按 sources 把变化写入源表"]
     PJ --> SO["源映射 sources：本系统补充，类型和属性对到连接、表、列"]
     P --> SO
 ```
 
-图 3：本体配置的结构与依赖。属性是对象类型的地基：同一性标准从属性里选，源映射把类型和属性对到连接、表、列；动作的前置落在属性上，效应改属性、写关系、生新对象，写回把变化写入源表——写去哪张表、哪一列，查源映射。标「本系统补充」的两项不在第 2 节的要素清单里；公理挂在对象类型下，写入前随前置一起校验；派生属性的计算分三种形式：谈源（`when`）、谈本类属性（`eq`）、看另一端是否存在（`exists`）。
+图 3：本体配置的结构与依赖。属性是对象类型的地基：同一性标准从属性里选，源映射把类型和属性对到连接、表、列；动作的前置落在属性上，效应改属性、写关系、生新对象，写回把变化写入源表——写去哪张表、哪一列，查源映射。标「本系统补充」的两项不在第 2 节的要素清单里；公理挂在对象类型下，写入前随前置一起校验；派生属性按形状分两种：`when` 规则谈源，布尔派生就是一条过滤。
 
 ### 3.2 跨系统本体对齐
 
@@ -166,7 +166,7 @@ flowchart TD
 上面那一对，人选阶段之后，配置里只留一个设备类。同一份已发布配置里还有部门类，以及设备到部门的关系；它们来自另一次对齐。
 
 ```yaml
-# 已发布的本体配置。键以附录 B 为准。候选对、交集率不在这里。
+# 已发布配置的对齐切片。键以附录 B 为准。完整文本见附录 C。候选对、交集率不在这里。
 object_types:
   equipment:
     description: 设备              # 给人 / Agent 看；引擎不读
@@ -182,15 +182,18 @@ object_types:
       dept:
         type: string
         description: 所属部门编号  # 源列属性；只在设备源有映射
+      mark:
+        type: enum
+        values: [scrapped]
+        description: 台账标记      # 源列属性。设备表 status 列映射到这里，不是派生属性 status
       status:
         type: enum
         description: 阶段
         values: [in_transit, in_service, scrapped]   # 只列出有规则能算出的值
         derived:                   # 派生：不对应源列。规则里写到的源，引擎才访问
           - when:
-              device:              # 源键下也可以带列条件
-                column: status     # 设备源有行，且 status 列为 scrapped
-                eq: scrapped
+              device:
+                mark: scrapped     # 设备源有行，且已映射属性 mark 为 scrapped
             value: scrapped
           - when:
               purchase: true       # 采购源必须有行；过滤时本次要的列从这里取
@@ -199,7 +202,7 @@ object_types:
           - when:
               device: true         # 设备源必须有行。不写 purchase：这条规则不查采购源
             value: in_service
-    sources:                       # 键是源条目名。when / writeback 用这个键，不用连接名。同名属性多源都有时，排在前面的源优先
+    sources:                       # 键是源条目名。when 和写回都用这个键，不用连接名。同名属性多源都有时，排在前面的源优先
       purchase:
         connection: purchase_sys
         table: po_item
@@ -215,6 +218,7 @@ object_types:
           name: name
           serial_no: serial_no
           dept: dept_id
+          mark: status             # 设备表 status 列；本体属性 status 是派生，不进 fields
     axioms:
       status_one:
         description: 同一时刻一个阶段
@@ -225,17 +229,14 @@ object_types:
         description: 验收入库
         pre:
           status: in_transit       # 可引用派生属性；引擎先按 when 求值
+          $link:
+            converted: false
         effect:
-          link: converted          # 存在上建立该关系。阶段变化写在关系的 transition 上
-        writeback:
-          - source: device         # 本类已声明的源条目。不重复 connection / table
-            mode: save
-            by: identity
-            fields: [name, serial_no]  # 插入设备源一行之后，device:true 成立
+          - link: converted        # 转化没有另一端；作用在请求点名的那台设备上
   department:
     description: 部门
     kind: thing
-    identity: dept_id
+    identity: dept_id                 # 部门编号
     properties:
       name:
         type: string
@@ -290,7 +291,7 @@ link_types:
 
 | 要素 | 含义 | 配置字段 | 示例 |
 |---|---|---|---|
-| **动作** | 该类个体允许发生的变化，以及如何写入源表 | `actions`：`pre`、`effect`、`writeback` | 调拨一台在役设备。`pre` 要求阶段为在役；`effect` 更改所属部门；`writeback` 写入设备表 |
+| **动作** | 该类个体允许发生的变化，以及如何写入源表 | `actions`：`pre`、`effect` | 调拨一台在役设备。`pre` 要求阶段为在役；`effect` 更改所属部门；写回按 `sources` 推出 |
 | **公理** | 写入前必须成立的约束 | `axioms`：`type`、`property` | 同一设备同一时刻只有一个阶段。`type: mutex`，`property: status` |
 
 第三步判定这两个**类**之间的**关系**为**生命周期**之后，配置里已经有一条**动作**。这条**动作**只完成阶段之间的转化：效应是个体从前一阶段转到后一阶段，写回对应的源表。
@@ -303,18 +304,18 @@ link_types:
 flowchart LR
     E[类：equipment]
     E --> AX["公理 mutex status"]
-    E --> AC["动作 transfer：pre / effect / writeback"]
+    E --> AC["动作 transfer：pre / effect / write"]
 ```
 
 图 5：对齐之后仍须写入**类**上的**公理**和**动作**。
 
 ## 4. 本体与引擎
 
-引擎加载的是已经发布的那一版配置，例如 3.2 节末尾的 `equipment`。查询和动作都针对这份配置，不针对某张源表。未发布的草稿引擎不加载。语言模型只参与写出配置，算完 `derived`、执行 `writeback` 时都不在场。
+引擎加载的是已经发布的那一版配置，例如 3.2 节末尾的 `equipment`。查询和动作都针对这份配置，不针对某张源表。未发布的草稿引擎不加载。语言模型只在两处出现：写出配置，把自然语言编成查询或写入请求。执行 `derived`、写回时都不在场。模型给建议，不定案，不算交集率。人不发话，模型不自己再生成、不自己写库。请求里的类名、属性名、关系名、动作名对不上已发布配置，引擎拒绝。
 
 一次查询给出**类**、过滤条件和要展开的**关系**。引擎取出该类的 `sources`、`identity`、`derived` 和相关 `link_types`，按**源映射**下推到源系统，用**同一性标准**所指定的**属性**作为键到其他源中查询，再算派生值。
 
-一次动作给出**类**、**动作**名和要作用的个体。引擎取出对应的 `actions` 条目，用 `pre` 和 `axioms` 校验，按 `effect` 改变存在，按 `writeback` 写源表。配置里没有这条**动作**，引擎拒绝。引擎不补写**公理**，也不发明**动作**。
+一次动作给出**类**、**动作**名和要作用的个体。引擎取出对应的 `actions` 条目，用 `pre` 和 `axioms` 校验，按 `effect` 改变存在，再按 `sources` 写源表。配置里没有这条**动作**，引擎拒绝。引擎不补写**公理**，也不发明**动作**。
 
 ```mermaid
 flowchart LR
@@ -356,35 +357,35 @@ flowchart LR
 
 ```json
 {
-  "object": "Class",
-  "identity": "value",
-  "properties": ["field"],
+  "object": "Class",                 // 从哪个类查起。只根节点写
+  "identity": "value",               // 可选。认准一个体：该类识别字段的值
+  "properties": ["field"],           // 本类要返回的属性
   "filter": {
-    "field": "value",
+    "field": "value",                // 属性名配字面值 = 等值
     "field2": {
       "gte": "2026-01-01"            // 运算符：eq / ne / lt / lte / gt / gte / in / contains
     },
     "$link": {
-      "linkName": true               // 关系条件收在 $link 里：true / false，或对象带目标侧条件
+      "linkName": true               // 关系条件：true / false，或对象=目标侧过滤
     }
   },
   "order": {
-    "field": "desc"
+    "field": "desc"                  // 可选。按该属性排序
   },
-  "limit": 20,
-  "aggregate": {
+  "limit": 20,                       // 可选。最多返回多少条
+  "aggregate": {                     // 可选。有它就不返回个体行，只返回统计
     "group_by": ["field"],
     "metrics": [
       { "count": "*" },
       { "avg": "field" }
     ]
   },
-  "expand": [
+  "expand": [                        // 按已声明关系进入目标类
     {
-      "relation": "linkName",
+      "relation": "linkName",        // link_types 里的名字，或 inverse
       "properties": ["field"],
-      "filter": {},
-      "expand": []
+      "filter": {},                  // 筛的是展开到的那个类
+      "expand": []                   // 可再往下套
     }
   ]
 }
@@ -395,14 +396,14 @@ flowchart LR
 ```json
 {
   "object": "equipment",              // 从设备查起
-  "properties": ["name"],             // 要返回：名称
+  "properties": ["name"],             // 要返回：设备名称
   "filter": {
-    "status": "in_service"            // 筛：只要在役的
+    "status": "in_service"            // 派生属性：只要阶段=在役
   },
-  "expand": [                         // 连带：按 belongs_to 读部门
+  "expand": [
     {
-      "relation": "belongs_to",
-      "properties": ["name"]
+      "relation": "belongs_to",       // 设备 → 部门
+      "properties": ["name"]          // 要返回：部门名称
     }
   ]
 }
@@ -440,7 +441,7 @@ flowchart LR
 
 **名字对不上就拒绝。** 配置中没有该**类**，或 `properties`、`filter`、`expand` 指向未定义的**属性**、**关系**，引擎拒绝，不猜。
 
-**根上给 `identity` 是另一种查法。** 不给 `filter` 而给 `"identity": "SN-40217"`，意思从筛一批变成认准一台——这里是某台设备的出厂序列号。个体的引用与识别在第七节展开。
+**根上给 `identity` 是另一种查法。** 不给 `filter` 而给 `"identity": "SN-40217"`，意思从筛一批变成认准一台——这里是某台设备的出厂序列号。
 
 ### 5.2 过滤
 
@@ -458,19 +459,19 @@ flowchart LR
 
 ```json
 {
-  "status": "in_service",             // 属性名配字面值：等值
+  "status": "in_service",             // 等值。写成 { "eq": "in_service" } 一样
   "serial_no": {
-    "contains": "SN-4"                // 属性名配运算符
+    "contains": "SN-4"                // 序列号包含这段文字
   },
   "dept": {
-    "in": ["D07", "D08"]
+    "in": ["D07", "D08"]              // 部门编号是这两个之一
   }
 }
 ```
 
-两个属性相比，右端写 `{ "property": "另一属性名" }`。履历的生效日不得晚于失效日：`{ "valid_from": { "lte": { "property": "valid_to" } } }`。
+两个属性相比，被比较的那个写成 `{ "property": "另一属性名" }`。履历的生效日不得晚于失效日：`{ "valid_from": { "lte": { "property": "valid_to" } } }`。
 
-派生属性可以出现在字段条件里。它没有对应的源列，引擎按 5.4 节的形式翻译，不按这个名字去表上找列。
+派生属性可以出现在字段条件里。它没有对应的源列，引擎按 5.4 节的形状翻译，不按这个名字去表上找列。
 
 **关系条件。** 关系没有值可比，只有连没连上、连的是谁。一律收在 `$link` 里。
 
@@ -481,9 +482,9 @@ flowchart LR
   "$link": {
     "belongs_to": true,               // 这条关系必须成立
     "converted": false,               // 不存在这样的关联（转化尚未发生）
-    "maintained_by": {                // 存在一个满足条件的关联个体
+    "covered_by": {                   // 存在一张到期日不早于该日的保修卡
       "expiry": {
-        "gte": "2026-01-01"
+        "gte": "2026-01-01"           // 目标类（保修卡）上的过滤
       }
     }
   }
@@ -503,7 +504,7 @@ flowchart LR
 | 接口 | 返回 | 不返回 |
 |---|---|---|
 | 列出**类** | 每个**类**的 `name`、`description` | **属性**、**关系**、**源映射** |
-| 读取一个**类** | 该**类**的**属性**（`name`、`description`、`type`；枚举附 `values`，派生附形式）；从该类出发的**关系**（`name`、`description`、`to`）；**动作**（`name`、`description`、`pre`） | `sources`、`pk`、`writeback`、`axioms` |
+| 读取一个**类** | 该**类**的**属性**（`name`、`description`、`type`；枚举附 `values`，派生附形式）；从该类出发的**关系**（`name`、`description`、`to`）；**动作**（`name`、`description`、`pre`） | `sources`、`pk`、`axioms` |
 | 检索（**类**很多时） | 与用户语句相关的**类**名、**关系**名 | 整份配置 |
 
 用户说「在役设备的名称和所属部门」时：先列出**类**（或检索），得到 `equipment` 与 `department`；再读取 `equipment`，见到 `name`、`status`（可取值 `in_transit`、`in_service`、`scrapped`）以及 `belongs_to` 指向 `department`；再读取 `department`，见到 `name`；然后写出请求 JSON。对 `to` 所指的**类**再读取一次，即可继续嵌套展开。
@@ -512,17 +513,18 @@ flowchart LR
 
 **引擎先定列，再下推。** 本次需要哪些**属性**，按**源映射**确定它们落在哪些连接、哪些表、哪些列。未点名的列不下推。过滤也一样下推：条件写进对该源的查询，在库内完成，而不是先取出行再在引擎里丢弃。
 
-#### 派生属性的三种形式
+#### 派生属性的两种形状
 
-派生属性不对应源列，值由定义算出。计算定义有三种形式，按它谈论的对象分。
+派生属性不对应源列，值由定义算出。定义按形状区分，没有第三种专用键。
 
-**`when`：谈源。** 按个体出现在哪些源、源列取什么值来定值，从上到下取第一条命中。`status` 就是（摘自 3.2 的配置，只留规则部分）：
+**列表：`when` 规则，谈源。** 按个体出现在哪些源、已映射属性取什么值来定值，从上到下取第一条命中。`when` 的键是源条目名。值为 `true` 或 `false` 时，只谈有没有行。值为一条过滤时，该源必须有行，且已映射属性满足这条过滤。过滤里写属性名，不写列名。`status` 就是（摘自 3.2 的配置，只留规则部分）：
 
 ```yaml
       status:
         derived:
           - when:
-              device: { column: status, eq: scrapped }   # 设备源有行，且该列等于报废
+              device:
+                mark: scrapped   # 设备源有行，且 mark 为 scrapped
             value: scrapped
           - when:
               purchase: true     # 采购源必须有行
@@ -533,27 +535,29 @@ flowchart LR
             value: in_service
 ```
 
-**`eq` 等比较符：谈本类的另一个属性。** 点属性的写法和过滤相同：`{ property: 名, from: current }`。形如 `derived: { eq: { property: status, from: current, value: in_service } }`。被比较的属性本身可以是派生的，翻译时一层接一层退到源列为止。它与直接过滤该属性等价——上例等价于 `{ "status": "in_service" }`——所以 3.2 的配置没有单独建它。
+`mark` 是源列属性，映射到设备表的 `status` 列。本体属性 `status` 是派生的，不进 `fields`。
 
-**`exists`：看另一端是否存在。** 按一条**关系**进入目标类，有满足 `where` 条件的个体即为真。设备是否在保，取决于维保记录里有没有到期日不早于今天的行：
+**对象：一条过滤，取布尔。** 与 5.2 同形，含 `$link`。当前个体满足这条过滤则为真。设备是否在保，取决于保修卡里有没有到期日不早于今天的行：
 
 ```yaml
       in_warranty:
         type: boolean
         description: 是否在保
-        derived:                       # exists：看另一端是否存在
-          exists:
-            relation: maintained_by    # equipment → 维保记录
-            where: { expiry: { gte: today } }   # today 是引擎内置的当前日期
+        derived:                       # 布尔派生=一条过滤。满足则为真
+          $link:
+            covered_by:                # 设备出发：有没有保修卡
+              expiry: { gte: now/d }   # 到期日不早于今天 0 点
 ```
+
+任职是否在任、维修是否未结束，同样是一条过滤：`valid_from` / `valid_to` 覆盖今天，或 `ended_at` 为空。失效日没有值，比较时按至今。没有单独的 `eq` 形式，也没有 `exists` / `where`。
 
 #### 派生属性的过滤与返回
 
 派生属性在请求里有两种用法，引擎的活不一样。
 
-**第一种用法是按它过滤。** 请求在 `filter` 里把这个**派生属性**写成条件，如 `{ "status": "in_transit" }`，意思是只留阶段算出来等于在途的设备。翻译按形式走：`when` 形式先找 `value` 命中过滤值的那条规则，再按它的 `when` 逐键翻译——`true` 是该源必须有行，本次要的列从这里取；`false` 是该源必须没有行，只取配对键列用来排除；键下带列条件，是该列等于给定值才算有行；没写进 `when` 的源，这条规则不访问。`eq` 形式退成所比较属性的条件，属性派生就接力。`exists` 形式退成目标类上的存在性条件：目标类里满足 `where` 的个体，其键收回来，作为本类配对键的包含或排除条件下推——`filter` 写 `{ "in_warranty": false }`，查到的就是过保设备。`$link` 里的关系条件按同一方式翻译，只是目标侧条件直接写在请求里，不经派生定义。
+**第一种用法是按它过滤。** 请求在 `filter` 里把这个**派生属性**写成条件，如 `{ "status": "in_transit" }`，意思是只留阶段算出来等于在途的设备。翻译按形状走。`when` 列表先找 `value` 命中过滤值的那条规则，再按它的 `when` 逐键翻译——`true` 是该源必须有行，本次要的列从这里取；`false` 是该源必须没有行，只取配对键列用来排除；键下带过滤，是已映射属性满足该过滤才算有行；没写进 `when` 的源，这条规则不访问。布尔派生的定义本身就是一条过滤，按 5.2 翻译：属性条件退到源列，属性仍是派生就接力；`$link` 退成目标类上的存在性条件。`filter` 写 `{ "in_warranty": false }`，查到的就是过保设备。请求里直接写的 `$link` 按同一方式翻译，只是目标侧条件写在请求里，不经派生定义。
 
-**第二种用法是只返回、不过滤。** 请求只在 `properties` 里点这个**派生属性**，如 `"properties": ["status"]`，意思是每台设备都算出阶段给人看，不筛掉谁。`when` 形式的各条规则里出现过的源都访问，用**同一性标准**对齐后按规则从上到下取第一条命中；其余形式在取回的行上按定义现算。都算出来供展示，不再承担筛选。
+**第二种用法是只返回、不过滤。** 请求只在 `properties` 里点这个**派生属性**，如 `"properties": ["status"]`，意思是每台设备都算出阶段给人看，不筛掉谁。`when` 列表里出现过的源都访问，用**同一性标准**对齐后按规则从上到下取第一条命中；布尔派生在取回的行上按那条过滤现算。都算出来供展示，不再承担筛选。
 
 #### 多源的对齐
 
@@ -566,23 +570,31 @@ flowchart LR
 ```yaml
 object_types:
   assignment:
-    description: 履历
+    description: 履历                # 设备在某段时间属于某部门。不是设备，不是部门
     kind: event                    # 发生过即确定，不经历阶段
-    identity: id
+    identity: asgn_no              # 履历编号；插入时 generate
     properties:
-      id: { type: string, description: 履历编号 }
-      serial_no: { type: string, description: 设备序列号 }
-      dept_id: { type: string, description: 部门编号 }
+      asgn_no:
+        type: string
+        description: 履历编号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      serial_no: { type: string, description: 设备序列号 }   # 用来对上设备
+      dept_id: { type: string, description: 部门编号 }      # 用来对上部门
       valid_from: { type: date, description: 生效日 }
-      valid_to: { type: date, description: 失效日 }
+      valid_to: { type: date, description: 失效日 }         # 空=至今
     sources:
       history:
         connection: device_sys
         table: assignment
         pk: id
         fields:
-          id: id
-          serial_no: sn
+          asgn_no: asgn_no
+          serial_no: sn            # 属性 serial_no 对照列 sn
           dept_id: dept_id
           valid_from: valid_from
           valid_to: valid_to
@@ -591,10 +603,10 @@ link_types:
     description: 哪台设备
     from: assignment
     to: equipment
-    inverse: assignments           # 反向名：从设备查履历
+    inverse: assignments           # 从设备查履历时写这个名字
     card: N:1
     match:
-      - { from: serial_no, to: serial_no }
+      - { from: serial_no, to: serial_no }   # 履历.序列号 = 设备.序列号
   of_department:
     description: 哪个部门
     from: assignment
@@ -610,22 +622,22 @@ link_types:
 ```json
 {
   "object": "equipment",
-  "identity": "SN-40217",             // 认准这一台
+  "identity": "SN-40217",             // 认准这一台设备
   "expand": [
     {
-      "relation": "assignments",      // of_equipment 的反向名：设备 → 履历
+      "relation": "assignments",      // 设备 → 履历
       "filter": {
         "valid_from": {
-          "lte": "2025-03-01"
+          "lte": "2025-03-01"         // 生效日不晚于这天
         },
         "valid_to": {
-          "gte": "2025-03-01"         // 区间覆盖这一天
+          "gte": "2025-03-01"         // 失效日不早于这天；空按至今
         }
       },
       "expand": [
         {
-          "relation": "of_department",
-          "properties": ["name"]
+          "relation": "of_department", // 履历 → 部门
+          "properties": ["name"]       // 只要部门名称
         }
       ]
     }
@@ -633,13 +645,13 @@ link_types:
 }
 ```
 
-`assignments` 是履历连向设备那条关系的反向名。区间右端为空表示至今，比较时按至今处理。反过来问「三月里属于某部门的所有设备」：根换成部门，反向展开到履历，过滤不变。
+`assignments` 是履历连向设备那条关系的反向名。失效日没有值表示至今，比较时按至今处理。反过来问「三月里属于某部门的所有设备」：根换成部门，反向展开到履历，过滤不变。
 
 #### 一次完整求值
 
 把 5.1 那份请求对照 3.2 那份已发布配置走一遍：在役的设备、设备名称、所属部门的名称。请求里没有表名，只有配置里的名字。引擎逐项翻译：
 
-- `filter.status` 是**派生属性**。取值 `in_service` 命中 `device: true` 那条，`when` 只写了设备源，只查设备源。采购源往往也有同一序列号的行，这条规则不看，这些个体要保留。报废规则排在在役前面：设备源有行且状态为报废的个体先命中报废，不会落进在役。
+- `filter.status` 是**派生属性**。取值 `in_service` 命中 `device: true` 那条，`when` 只写了设备源，只查设备源。采购源往往也有同一序列号的行，这条规则不看，这些个体要保留。报废规则排在在役前面：设备源有行且 `mark` 为报废的个体先命中报废，不会落进在役。
 - `name` 在两个源都有映射：同一个体对齐之后，按 `sources` 的声明顺序取，排在前面的源优先。
 - `expand.belongs_to` 按 `match` 把 `equipment.dept` 对到 `department.dept_id`，经 `fields` 落到列，再读部门的 `name`。
 
@@ -651,7 +663,7 @@ link_types:
 flowchart TD
     Q["请求给出类、要返回的属性、过滤条件、要展开的关系"] --> N["收齐本次涉及的属性"]
     N --> M["按源映射对到连接、表、列；未对上的列不查"]
-    M --> W["过滤：源列属性对该列加条件；派生属性按形式翻译：when 查源、eq 接力、exists 查目标类"]
+    M --> W["过滤：源列属性对该列加条件；派生属性按形状翻译：when 查源，布尔过滤按 5.2 下推"]
     W --> C{"这些列是否属于同一个类"}
     C -->|是| J1["同一类、多张表：用同一性标准指定的属性对齐"]
     C -->|否| J2["不同类：用所展开关系的 match 对齐"]
@@ -707,26 +719,26 @@ flowchart TD
 
 引擎按请求里的 `identity` 到该类各个源去读。读的结果有两种。一种是至少有一个源有行，个体当前的属性值和派生值可以算出来。一种是各源都没有行，个体尚不存在——这是合法状态，不是引擎故障。前置里的 `$link`、效应里认个体的过滤若点到别的类，第 3 步把那些已有个体一并读出，供前置核对、供效应改旧值。读完之后，按 5.2 节的过滤对前置求值：同一套**属性**名，同一组运算符，同一个 `$link`。任一条件不成立，整次写入拒绝，不投影任何源。
 
-前置检查的是**当前**存在。请求打算写成什么，不会自动变成前置里的条件。参数要参与核对，必须写进 `$request`，或出现在某个条件的右端并标明 `from: request`。
+前置检查的是**当前**存在。请求打算写成什么，不会自动变成前置里的条件。参数要参与核对，必须写进 `$request`，或在比较里写明 `from: request`。
 
-点属性的写法两端相同：`{ property: 名, from: current | request }`。`from: current` 是刚读出来的当前个体。`from: request` 是写入请求 `request` 里的参数。省略 `from`，等于 `current`。直挂在 `pre` 下的键，等于 `{ property: 该键, from: current }`。写在 `$request` 下的键，等于 `{ property: 该键, from: request }`。
+点另一个属性时，写法都是 `{ property: 名, from: current | request }`。`from: current` 是本条过滤或 `update` 正在谈的那个体。`from: request` 是写入请求 `request` 里的参数。请求顶上的识别值、动作名、类名写成 `{ from: identity }`、`{ from: action }`、`{ from: object }`。插入时生编号写成 `{ from: generated }`。没有 `from: root`，没有 `$root`。省略 `from`，等于 `current`。直挂在 `pre` 下的键，等于刚读到的该属性。写在 `$request` 下的键，等于请求里的该参数。
 
-**派生属性。** 验收要求这台设备现在处于在途。左端直挂 `status`，比的是刚读出来的当前个体，不是请求参数。右端 `in_transit` 是字面值。请求里通常没有 `status`：阶段是派生的，不能当参数传来。
+**派生属性。** 验收要求这台设备现在处于在途。`pre` 上直挂 `status`，比的是刚读出来的阶段，不是请求参数。要相等的值是 `in_transit`。请求里通常没有 `status`：阶段是派生的，不能当参数传来。
 
 ```yaml
         pre:
-          status: in_transit    # 左：from current；右：常量。按 5.4 的 when 求值
+          status: in_transit    # 刚读到的阶段必须是在途。按 5.4 的 when 求值
 ```
 
-引擎按 5.4 节的 `when` 对这台已读到的设备求值。采购源有行、设备源无行，条件成立。已经在役的设备走这条动作，读出来的阶段是 `in_service`，和 `in_transit` 对不上，前置失败。报废同样比刚读到的阶段，只是右端换成 `in_service`。已报废的个体命中更靠前的报废规则，不会落进 `in_service`，因此也过不了报废自己的前置。
+引擎按 5.4 节的 `when` 对这台已读到的设备求值。采购源有行、设备源无行，条件成立。已经在役的设备走这条动作，读出来的阶段是 `in_service`，和 `in_transit` 对不上，前置失败。报废同样比刚读到的阶段，只是要相等的值换成 `in_service`。已报废的个体命中更靠前的报废规则，不会落进 `in_service`，因此也过不了报废自己的前置。
 
-**跟谁比。** 一条字段条件就是 `pre` 里的一个键值对。键是左端，值是右端。右端就写在这个值上，没有另开一份配置。左端看这个键写在哪一层：直挂在 `pre` 下，是刚读到的属性；写在 `$request` 下，是请求参数。
+**跟谁比。** 一条字段条件就是 `pre` 里的一个键值对。键是拿来比的属性。值是拿来比的对象：一个字面量，或另一个属性，或请求参数。值就写在这个键下面，没有另开一份配置。键直挂在 `pre` 下，比的是刚读到的属性；写在 `$request` 下，比的是请求参数。
 
 跟字面值比。只允许从编号为 `D07` 的部门调出：
 
 ```yaml
         pre:
-          dept: D07             # 左：刚读到的部门；右：常量
+          dept: D07             # 刚读到的部门必须是 D07
 ```
 
 `dept` 来自设备源读到的 `dept_id`。它不是请求参数。当前部门不是 `D07`，前置失败。
@@ -736,55 +748,55 @@ flowchart TD
 ```yaml
         pre:
           valid_from: { lte: { property: valid_to, from: current } }
-          # 左：刚读到的生效日；右：刚读到的失效日。不是再查一次
+          # 刚读到的生效日 ≤ 刚读到的失效日。不是再查一次
 ```
 
-`{ property: valid_to, from: current }` 点的是同一个体上另一次读取里已经拿到的字段。右端如果写成 `"2026-01-01"`，比的就是这个固定日期。这里要比的是另一栏的值，所以用 `property` 点名，并用 `from: current` 标明来源。
+`{ property: valid_to, from: current }` 点的是同一个体上已经读到的失效日。如果写成 `"2026-01-01"`，比的就是这个固定日期。这里要比的是另一栏的值，所以用 `property` 点名，并用 `from: current` 标明来自刚读到的个体。
 
-跟请求参数比。右端同样写 `property`，只是 `from: request`。调拨的新部门不得与当前相同：
+跟请求参数比。被比较的那个同样写 `property`，只是 `from: request`。调拨的新部门不得与当前相同：
 
 ```yaml
         pre:
           status: in_service
           dept: { ne: { property: dept, from: request } }
-          # 左：刚读到的部门；右：请求 request.dept
+          # 刚读到的部门 ≠ 请求里的 request.dept
 ```
 
 ```json
 {
-  "action": "transfer",
-  "object": "equipment",
-  "identity": "SN-40217",
+  "action": "transfer",               // 做「调拨」
+  "object": "equipment",              // 对设备做
+  "identity": "SN-40217",             // 哪台设备（序列号）
   "request": {
-    "dept": "D07"                     // 右端 from: request 取这里
+    "dept": "D07"                     // 要调去的部门；前置和效应都取这里
   }
 }
 ```
 
-左端是读出来的当前部门。右端是请求里要调去的那个 `D07`。当前已经是 `D07`，请求却再写一次 `D07`，前置失败。
+比的是刚读到的当前部门，和请求里要调去的 `D07`。当前已经是 `D07`，请求却再写一次 `D07`，前置失败。
 
-两端都是请求参数。键写进 `$request`，右端也写 `from: request`。两边都不读源。登记时请求带了生效日和失效日，要求参数里的生效日不晚于参数里的失效日：
+两个都是请求参数。键写进 `$request`，被比较的那个也写 `from: request`。两边都不读源。登记时请求带了生效日和失效日，要求参数里的生效日不晚于参数里的失效日：
 
 ```yaml
         pre:
           $exists: false
           $request:
             valid_from: { lte: { property: valid_to, from: request } }
-            # 左、右都是请求参数，不读源
+            # request.valid_from ≤ request.valid_to，不读源
 ```
 
 ```json
 {
   "action": "register",
-  "identity": "SN-90001",
+  "identity": "SN-90001",              // 新序列号
   "request": {
-    "valid_from": "2026-03-01",        // 左端 $request.valid_from
-    "valid_to": "2026-01-01"           // 右端 from: request
+    "valid_from": "2026-03-01",        // 请求里的生效日
+    "valid_to": "2026-01-01"           // 请求里的失效日。生效晚于失效，前置失败
   }
 }
 ```
 
-左端是请求里的 `2026-03-01`。右端是请求里的 `2026-01-01`。生效日晚于失效日，前置失败。`{ property: valid_to, from: current }` 和 `{ property: valid_to, from: request }` 不是同一个东西：前者是读出来的属性，后者是请求参数。
+拿请求里的 `2026-03-01` 去比请求里的 `2026-01-01`。生效日晚于失效日，前置失败。`{ property: valid_to, from: current }` 和 `{ property: valid_to, from: request }` 不是同一个东西：前者是读出来的属性，后者是请求参数。
 
 **参数必须能认到另一个体。** 调拨的目标部门必须是已经存在的部门。引擎把 `request.dept` 当作部门类的同一性标准再读一次。读不到这个部门，前置失败：
 
@@ -829,7 +841,7 @@ flowchart TD
 
 引擎先读这台设备，算出阶段，取出当前 `dept`，再读目标部门是否存在，再看 `belongs_to` 是否成立。有一条失败就整次拒绝，后面的效应和写回都不执行。
 
-**个体尚不存在。** 请求里的 `identity` 在各源都对不上行，读的结果是空。左端没有当前值。任何字段条件——`status: in_transit`、`dept: D07`、`dept: { ne: { property: dept, from: request } }`——左端落空，都不成立。`$link` 同样不成立：没有个体，就没有关系。
+**个体尚不存在。** 请求里的 `identity` 在各源都对不上行，读的结果是空。没有当前值可比。任何字段条件——`status: in_transit`、`dept: D07`、`dept: { ne: { property: dept, from: request } }`——都比不成，不成立。`$link` 同样不成立：没有个体，就没有关系。
 
 因此纯新增不能复用验收、调拨那种前置。它只能声明「现在必须没有这个体」，以及核对请求参数：
 
@@ -841,29 +853,29 @@ flowchart TD
           $request:
             dept: { object: department }    # 带了部门编号，必须能认到
         effect:
-          update: [name, dept]              # 名称、部门来自 request
-        writeback:
-          - source: device
-            mode: save                      # 按配对键找不到行，走插入
-            by: identity
-            fields: [name, serial_no, dept] # serial_no 取自请求的 identity
+          - create:
+              object: equipment             # 新生一台设备
+              properties:
+                name: { from: request }     # 名称=request.name
+                dept: { from: request }     # 部门=request.dept
+                serial_no: { from: identity }  # 序列号=请求顶上的 identity
 ```
 
 ```json
 {
   "action": "register",
   "object": "equipment",
-  "identity": "SN-90001",              // 新序列号，各源尚无此行
+  "identity": "SN-90001",              // 新序列号，各源尚无此行；也是 serial_no 的值
   "request": {
-    "name": "新机床",
-    "dept": "D07"
+    "name": "新机床",                   // → create.properties.name
+    "dept": "D07"                      // → create.properties.dept
   }
 }
 ```
 
-`$exists: false` 成立之后，针对当前个体的字段条件不再有左端可比。名称、部门来自请求 `request`。序列号来自请求的 `identity`。写回 `save` 按配对键找不到行，走插入。
+`$exists: false` 成立之后，没有当前个体上的属性可比。个体尚不存在，效应用 `create`，不用 `update`。名称、部门来自请求。序列号 `{ from: identity }`，取自请求里的 `identity`。第 3 步没有行，写回按 `create` 插入设备源。
 
-`$exists: true` 表示至少一个源已经有行。调拨、验收、报废都隐含这个前提：它们的字段条件在空个体上会自己失败。登记必须显式写 `$exists: false`。否则前置为空、写回却是 `save`，已有个体会被改掉。
+`$exists: true` 表示至少一个源已经有行。调拨、验收、报废都隐含这个前提：它们的字段条件在空个体上会自己失败。登记必须显式写 `$exists: false`。否则已有个体会被当成新生去插。
 
 配置里没有写前置，视为没有额外条件，只靠后面的公理挡。
 
@@ -871,209 +883,205 @@ flowchart TD
 
 ### 6.2 效应
 
-效应写存在上变成了什么。它不写表名，也不写 SQL。前置通过之后，引擎只按这里列出的变化理解这次动作。配置里没有的效应写法，引擎不认。
+效应写存在上变成了什么。前置问「现在过不过关」。效应问「过关之后，世界里多了谁、谁改了、谁没了、谁和谁连上了」。它不写表名，也不写 SQL。写哪张表是写回的事。
 
-效应是一组可以并列的操作。引擎只认四种，每种都能写多项：
+效应是一份列表。每一项一种操作，形状相同：先说对哪个类，再说找谁或新生谁，最后说属性怎么赋值。引擎只认四种：
 
 | 操作 | 做什么 |
 |---|---|
-| `update` | 改**已经存在**的个体上的源列属性 |
-| `create` | 新生一个个体，并可连上一条关系 |
-| `delete` | 让某个已有个体从指定源消失 |
-| `link` | 在已有个体之间建立一条已声明的关系 |
+| `update` | 改已经存在的个体 |
+| `create` | 新生一个个体 |
+| `delete` | 撤走某个已有个体 |
+| `link` | 建立一条已声明的关系 |
 
-插入是 `create`。更新是 `update`。插入的同时更新，就是同一条效应里既有 `create` 又有 `update`。没有第五种「调岗专用」「维修专用」的操作。场景不同，只是这四种的组合不同。
+插入是一条 `create`。更新是一条 `update`。插入的同时更新，就是列表里两条都写。没有第五种「调岗操作」。
 
-每种操作都要先说清改谁。认人只有两种办法，和查询是同一套：
+认人必须写明。请求点名的那个体：`object` 加 `identity: { from: identity }`。其他已有个体：`object` 加 `filter`，过滤落在该类上。`filter` 里的 `$link` 必须用该类出发的关系名，不能把前置里另一端的名字抄过来。第 3 步把过滤点到的个体一并读出。`update` 改的就是读到的这些行。
 
-- `$root`：请求里 `object` + `identity` 点名的那个体。
-- `{ object: 类名, filter: 过滤 }`：按 5.2 的过滤，在已有个体里找。过滤可以含 `$link`，因此能从根个体连到另一类再筛。
+属性新值的来源必须写明。`{ from: request }`：请求 `request` 里的同名参数。`{ property: 名, from: current | request }`：点名的属性；`current` 是本条 `update` 的对象。`{ from: identity }` / `{ from: action }` / `{ from: object }`：请求顶上的识别值、动作名、类名。`{ from: generated }`：按该属性的 `generate` 列表拼出编号。再就是表达式。没有 `$root`，没有 `from: root`。
 
-第 3 步读的范围由这两处决定。过滤点到的已有个体，这次一并读出。后面的 `update` 改的就是读到的这些行，不另外发明「按关系走进去」的键。
+表达式分两套。表面都跟 Elasticsearch：中缀的 `+` `-`，写成一根字符串，不是对象树，没有 `left` / `right`。语义不能混。
 
-属性的新值也只有三种来源，和前置右端同一套：`{ from: request }`、`{ property: 名, from: current }`（`current` 指 `$root`）、`{ builtin: today | yesterday | now }`。
+日期一套，跟 Elasticsearch 的 date math。锚点只有 `now`，表示此刻，值是 UTC Unix 秒。后面接 `+1d`、`-1d` 这种步进，单位是 `y` / `M` / `w` / `d` / `h` / `m` / `s`。再接 `/d`、`/h` 是向下取整到该单位的起点。`now/d` 是今天 0 点。`now-1d/d` 是昨天 0 点。没有单独的 `today`。求值结果仍是 UTC Unix 秒。`type: date` 的属性按这个秒落到日期。
 
-最简的 `update: [dept]` 是省写：改 `$root`，所列属性的值全部来自 `request`。设备调拨就是这种：
+```yaml
+          valid_from: now/d          # 今天 0 点（UTC Unix 秒）
+          valid_to: now-1d/d         # 昨天 0 点
+          ended_at: now              # 此刻
+```
+
+数字一套，同样写 `+` `-`，但没有单位，也不能取整。锚点是 `current.属性名`、`request.参数名`，或数字字面量。与 `{ from: current | request }` 同一组来源。
+
+```yaml
+          qty: current.qty-1                     # 本条正在改的个体上，qty 减 1
+          amount: current.amount+request.delta   # 当前金额加上 request.delta
+```
+
+`now-1` 不合法：日期的加减必须带单位。`current.qty-1d` 不合法：数字加减不能带日历单位。`now` 不能出现在数字表达式里。过滤里拿来比的日期也用这一套，所以 `expiry: { gte: now/d }` 与效应里的 `valid_from: now/d` 是同一个求值器。
+
+设备调拨只改请求点名的那台设备上的部门。类和识别值都要写：
 
 ```yaml
         effect:
-          update: [dept]              # 等于 of: $root，dept 取 request.dept
+          - update:
+              object: equipment
+              identity: { from: identity }   # 序列号=请求里的 identity
+              properties:
+                dept: { from: request }      # 值来自 request.dept
 ```
 
-`update` 只接受源列**属性**。派生属性没有源列，写进 `update`，引擎拒绝。
+`update` / `create` 的 `properties` 只接受源列属性。派生属性写进来，引擎拒绝。
 
-完整的 `update` 是列表。每一项自己声明改谁、改哪些属性、值从哪来。结束维修：动作点在设备上，改的是已经存在的那条未结束维修——先按过滤读出来，再 `update` 结束时间：
+结束维修：改的不是设备，是已经存在的那条未结束维修。前置写在设备上，用设备出发的关系。效应改维修，过滤落在维修自己的字段上，不再抄设备那边的关系名：
 
 ```yaml
       finish_repair:
         description: 结束维修
         pre:
           $link:
-            under_repair: true        # 根上这条关系成立，否则没有可改的维修
+            under_repair:
+              is_open: true              # 这台设备有一条未结束的维修
         effect:
-          update:
-            - of:                     # 认人：已有个体 + 5.2 过滤
-                object: repair
-                filter:
-                  $link:
-                    under_repair: true
-                  is_open: true       # 派生：尚未结束
+          - update:
+              object: repair
+              filter:
+                is_open: true
+                serial_no: { eq: { from: identity } }   # 这台设备的序列号
               properties:
-                ended_at: { builtin: now }
+                ended_at: now            # 结束时刻=此刻
 ```
 
-找不到这样一条维修，过滤结果为空，`update` 没有对象，动作拒绝。请求不必传维修编号。
+过滤结果为空，`update` 没有对象，动作拒绝。请求不必传维修编号。
 
-调岗是同一种组合：一条 `update` 改已有任职，一条 `create` 新生任职。没有「调岗」这种操作：
+调岗是两条操作并列：一条 `update` 关旧职，一条 `create` 开新职。`appointment` 是任职，不是人。人是 `person`。任职是一条记录：谁、在哪个部门、任什么职务、从哪天到哪天。一个人可以有多条任职，同时只有一条在任。调岗不改人，只关旧记录、开新记录。
+
+`held_by` 不是保留字。它是任职连向人员的关系名，靠 `person_no` 与人员编号相等成立。从人往回看，同一条关系叫 `appointments`。前置写在人上，用 `appointments`。效应改任职，过滤用任职自己的字段，把工号写成 `{ from: identity }`。新任职同样只写 `person_no`，不再另写一条指向代词的 `link`。
 
 ```yaml
       transfer_post:
-        description: 调岗
+        description: 调岗                    # 动作名；挂在人员类上，不是挂在任职类上
         pre:
           $link:
-            appointments:
-              is_current: true
+            appointments:                   # 从这个人出发，看他的任职
+              is_current: true              # 必须已经有一条在任
           $request:
-            dept: { object: department }
+            dept: { object: department }    # request.dept 必须能按部门编号认到已有部门
         effect:
-          update:
-            - of:
-                object: appointment
-                filter:
-                  $link:
-                    appointments: true
-                  is_current: true
+          - update:
+              object: appointment           # 改任职，不改人
+              filter:
+                is_current: true
+                person_no: { eq: { from: identity } }  # 这个人的工号 + 在任
               properties:
-                valid_to: { builtin: yesterday }
-          create:
-            - object: appointment
-              link: appointments      # 新生个体连到 $root
-              properties:
-                title: { from: request }
-                dept: { from: request }
-                valid_from: { builtin: today }
+                valid_to: now-1d/d          # 只改失效日。职务、部门、生效日保持原值
+          - create:
+              object: appointment           # 再新建一条任职
+              properties:                   # 只写这次要赋的源列属性。held_by 靠 person_no 的 match 成立
+                appt_no: { from: generated }   # 属性名：任职编号。按该类该属性的计数器发号
+                person_no: { from: identity }  # 人员编号=请求顶上的 identity（如下面的 P001）
+                title: { from: request }       # 职务=request.title（如下面的「经理」）
+                dept: { from: request }        # 部门=request.dept（如下面的 D07）
+                valid_from: now/d              # 生效日=今天 0 点。valid_to 不写，空着表示至今
 ```
 
 ```json
 {
-  "action": "transfer_post",
-  "object": "person",
-  "identity": "P001",
+  "action": "transfer_post",            // 做「调岗」这条动作
+  "object": "person",                  // 对人员做，不是对任职做
+  "identity": "P001",                  // 哪个人；也是新任职 person_no 的值
   "request": {
-    "title": "经理",
-    "dept": "D07"
+    "title": "经理",                   // 新职务 → create.properties.title
+    "dept": "D07"                      // 新部门 → create.properties.dept
   }
 }
 ```
 
-两条操作在同一次动作里完成。拆成两次请求，中间会出现空窗或重叠。`is_current`、`is_open` 是类上已有的派生属性，不是为这两个动作新造的键。引擎不认「任职」「维修」这些词。
+两条在同一次动作里完成。拆成两次请求，中间会出现空窗或重叠。`is_current`、`is_open` 是类上已有的派生属性，定义见附录 C：任职的生效日与失效日覆盖今天，维修的结束时刻为空。
 
-`create` 可以写多项，一次插多张表。`update` 可以写多项，一次改多个已有个体。验收兼立保修卡，是 `link` 加一条 `create`：
+验收兼立保修卡，同样是列表里两项。转化没有另一端，`link` 只写关系名。保修卡靠序列号与设备相等，`covers` 的 `match` 自己成立，不必再写 `link`：
 
 ```yaml
         effect:
-          link: converted
-          create:
-            - object: warranty_card
-              link: covered_by
+          - link: converted                    # 转化。没有另一端
+          - create:
+              object: warranty_card            # 新生一张保修卡
+              properties:
+                serial_no: { from: identity }  # 序列号=设备的识别值；covers 靠 match 成立
+                expiry: now+1y                 # 到期日=今天起一年
 ```
 
-`link` 单独出现时，建立的是 `$root` 上一条已声明的关系。阶段转化是它的一种，两个阶段写在关系的 `transition` 上，见 6.4。`create` 里的 `link` 则是把新生个体连到 `$root`。
+阶段转化见 6.4。`delete` 的认人和 `update` 相同，必须写 `object` 加 `identity` 或 `filter`。存在上的变化必须写在效应里。报废改的是源列属性 `mark`，不是派生属性 `status`：
 
-四种都可以缺。报废没有 `update` / `link` / `create`，只靠写回改规则读过的源列。个体从某个源消失，用 `delete`，`of` 的写法和 `update` 相同。
+```yaml
+        effect:
+          - update:
+              object: equipment
+              identity: { from: identity }   # 哪台设备=请求里的序列号
+              properties:
+                mark: scrapped               # 只改台账标记；派生 status 随后算成报废
+```
 
-效应确定之后，引擎对这次将发生的变化做公理校验。通过才进入写回。
+效应定完，引擎对将发生的变化做公理校验。通过才进入写回。
 
 ### 6.3 写回
 
-写回把已经确定的效应投影到源表。每一条引用本类已声明的源条目，不重复连接名与表名。要写哪张表，查该源条目的 `connection` 和 `table`。列值取自刚才读到的个体，以及请求 `request`。属性名经该源条目的 `fields` 翻成列名。
+写回把已经确定的效应投影到源表。表在哪、列怎么对，查该类的 `sources`。动作上不再另配一份名单。认人、要写的属性，效应里已经有了。
 
-`mode` 只认两种。`save` 按配对键认行，有则改、无则插。`delete` 按配对键认行，删除。`by: identity` 声明认行用识别字段。`fields` 列出要写的源列**属性**。派生属性不能出现在 `fields` 里：表上没有对应列。
+插还是改，看第 3 步读这个源时有没有行：有行就改，没行就插。写回不再查一遍。值取效应之后该个体的属性；效应没赋的，用第 3 步读到的值。未映射的 `pk`，插入时由源库自生。
 
-验收向设备源插入一行。插入之后，派生规则里的 `device: true` 成立，再读时阶段为在役。这条写回没有 `status` 可写，也不需要——`po_item` 上没有阶段列，本体属性 `status` 也不是设备表上那一列：
+往哪张表写，按效应推：
 
-```yaml
-        writeback:
-          - source: device          # 本类已声明的源条目，不重复连接名与表名
-            mode: save              # 有则改、无则插
-            by: identity            # 按识别字段认行
-            fields: [name, serial_no]  # 本体属性；值来自刚读到的个体
-```
+- 改了哪些属性，就改映射了这些属性、并且第 3 步已经有行的源。调拨改 `dept`，只有设备源有 `dept` 且已有行，只改设备表。
+- 新生一个体，插入映射了所赋全部属性的源。登记赋了名称、部门、序列号，只有设备源三项都有，只插设备表。采购、资产缺部门这一项，不插。
+- 转化：插入该类里第 3 步没有行、又映射了识别字段的源。验收时采购源已有行，不动；设备源、资产源没行，各插一行。保修卡是另一条 `create`，插入它自己的源。
+- 撤走一个体：删掉第 3 步读到行的那些源上的行。只想改阶段、留着采购记录，用报废改 `mark`，不要 `delete`。
 
-```sql
--- name、serial_no 经设备源 fields 翻成列
-INSERT INTO device (name, serial_no) VALUES ('精密机床', 'SN-40217')
-ON CONFLICT (serial_no) DO UPDATE SET name = EXCLUDED.name;
-```
+接进一个新系统，先问第 3.2 节那个问题。答案只有三种：
 
-调拨只改设备源上已经存在的那一行。采购库不动。`dept` 翻成 `dept_id`，靠的是设备源条目的 `fields`。值来自请求 `request.dept`：
+| 新系统里是 | 建模 | 写入时 |
+|---|---|---|
+| 同一个体的又一源 | 本类 `sources` 加一行 | 转化时第 3 步该源没行、又映射了识别字段，就插入 |
+| 挂在个体上的新对象 | 立一个新对象类型，加一条到本类的关系 | 效应 `create`，插入该类能承接所赋属性的源 |
+| 另一件事 | 本类不动 | 另立动作，另一次请求 |
 
-```yaml
-        writeback:
-          - source: device
-            mode: save
-            by: identity
-            fields: [dept]          # 经 fields 翻成 device.dept_id；值来自 request
-```
+验收之后进资产台账，是第一种。立保修卡是第二种。下个月才做的点检是第三种，不塞进验收。请求不指定写哪几个系统。完整配置见附录 C。
 
-```sql
-UPDATE device SET dept_id = 'D07' WHERE serial_no = 'SN-40217';
-```
-
-登记时各源都没有行。`save` 按配对键找不到行，走插入。`name`、`dept` 取自请求 `request`。`serial_no` 取自请求的 `identity`。没有「当前值」可抄。
-
-报废要让派生规则命中 `scrapped`。那条 `when` 读的是设备源上的 `status` 列，不是本体属性 `status`。写回把同一列写成规则里的那个值。这一条没有 `update` / `link` / `create`：存在上的阶段变化，靠写出让规则成立的行完成。
+报废只改 `mark`。这个属性只挂在设备源上：
 
 ```yaml
       scrap:
         description: 报废
         pre:
           status: in_service        # 刚读到的阶段必须在役
-        writeback:
-          - source: device
-            mode: save
-            by: identity
-            columns:
-              status: scrapped     # when.column 点过的源列；不是 properties.status
+        effect:
+          - update:
+              object: equipment
+              identity: { from: identity }
+              properties:
+                mark: scrapped              # 台账标记改为报废
 ```
 
-`columns` 只允许出现在某条 `when` 里已经点过的源列。本体属性走 `fields`，规则读过的源列走 `columns`，两套不混。
+效应改的是属性 `mark`。设备源 `fields` 里是 `mark: status`，落到表上才是列 `status`。本体属性 `status` 是派生的阶段，不是这张表上的列。
 
-从某个源撤走一行，用 `delete`。配对键仍按 `by` 认：
-
-```yaml
-        writeback:
-          - source: device
-            mode: delete            # 按 by 认行后删除
-            by: identity
+```sql
+-- mark → 列 status；serial_no 仍是序列号
+UPDATE device SET status = 'scrapped' WHERE serial_no = 'SN-40217';
 ```
 
-一条动作可以写多条写回。认人与效应相同：`of: $root`、`of: { object, filter }` 对应某条 `update` / `delete`；`created: 类名` 对应某条 `create`。调岗的写回就是两条——改已有的那条任职，再插入新生的那条：
+验收之后设备源有行，`device: true` 成立，再读时阶段为在役：
 
-```yaml
-        writeback:
-          - of:                         # 与 effect.update 的 of 同一套认人
-              object: appointment
-              filter:
-                $link:
-                  appointments: true
-                is_current: true
-            source: posts
-            mode: save
-            fields: [valid_to]          # 值来自效应：builtin.yesterday
-          - created: appointment        # 与 effect.create 对应，走插入
-            source: posts
-            mode: save
-            fields: [person_no, title, dept, valid_from]
+```sql
+-- name、serial_no 经各源 fields 翻成列
+INSERT INTO device (name, serial_no) VALUES ('精密机床', 'SN-40217');
+INSERT INTO asset (asset_name, sn) VALUES ('精密机床', 'SN-40217');
+INSERT INTO warranty_card (sn, expiry) VALUES ('SN-40217', ...);
 ```
 
-值不在写回里重写一遍，以效应为准。第 8 节再展开同一变更投到更多源。
-
-写回逐条执行，可能部分失败。跨库没有分布式事务：已成功的投影不回滚，失败条目进留痕。补偿是再发一次同一动作——`save` 按配对键认行，重复执行结果相同——或人工修库。写完要核对就再读一次。读走的仍是第 5 节的查询。写入的效果由读规则确认，不由写入方自报。
+写回逐条执行，可能部分失败。跨库没有分布式事务：已成功的投影不回滚，失败条目进留痕。补偿是再发一次同一动作：第 3 步重读，有行则改、没行则插，结果与上次成功的部分相同——或人工修库。写完要核对就再读一次。读走的仍是第 5 节的查询。写入的效果由读规则确认，不由写入方自报。
 
 ### 6.4 转化关系
 
-效应 `link: converted` 只声明存在上要建立这条关系。它成不成立，仍用读到的事实判定。写入自己不另报一条「关系已建立」。读发生在投影前：前置里的 `$link.converted` 用这次读。读也发生在投影后：再读一次，确认关系是否成立。两次用同一条判定，差别只在读发生在投影前还是投影后。
+效应 `link: converted` 只声明存在上要建立这条转化。它成不成立，仍用读到的事实判定。写入自己不另报一条「关系已建立」。转化没有另一端，所以没有 `$root`。读发生在投影前：前置里的 `$link.converted` 用这次读。读也发生在投影后：再读一次，确认关系是否成立。两次用同一条判定，差别只在读发生在投影前还是投影后。
 
 转化关系与 `match` 不是同一种判定。`match` 比较两端各一个**属性**的值，值相等则关系成立。转化关系的两端是同一个体，没有两列可对：
 
@@ -1110,7 +1118,7 @@ UPDATE device SET dept_id = 'D07' WHERE serial_no = 'SN-40217';
 
 这条事件是泛化的。不要为调岗、维修各建一个事件类。操作种类与效应相同。任职、维修若在效应里被新建或改过，作为这条事件里的一行出现。
 
-动作配置了告知，引擎在写回之后生成这条变更事件。不必在效应里再手写一遍 `create`。事件的识别值由动作名、根个体的识别值和发生时间合成，不是平台另发的编号。有映射的事件表，走写回，把这条事件投影进去。没有映射的出站，只收告知。同一条存在变化，两条出路。
+动作配置了告知，引擎在写回之后生成这条变更事件。不必在效应里再手写一遍 `create`。事件上要写的属性必须出现在 `inform.properties` 里：动作名、发生时间、请求的识别值和类名。`change_id` 由这三项合成。`change_line` 按效应列表逐项生成。有映射的事件表，走写回。没有映射的出站，只收告知。同一条存在变化，两条出路。
 
 出站是已声明的收件地址，不是 `sources` 里的表。配置里没有告知，引擎就不发。告知失败不回滚已经写下的源表。对方没接到，是告知失败，不是这次存在变化没发生。
 
@@ -1119,27 +1127,27 @@ UPDATE device SET dept_id = 'D07' WHERE serial_no = 'SN-40217';
 ```yaml
 object_types:
   change:
-    description: 变更
+    description: 变更                  # 一次动作做完后的那包变更，不是业务表
     kind: event
-    identity: change_id
+    identity: change_id               # 由 action + subject + occurred_at 合成
     properties:
       change_id:
         type: string
         description: 变更编号
       action:
         type: string
-        description: 动作名
+        description: 动作名            # inform 里 { from: action }
       occurred_at:
         type: date
-        description: 发生时间
+        description: 发生时间          # inform 里 now
       subject:
         type: string
-        description: 根个体的识别值
+        description: 请求点名个体的识别值   # inform 里 { from: identity }
       subject_class:
         type: string
-        description: 根个体的类名
+        description: 请求点名个体的类名     # inform 里 { from: object }
   change_line:
-    description: 变更条目
+    description: 变更条目              # 效应里每一项一行
     kind: event
     identity: line_id
     properties:
@@ -1165,6 +1173,7 @@ link_types:
     from: change
     to: change_line
     card: 1:N
+    inverse: of_change
     match:
       - { from: change_id, to: change_id }
 ```
@@ -1179,8 +1188,13 @@ outlets:
 actions:
   transfer_post:
     inform:
-      - created: change           # 发这条变更事件，不是发人员表
-        to: [payroll]
+      - object: change                       # 发变更事件，不是发人员表
+        to: [payroll]                        # 出站名，见 outlets
+        properties:
+          action: { from: action }           # 请求里的动作名，此处 transfer_post
+          occurred_at: now                   # 此刻
+          subject: { from: identity }        # 请求里的工号，此处 P001
+          subject_class: { from: object }    # 请求里的类名，此处 person
 ```
 
 薪酬系统以后若接入建模、任职有了源映射，那条路径改成写回。在那之前，它只收这条变更事件。
@@ -1189,126 +1203,11 @@ actions:
 
 写回部分失败时，仍按再读到的事实生成变更事件，并在留痕里写清哪些投影成功。对方看到的是实际存在，不是「假如全成功本该是什么样」。
 
-## 7. 个体的引用与识别
-
-配置里没有个体：本体只有类的规定，个体是源库里的业务行，平台也不给个体发自有编号。那么请求怎么指称一个体？引用一个体，就是给出**同一性标准**指定的**属性**的值。第 5 节查询根上的 `identity`、第 6 节写入请求里的 `identity`，都是这个值。`SN-40217` 不是平台分配的，是采购单与设备台账里本来就有的出厂序列号。
-
-这个值凭什么能认个体，是同一性标准回答的问题。它承担两种判定。其一，同一时刻的两个描述是否指同一个体：采购源那一行与设备源那一行，是不是同一台设备——各源查完后的对齐（第 5 节）、写入时写回认行（第 6 节），靠的是它。其二，变化前后是否仍是同一个体：在途的它与在役的它是同一台——阶段转化关系的两端是同一个体（第 3.2 节），靠的也是它。配置里同一个 `identity` 承担这两种判定，不另设机制。
-
-不是任何属性都当得起识别字段。瓜里诺（Guarino）与韦尔蒂（Welty）给同一性标准立的约束，翻成工程话是三条。**能区分**：不同个体不得取同一个值——姓名会重名，当不起。**能覆盖**：该类的每个个体都取得到这个值——不是每台设备都登记了维保合同号。**稳定**：个体存续期间取值不变——所属部门会调动，序列号出厂即定。三条都满足，这个属性才既不会把两台设备认成一台，也不会把同一台认成两台。
-
-三种「键」不要混。源表主键 `pk` 定位行：插入、更新、删除时找到那一行，不是同一性标准。识别字段认个体：跨源对齐与写入认人共用。引擎不发自有标识，没有第三种。某张源表没有识别字段那一列时，该源条目写 `key`，对齐与认行改用它（附录 B）。
-
-比对之前先归一化。裁决算交集率时（第 3.2 节），两端识别字段先洗成统一格式：去区号、连字符与空格，统一大小写；脱敏出不了明文的，下推到源里算指纹再比。归一化只发生在内存，不改源里的值，也不落库。运行时的对齐按各源映射列的值进行；两端格式长期不一致的，修法是在建模时调整映射或在该源写 `key`，不是在每次查询里临时处理。
-
-事件类个体的认定落在它连接的事物与发生的时间上：一次点检是「哪台设备、何时」。这类个体的识别字段常由这些成分合成，比如设备编号加日期，配置写法不变。事件没有跨时间的同一性问题——发生过即确定，第二种判定对它不适用。
-
-## 8. 多系统投影
-
-一次存在上的变更，常要落到多个源。**投影**就是把这次变更按写回逐条写进各源表。第 6 节的两个例子都只投一个源，这一节处理一变更多源。
-
-接进一个新系统时，先问的还是第 3.2 节那个问题：这个系统里的东西，和本类个体是什么关系？答案不同，写法不同：
-
-| 新系统里是 | 建模 | 写入时 |
-|---|---|---|
-| 同一个体的又一源 | 本类 `sources` 加一行 | 动作的写回加一条，引用新加的源条目 |
-| 挂在个体上的新对象 | 立一个新对象类型，加一条到本类的关系 | 效应 `create` 立对象并连上；写回加一条，`object` 指向新类 |
-| 另一件事 | 本类不动 | 另立动作，另一次请求 |
-
-还是验收的例子。设备验收之后，还要进资产台账，还要立一张保修卡。资产台账里就是这台设备，序列号能认——同一个体的又一源。保修卡不是设备，是挂在设备上的新个体——关联对象诞生。首次点检下个月才做，不是验收的同一变更——另一件事，另立动作 `inspect`，不塞进 `convert`。前两种落进配置：
-
-```yaml
-# 在 3.2 已发布配置上追加。键以附录 B 为准。
-object_types:
-  equipment:
-    sources:
-      asset:                       # 同一台设备的又一源
-        connection: asset_sys
-        table: asset
-        pk: asset_id
-        fields:
-          name: asset_name
-          serial_no: sn
-    actions:
-      convert:
-        description: 验收入库
-        pre:
-          status: in_transit
-        effect:
-          link: converted
-          create:
-            - object: warranty_card
-              link: covered_by     # 立一张保修卡，并连上这台设备
-        writeback:
-          - source: device
-            mode: save
-            by: identity
-            fields: [name, serial_no]
-          - source: asset          # 又一源：同一次变更，多一条投影
-            mode: save
-            by: identity
-            fields: [name, serial_no]
-          - object: warranty_card  # 关联对象：投到它自己声明的源条目
-            source: cards
-            mode: save
-            by: identity
-            fields: [serial_no]
-  warranty_card:
-    description: 保修卡
-    kind: thing
-    identity: serial_no
-    properties:
-      serial_no:
-        type: string
-        description: 出厂序列号
-    sources:
-      cards:
-        connection: asset_sys
-        table: warranty_card
-        pk: card_id
-        fields:
-          serial_no: sn
-link_types:
-  covered_by:
-    description: 保修
-    from: equipment
-    to: warranty_card
-    inverse: covers
-    card: 1:1
-    match:
-      - { from: serial_no, to: serial_no }
-```
-
-请求仍然是第 6 节那一份 JSON，一个字不改。下发到几个系统，由这条动作当时的效应与写回决定，不由请求方指定，也不由模型在执行时临时发明。
-
-**执行顺序与失败处理。** 写回各条逐条执行；跨库不做两阶段提交。某条失败：已成功的投影不回滚，失败条目进留痕，写清是哪条源条目、什么错。部分成功在读规则下是自洽的：设备源写下了，阶段就是在役；台账源没写下，只是台账源查无此行。补偿是再发一次同一动作——`save` 按配对键认行，重发结果相同——或人工修库。
-
-执行器不为这些行业写分支。它认的构造仍是前置、效应、写回与两种 `mode`。进新系统只加三样东西：连接、源映射、动作定义——换的是 YAML，不是引擎。第 4 节的检验在这里同样适用：引擎源码中不出现资产、保修这些词。
-
-## 9. 语言模型的位置
-
-模型在这套系统里出现在两个时刻：写配置的时候，编请求的时候。执行的时候它不在场。
-
-| 时刻 | 模型做什么 | 产出 | 谁定案 |
-|---|---|---|---|
-| 逆向建模 | 读表结构，建议类、属性、关系、识别字段 | 草稿上画布 | 人改、发布 |
-| 对齐第一步 | schema 语义比对，给候选对与倾向 | 建议与依据 | 交集率、人裁决 |
-| 判定为阶段之后 | 建议转化动作的前置、效应、写回 | 草稿 | 人改、发布 |
-| 问数与写入 | 把自然语言编成查询或写入请求 JSON | 一次请求 | 引擎校验 |
-
-生成要模型，执行不要。理解发生在生成期：动作被定义、被修改、被发布的那一刻。执行期引擎解释已发布文本，逐条求值；执行期再让模型「理解着写库」，等于让它发明表、写一半。第 4 节的边界由此而来：配置里没有的，引擎不做。
-
-模型当顾问，不当计算器。交集率、归一化、对齐、下推语句的编译，全是确定性代码，数值不许模型算。模型的建议也不许定案：实测它做这类建模的准确率在六到八成，所以结构校验卡住请求、交集率挡住合并、人裁决写下定案。三层兜底都不依赖模型自己判断对了没有。
-
-再生成不是 ReAct。画布上「上一版配置加人的一句话，再生成一次草稿，停」是人驱动的再生成：人不发话，模型不动。模型不自己选工具，不自己写库。外部 Agent 是这套系统的调用方，循环做在调用方那边；平台只提供查询与写入两个接口，接口里没有一个键允许模型绕过已发布配置。
-
-幻觉的代价被结构压住。请求里的类名、属性名、关系名、动作名，对不上已发布配置，引擎拒绝。模型编错名字的后果是这次请求被拒，不是数据被改。
-
-## 10. 局限
+## 7. 局限
 
 分四处说：本体论上没做的，引擎做不到的，判定甩给人的，承诺本身换来的。
 
-**与形式化本体的距离。** 配置是 YAML，不是 OWL，没有推理机。公理只跑写入前校验的几种类型，不做全局一致性检查。规则与推理只到派生属性的取值规则为止，推不出没写下的事实。函数不单独立构造：逐个体的计算统一写成**派生属性**的三种形式；标准本体论里函数进公理、当同一性的键、参与推理的角色未做，同一性由 `identity` 承担。子类型只预留不定案，部分与整体未落地。换来的是配置读写都简单；代价是第 2 节要素清单里机器替人做不了的那部分，仍然靠人。另一头，Palantir Ontology 那种先灌进对象库再改的路，和第 1 节写的不是一条：本文不建对象库，个体不在平台里落像。
+**与形式化本体的距离。** 配置是 YAML，不是 OWL，没有推理机。公理只跑写入前校验的几种类型，不做全局一致性检查。规则与推理只到派生属性的取值规则为止，推不出没写下的事实。函数不单独立构造：逐个体的计算统一写成**派生属性**的两种形状（`when` 规则，或一条过滤）；标准本体论里函数进公理、当同一性的键、参与推理的角色未做，同一性由 `identity` 承担。子类型只预留不定案，部分与整体未落地。换来的是配置读写都简单；代价是第 2 节要素清单里机器替人做不了的那部分，仍然靠人。另一头，Palantir Ontology 那种先灌进对象库再改的路，和第 1 节写的不是一条：本文不建对象库，个体不在平台里落像。
 
 **读的边界。** 跨源对齐在引擎内存里做，规模受限；聚合跨源时在取回的行上算，同样受限。没有变更数据捕获：源库被原地改动，平台当时无感，下次读才看见——读到的是已发布配置对应的现在。
 
@@ -1347,7 +1246,7 @@ link_types:
 | 动作 | 规定一个对象允许发生什么变化 |
 | 前置 | 变化发生前必须成立的条件 |
 | 效应 | 变化在存在上是什么：改属性、写关系、生新对象 |
-| 写回 | 把已经确定的效应投影到源表 |
+| 写回 | 把已经确定的效应写入源表。按 `sources` 推出，动作上不另配名单 |
 
 **对齐与运行（第 3、4 节）**
 
@@ -1387,9 +1286,9 @@ link_types:
 
 ## 附录 B 本体配置
 
-已发布文本里有哪些键、写在哪一层。概念见附录 A。正文里的例子按这里的键写。
+已发布文本里有哪些键、写在哪一层。概念见附录 A。完整可发布文本见附录 C。与正文片段冲突时，以附录 B、C 为准。
 
-文本两棵树：`object_types` 下每个键是一个**类**，`link_types` 下每个键是一条**关系**。具名的一律用映射，键就是机器名。列表只用于派生规则、写回条目、`match` 的配对。
+文本两棵树：`object_types` 下每个键是一个**类**，`link_types` 下每个键是一条**关系**。根上还可有 `outlets`。具名的一律用映射，键就是机器名。列表只用于：`when` 规则、效应操作、告知条目、`match` 的配对。
 
 **类**
 
@@ -1399,7 +1298,7 @@ link_types:
 | `kind` | `thing` 或 `event` |
 | `identity` | 同一性标准：一个源列属性的名。每个源的 `fields` 里都要有它，除非该源写了 `key` |
 | `properties` | 属性。键是属性名 |
-| `sources` | 源映射。键是源条目名；`when`、`writeback` 用这个键 |
+| `sources` | 源映射。键是源条目名；`when` 用这个键。写回也按这些条目推表 |
 | `axioms` | 公理。键是公理名 |
 | `actions` | 动作。键是动作名 |
 
@@ -1411,8 +1310,13 @@ link_types:
 | `description` | 给人 / Agent 读 |
 | `values` | `enum` 的可取值；只列出有规则能算出的值 |
 | `derived` | 有它就是派生属性，禁止再出现在任何源的 `fields` 里 |
+| `generate` | 可选。列表，按顺序拼成该属性的值。项为：字面量；与效应相同的取值；`{ date: now/d, format: yyyyMMdd }`（UTC，记号 `yyyy` `MM` `dd` `HH` `mm` `ss`）；`{ sequence: { start: 1, width: 4 } }`（该类该属性一个计数器）；`{ uuid: v7 }`。效应写 `{ from: generated }` |
 
-`derived` 三条规则从上到下取第一条命中，形式三种。`when` 谈源：键是源条目名，值为 `true` / `false`，或 `{ column, eq }` 这类列条件。比较符谈本类另一个属性，点属性的写法与过滤相同：`{ eq: { property: status, from: current, value: in_service } }`。`exists` 看另一端是否存在：`relation` 加目标类上的 `where`（`where` 是一条过滤）。
+`derived` 按形状区分，没有第三种专用键。
+
+列表：`when` 规则，从上到下取第一条命中。`when` 的键是源条目名。值为 `true`（该源必须有行）、`false`（该源必须无行），或一条过滤（该源必须有行，且已映射属性满足这条过滤）。过滤里写属性名，不写列名。没有 `column`。
+
+对象：一条过滤，与 5.2 同形（含 `$link`）。取值为布尔：当前个体满不满足这条过滤。失效日没有值，比较时按至今。没有单独的 `eq` 形式，也没有 `exists` / `where`。
 
 **源映射**
 
@@ -1420,7 +1324,7 @@ link_types:
 |---|---|
 | `connection` | 连接名 |
 | `table` | 表名 |
-| `pk` | 该表主键，定位行、插入时用；不是同一性标准 |
+| `pk` | 该表主键，定位行、更新删除时用；不是同一性标准。未出现在 `fields` 里的 `pk`，插入时由源库自生，引擎不发明值 |
 | `fields` | 源列属性 → 列名。派生属性不得出现 |
 | `key` | 可选。该源用于对齐、认行的属性名；省略则用类的 `identity` |
 
@@ -1443,11 +1347,14 @@ link_types:
 |---|---|
 | `description` | 给人 / Agent 读 |
 | `pre` | 前置。形状与过滤相同，另多 `$request`、`$exists`。`$request` 下可写 `{ object: 类名 }`：该参数必须能按该类 `identity` 读到个体 |
-| `effect` | 四种操作可并列、可多项：`update` 改已有个体，`create` 新生，`delete` 从源撤走，`link` 建关系。认人：`of: $root`，或 `of: { object, filter }`（`filter` 即 5.2）。`update: [属性名]` 是改 `$root`、值来自 `request` 的省写。属性值：`{ from: request }`、`{ property: 名, from: current }`、`{ builtin: today \| yesterday \| now }` |
-| `writeback` | 写回条目的列表 |
-| `inform` | 告知。写回之后把变更事件发给出站。每条：`created: change`（或点名的变更事件类），`to` 为出站名列表 |
+| `effect` | 列表。每项一个键，四种之一：`update` / `create` / `delete` / `link`。认人必须写明，不许省略、不许 `$root`。请求点名的那个体：`object` + `identity: { from: identity }`。其他已有个体：`object` + `filter`（过滤落在该类上，关系用该类出发的名字）。`create` 必须写 `object`。`match` 关系靠 `properties` 里的配对字段成立，`create` 不写 `link`。`link` 只用于转化：值为关系名，作用在请求点名的个体上，没有另一端 |
+| `inform` | 告知。写回之后生成变更事件并外发。每条：`object` 为事件类名，`to` 为出站名列表，`properties` 写明事件属性从哪来 |
 
-写回每条：`source` 引用源条目；`of` 与效应同一套认人（`$root` 或 `{ object, filter }`）；`created: 类名` 对应本动作的一条 `create`；`mode` 为 `save` 或 `delete`；`by: identity` 按识别字段认行；`fields` 写本体属性；`columns` 只写某条 `when` 已经点过的源列。值以效应为准。
+属性值来源。`{ from: request }`：请求 `request` 里的同名参数。`{ property: 名, from: current \| request }`：点名的属性；`current` 是本条过滤或 `update` 正在谈的那个体，不是代词换一个人。`{ from: identity }` / `{ from: action }` / `{ from: object }`：请求顶上的识别值、动作名、类名。`{ from: generated }`：按该属性的 `generate` 发一个新号并写入源表。日期表达式、数字表达式见保留字。没有 `from: root`，没有 `$root`。`update` / `create` 的 `properties` 只接受源列属性。
+
+写回不另配名单。值取效应之后该个体的属性；效应没赋的，用第 3 步读到的值。插还是改，看第 3 步该源有没有行。往哪张表写，按 6.3 从效应和 `sources` 推出。列名经源条目 `fields` 翻。
+
+告知的 `properties` 必须写明。`change_line` 按效应列表逐项生成：`op` 为操作名，`object` 为该类名，`target` 为该个体识别值。`change_id` 由已写入的 `action`、`subject`、`occurred_at` 合成。
 
 根上还可有 `outlets`：出站。键是出站名。`connection` 是收件地址，不是源表。
 
@@ -1457,7 +1364,27 @@ link_types:
 
 写入请求：`action`、`object`、`identity`，参数放 `request`。
 
-过滤（查询的 `filter` 与动作的 `pre`）是同一个对象。直挂的键是属性名，等于 `{ property: 该键, from: current }`。关系收在 `$link`。运算符为 `eq` / `ne` / `lt` / `lte` / `gt` / `gte` / `in` / `contains`。右端字面值是常量；点属性一律写成 `{ property: 名, from: current | request }`，省略 `from` 等于 `current`。`$request` 下的键等于 `{ property: 该键, from: request }`。
+过滤（查询的 `filter`、动作的 `pre`、布尔派生、`when` 下的过滤）是同一个对象。直挂的键是属性名，等于刚读到的该属性。关系收在 `$link`，键是**该类出发**的关系名。运算符为 `eq` / `ne` / `lt` / `lte` / `gt` / `gte` / `in` / `contains`。拿来比的可以是字面量、日期表达式，或 `{ from: identity }`。点另一个属性写成 `{ property: 名, from: current | request }`，省略 `from` 等于 `current`。`$request` 下的键等于请求里的该参数。失效日没有值，比较时按至今。
+
+**保留字**
+
+下列名字由引擎解释，业务里的类名、属性名、关系名、出站名不得占用。要增加一个，先写入本表，再进例子。
+
+| 名字 | 层 | 含义 |
+|---|---|---|
+| `$link` | 过滤 / 前置 | 关系条件 |
+| `$request` | 前置 | 请求参数参与核对 |
+| `$exists` | 前置 | 请求 `identity` 在各源是否有行 |
+| `now` | 日期表达式 | 锚点。此刻，UTC Unix 秒。`now`、`now/d`、`now-1d`、`now-1d/d`、`now+1y` |
+| `current` `request` | 值 / 数字表达式 | `from` 的来源。`current` 是本条过滤或 `update` 正在谈的个体 |
+| `identity` `action` `object` | 值 | `{ from: identity }` / `{ from: action }` / `{ from: object }`：请求顶上的识别值、动作名、类名 |
+| `generated` | 值 | `{ from: generated }`。按该属性 `generate` 发号 |
+| `update` `create` `delete` `link` | 效应操作 | 改已有 / 新生 / 撤走 / 建关系 |
+| `eq` `ne` `lt` `lte` `gt` `gte` `in` `contains` | 过滤运算符 | 比较 |
+
+| `thing` `event` | `kind` | 事物 / 事件 |
+
+没有 `$root`、`from: root`、`today`、`yesterday`、`builtin`、`addDays`、`column`、`where`、`exists`（派生键）、`of`、`columns`、`by`、`save`、`mode`，也不用 `{ add: { left, right } }` 或 `{ today: [] }`。一天写成 `1d`，不是 `86400`。效应不是映射，是列表。`update: [属性名]` 不合法。不许省略 `object` 当「请求点名的那个体」。写回按效应和 `sources` 推出，动作上不写 `write`。
 
 **键的命名空间**
 
@@ -1475,13 +1402,502 @@ link_types:
 | 类之下 | 语法键：`description`、`kind`、`identity`、`properties`、`sources`、`axioms`、`actions` | 否 |
 | 关系之下 | 语法键：`from`、`to`、`inverse`、`card`、`match`、`transition` | 否 |
 | `properties` 下、`fields` 下 | 业务属性名 | 否 |
-| 属性之下 | 语法键：`type`、`values`、`derived` | 否 |
+| 属性之下 | 语法键：`type`、`values`、`derived`、`generate` | 否 |
 | `sources` 下、`when` 下 | 源条目名 | 否 |
 | 源条目之下 | 语法键：`connection`、`table`、`pk`、`fields`、`key` | 否 |
 | 公理之下 | 语法键：`description`、`type`、`property` | 否 |
-| 动作之下 | 语法键：`description`、`pre`、`effect`、`writeback`、`inform` | 否 |
-| `inform` 条内 | 语法键：`created`、`to` | 否 |
-| `effect` 下、`update`/`create`/`delete` 条内 | 语法键：`of`、`filter`、`properties`、`object`、`link`、`from`、`builtin` | 否 |
-| 写回条内 | 语法键：`of`、`created`、`source`、`mode`、`by`、`fields`、`columns` | 否 |
+| 动作之下 | 语法键：`description`、`pre`、`effect`、`inform` | 否 |
+| `effect` 列表项内 | 语法键：`update` / `create` / `delete` / `link` 之一 | 否 |
+| `update` / `delete` 条内 | 语法键：`object`、`identity`、`filter`、`properties` | 否 |
+| `create` 条内 | 语法键：`object`、`properties` | 否 |
+| `link` 项 | 值为转化关系名 | 否 |
+
+| `inform` 条内 | 语法键：`object`、`to`、`properties` | 否 |
+| 布尔派生 / `when` 下的过滤 | 与 `filter` 内相同 | 是（有 `$link` 时） |
 
 `effect` 下的 `link` 不加 `$`：那一层全是语法键，不混层。规则针对混层，不针对某个词。
+
+## 附录 C 已发布配置
+
+正文里出现过的类、关系、动作收在这一份里。形状以附录 B 为准。引擎加载的就是这样一份文本。
+
+```yaml
+object_types:
+  equipment:
+    description: 设备
+    kind: thing
+    identity: serial_no
+    properties:
+      name:
+        type: string
+        description: 名称
+      serial_no:
+        type: string
+        description: 出厂序列号
+      dept:
+        type: string
+        description: 所属部门编号
+      mark:
+        type: enum
+        values: [scrapped]
+        description: 台账标记
+      status:
+        type: enum
+        description: 阶段
+        values: [in_transit, in_service, scrapped]
+        derived:                               # 不进 fields。从上到下第一条命中
+          - when:
+              device:
+                mark: scrapped                 # 设备源有行且 mark=报废
+            value: scrapped
+          - when:
+              purchase: true                   # 采购源必须有行
+              device: false                    # 设备源必须无行
+            value: in_transit
+          - when:
+              device: true                     # 只看设备源
+            value: in_service
+      in_warranty:
+        type: boolean
+        description: 是否在保
+        derived:                               # 布尔=一条过滤
+          $link:
+            covered_by:
+              expiry: { gte: now/d }           # 有到期日不早于今天的保修卡
+    sources:
+      purchase:
+        connection: purchase_sys
+        table: po_item
+        pk: po_id                              # 表主键，不是同一性标准
+        fields:
+          name: item_name
+          serial_no: sn
+      device:
+        connection: device_sys
+        table: device
+        pk: dev_id
+        fields:
+          name: name
+          serial_no: serial_no
+          dept: dept_id
+          mark: status                         # 设备表 status 列
+      asset:
+        connection: asset_sys
+        table: asset
+        pk: asset_id
+        fields:
+          name: asset_name
+          serial_no: sn
+    axioms:
+      status_one:
+        description: 同一时刻一个阶段
+        type: mutex
+        property: status
+    actions:
+      convert:
+        description: 验收入库
+        pre:
+          status: in_transit                   # 现在必须在途
+          $link:
+            converted: false                   # 转化尚未发生
+        effect:
+          - link: converted                    # 转化没有另一端；作用在请求点名的那台设备上
+          - create:
+              object: warranty_card
+              properties:
+                serial_no: { from: identity }  # 与设备序列号相同，covers 靠 match 成立
+                expiry: now+1y
+      transfer:
+        description: 调拨
+        pre:
+          status: in_service
+          dept: { ne: { property: dept, from: request } }  # 新部门不得等于当前
+          $link:
+            belongs_to: true
+          $request:
+            dept: { object: department }       # request.dept 必须能认到部门
+        effect:
+          - update:
+              object: equipment
+              identity: { from: identity }
+              properties:
+                dept: { from: request }        # 部门=请求里的部门
+      scrap:
+        description: 报废
+        pre:
+          status: in_service
+        effect:
+          - update:
+              object: equipment
+              identity: { from: identity }
+              properties:
+                mark: scrapped                 # 台账标记改为报废
+      register:
+        description: 登记
+        pre:
+          $exists: false                       # 各源都还没有这个序列号
+          $request:
+            dept: { object: department }
+        effect:
+          - create:
+              object: equipment
+              properties:
+                name: { from: request }
+                dept: { from: request }
+                serial_no: { from: identity }  # 序列号=请求顶上的 identity
+      finish_repair:
+        description: 结束维修
+        pre:
+          $link:
+            under_repair:
+              is_open: true                   # 前置在设备上，用设备出发的关系名
+        effect:
+          - update:
+              object: repair
+              filter:
+                is_open: true
+                serial_no: { eq: { from: identity } }   # 过滤落在维修上，用维修自己的字段
+              properties:
+                ended_at: now                  # 结束时刻=此刻
+  department:
+    description: 部门
+    kind: thing
+    identity: dept_id
+    properties:
+      name:
+        type: string
+        description: 部门名称
+      dept_id:
+        type: string
+        description: 部门编号
+    sources:
+      org:
+        connection: device_sys
+        table: department
+        pk: dept_id
+        fields:
+          name: dept_name
+          dept_id: dept_id
+
+  assignment:
+    description: 履历                          # 设备某段时间属于某部门。不是设备
+    kind: event
+    identity: asgn_no
+    properties:
+      asgn_no:
+        type: string
+        description: 履历编号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      serial_no:
+        type: string
+        description: 设备序列号
+      dept_id:
+        type: string
+        description: 部门编号
+      valid_from:
+        type: date
+        description: 生效日
+      valid_to:
+        type: date
+        description: 失效日
+    sources:
+      history:
+        connection: device_sys
+        table: assignment
+        pk: id
+        fields:
+          asgn_no: asgn_no
+          serial_no: sn
+          dept_id: dept_id
+          valid_from: valid_from
+          valid_to: valid_to
+
+  warranty_card:
+    description: 保修卡                        # 挂在设备上，不是设备自己
+    kind: thing
+    identity: serial_no                        # 与设备同一序列号
+    properties:
+      serial_no:
+        type: string
+        description: 出厂序列号
+      expiry:
+        type: date
+        description: 到期日
+    sources:
+      cards:
+        connection: asset_sys
+        table: warranty_card
+        pk: card_id
+        fields:
+          serial_no: sn
+          expiry: expiry
+
+  repair:
+    description: 维修                          # 一次维修记录。不是设备
+    kind: event
+    identity: repair_no
+    properties:
+      repair_no:
+        type: string
+        description: 维修单号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      serial_no:
+        type: string
+        description: 设备序列号
+      started_at:
+        type: date
+        description: 开始时刻
+      ended_at:
+        type: date
+        description: 结束时刻
+      is_open:
+        type: boolean
+        description: 是否未结束
+        derived:
+          ended_at: null                       # 结束时刻为空=未结束
+    sources:
+      repairs:
+        connection: device_sys
+        table: repair
+        pk: id
+        fields:
+          repair_no: repair_no
+          serial_no: serial_no
+          started_at: started_at
+          ended_at: ended_at
+
+  person:
+    description: 人员
+    kind: thing
+    identity: person_no                        # 工号
+    properties:
+      person_no:
+        type: string
+        description: 人员编号
+      name:
+        type: string
+        description: 姓名
+    sources:
+      hr:
+        connection: hr_sys
+        table: person
+        pk: person_no
+        fields:
+          person_no: person_no
+          name: name
+    actions:
+      transfer_post:
+        description: 调岗                         # 挂在人员上：对某个人调岗，不改人本身
+        pre:
+          $link:
+            appointments:                        # 前置在人上，用人出发的关系名
+              is_current: true
+          $request:
+            dept: { object: department }
+        effect:
+          - update:
+              object: appointment
+              filter:
+                is_current: true
+                person_no: { eq: { from: identity } }  # 过滤落在任职上：这个人工号 + 在任
+              properties:
+                valid_to: now-1d/d
+          - create:
+              object: appointment
+              properties:
+                appt_no: { from: generated }     # 任职编号（属性名，不是保留字）。计数器发号
+                person_no: { from: identity }    # 人员编号=请求顶上的工号
+                title: { from: request }
+                dept: { from: request }
+                valid_from: now/d              # 生效日=今天 0 点
+        inform:
+          - object: change
+            to: [payroll]
+            properties:
+              action: { from: action }
+              occurred_at: now
+              subject: { from: identity }
+              subject_class: { from: object }
+
+  appointment:
+    description: 任职                            # 谁在哪个部门任什么职、从哪天到哪天。不是人
+    kind: event                                 # 一条记录发生过即确定；在任与否用日期算，不另改类
+    identity: appt_no
+    properties:
+      appt_no:
+        type: string
+        description: 任职编号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      person_no:
+        type: string
+        description: 人员编号                    # 用来和人对上；held_by 比的就是它
+      title:
+        type: string
+        description: 职务
+      dept:
+        type: string
+        description: 部门编号
+      valid_from:
+        type: date
+        description: 生效日
+      valid_to:
+        type: date
+        description: 失效日                      # 空=至今
+      is_current:
+        type: boolean
+        description: 是否在任                    # 派生，表上没有这一列
+        derived:
+          valid_from: { lte: now/d }            # 生效日不晚于今天
+          valid_to: { gte: now/d }              # 失效日不早于今天；空按至今
+    sources:
+      posts:
+        connection: hr_sys
+        table: appointment
+        pk: id
+        fields:
+          appt_no: appt_no
+          person_no: person_no
+          title: title
+          dept: dept_id
+          valid_from: valid_from
+          valid_to: valid_to
+
+  change:
+    description: 变更                            # 一次动作做完后的那包变更
+    kind: event
+    identity: change_id                         # 由 action、subject、occurred_at 合成
+    properties:
+      change_id:
+        type: string
+        description: 变更编号
+      action:
+        type: string
+        description: 动作名                      # inform：{ from: action }
+      occurred_at:
+        type: date
+        description: 发生时间                    # inform：now
+      subject:
+        type: string
+        description: 请求点名个体的识别值        # inform：{ from: identity }
+      subject_class:
+        type: string
+        description: 请求点名个体的类名          # inform：{ from: object }
+
+  change_line:
+    description: 变更条目
+    kind: event
+    identity: line_id
+    properties:
+      line_id:
+        type: string
+        description: 条目编号
+      change_id:
+        type: string
+        description: 所属变更
+      op:
+        type: enum
+        values: [update, create, delete, link]
+        description: 操作种类，与效应相同
+      object:
+        type: string
+        description: 被操作个体的类名
+      target:
+        type: string
+        description: 被操作个体的识别值
+
+link_types:
+  converted:
+    description: 转化为
+    from: equipment
+    to: equipment                              # 同一台设备的两个阶段
+    inverse: converted_from
+    card: 1:1
+    transition:
+      property: status
+      from: in_transit
+      to: in_service
+  belongs_to:
+    description: 属于
+    from: equipment
+    to: department
+    inverse: has_equipment                     # 从部门查设备时写这个名字
+    card: N:1
+    match:
+      - { from: dept, to: dept_id }
+  of_equipment:
+    description: 哪台设备
+    from: assignment
+    to: equipment
+    inverse: assignments
+    card: N:1
+    match:
+      - { from: serial_no, to: serial_no }
+  of_department:
+    description: 哪个部门
+    from: assignment
+    to: department
+    inverse: has_assignments
+    card: N:1
+    match:
+      - { from: dept_id, to: dept_id }
+  covers:
+    description: 保修
+    from: warranty_card
+    to: equipment
+    inverse: covered_by
+    card: N:1
+    match:
+      - { from: serial_no, to: serial_no }
+  on_equipment:
+    description: 维修哪台
+    from: repair
+    to: equipment
+    inverse: under_repair                      # 从设备查维修时写这个名字
+    card: N:1
+    match:
+      - { from: serial_no, to: serial_no }
+  held_by:
+    description: 任职于谁                         # 任职 → 人。不是保留字
+    from: appointment
+    to: person
+    inverse: appointments                        # 人 → 任职。前置里写这个名字
+    card: N:1                                    # 一人可有多条任职，一条任职只属于一人
+    match:
+      - { from: person_no, to: person_no }       # 任职.person_no = 人.person_no 则关系成立
+  posted_in:
+    description: 任职于哪
+    from: appointment
+    to: department
+    inverse: has_posts
+    card: N:1
+    match:
+      - { from: dept, to: dept_id }
+  has_line:
+    description: 变更包含条目
+    from: change
+    to: change_line
+    inverse: of_change
+    card: 1:N
+    match:
+      - { from: change_id, to: change_id }
+
+outlets:
+  payroll:
+    description: 薪酬侧收件
+    connection: payroll_hook
+```
