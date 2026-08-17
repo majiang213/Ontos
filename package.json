@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@phosphor-icons/react": "^2.1.10",
     "@types/js-yaml": "^4.0.9",
     "@xyflow/react": "^12.11.2",

@@ -1,5 +1,5 @@
 // 本体画布 —— 节点是对象类型，边是关系。只读展示已发布配置（编辑走发布流程，M4 之后开放）。
-// 节点卡用 Double-Bezel（外壳托盘 + 内核），ReactFlow 只换肤不改行为。
+// 节点卡用 Double-Bezel；位置由 dagre 分层布局给出（被引用的根在上）；「整理布局」随时重排。
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
@@ -8,15 +8,19 @@ import {
   Controls,
   Handle,
   MarkerType,
+  Panel,
   Position,
   ReactFlow,
+  ReactFlowProvider,
   applyNodeChanges,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { layoutObjects } from "../lib/layout";
 
 export interface CanvasObject {
   name: string;
@@ -38,8 +42,8 @@ export interface CanvasLink {
 function ObjectNode({ data }: { data: ObjNodeData }) {
   return (
     <div className="node-shell">
-      <Handle type="target" position={Position.Left} style={{ visibility: "hidden" }} />
-      <Handle type="source" position={Position.Right} style={{ visibility: "hidden" }} />
+      <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
+      <Handle type="source" position={Position.Bottom} style={{ visibility: "hidden" }} />
       <div className="node-core">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span className="node-title">{data.label}</span>
@@ -73,28 +77,25 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
 type ObjNodeData = Record<string, unknown> & CanvasObject & { label: string };
 const nodeTypes = { obj: ObjectNode };
 
-export default function OntologyCanvas({
-  objects,
-  links,
-  onSelect,
-}: {
-  objects: CanvasObject[];
-  links: CanvasLink[];
-  onSelect: (name: string) => void;
-}) {
-  const initialNodes: Node<ObjNodeData>[] = useMemo(
-    () =>
-      objects.map((o, i) => {
-        const row = Math.floor(i / 3);
-        return {
-          id: o.name,
-          type: "obj",
-          position: { x: (i % 3) * 340 + (row % 2) * 120, y: row * 320 }, // 奇数行右移，破刚性网格
-          data: { ...o, label: o.name },
-        };
-      }),
-    [objects]
+export default function OntologyCanvas(props: { objects: CanvasObject[]; links: CanvasLink[]; onSelect: (name: string) => void }) {
+  return (
+    <ReactFlowProvider>
+      <Flow {...props} />
+    </ReactFlowProvider>
   );
+}
+
+function Flow({ objects, links, onSelect }: { objects: CanvasObject[]; links: CanvasLink[]; onSelect: (name: string) => void }) {
+  const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
+    const pos = layoutObjects(objects, links);
+    return objects.map((o) => ({
+      id: o.name,
+      type: "obj",
+      position: pos.get(o.name) ?? { x: 0, y: 0 },
+      data: { ...o, label: o.name },
+    }));
+  }, [objects, links]);
+
   // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
   const [nodes, setNodes] = useNodesState(initialNodes);
   useEffect(() => setNodes(initialNodes), [initialNodes, setNodes]);
@@ -102,6 +103,15 @@ export default function OntologyCanvas({
     (changes: NodeChange<Node<ObjNodeData>>[]) => setNodes((ns) => applyNodeChanges(changes, ns)),
     [setNodes]
   );
+
+  const rf = useReactFlow();
+  /** 一键理顺：重跑分层布局并取景。导入一批新表、或拖乱了之后用。 */
+  const tidy = useCallback(() => {
+    const pos = layoutObjects(objects, links);
+    setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
+    requestAnimationFrame(() => rf.fitView({ padding: 0.2 }));
+  }, [objects, links, setNodes, rf]);
+
   const edges: Edge[] = useMemo(
     () =>
       links.map((l) => ({
@@ -114,6 +124,7 @@ export default function OntologyCanvas({
       })),
     [links]
   );
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -129,6 +140,9 @@ export default function OntologyCanvas({
     >
       <Background gap={20} color="rgba(32,29,24,0.06)" />
       <Controls showInteractive={false} />
+      <Panel position="top-right">
+        <button className="btn" onClick={tidy}>整理布局</button>
+      </Panel>
     </ReactFlow>
   );
 }
