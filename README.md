@@ -41,8 +41,8 @@
 
 | 文件 | 内容 |
 |---|---|
-| `ontos-article.md` | 概念长文：本体论要素、本体与已有系统、跨源对齐方法论、查询与写入的求值过程、局限、配置附录 |
-| `Ontology平台MVP设计文档.md` | MVP 设计文档：产品定位、系统架构、元模型骨架、计划与红线 |
+| `docs/ontos-article.md` | 概念长文：本体论要素、本体与已有系统、跨源对齐方法论、查询与写入的求值过程、局限、配置附录 |
+| `docs/Ontology平台MVP设计文档.md` | MVP 设计文档：产品定位、系统架构、元模型骨架、计划与红线 |
 | `AGENTS.md` | 仓库工作约定：语言规则、术语表、交互架构约定 |
 | 仓库根目录 | Next.js 应用（前后端一体）：引擎 `lib/engine/`、Zod schema `lib/schema/`、种子配置 `lib/config/ontology.yaml`、引擎测试 `tests/` |
 
