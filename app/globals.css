@@ -235,6 +235,16 @@ input:focus { border-color: var(--accent) !important; }
 .node-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 
 /* ReactFlow 换肤 */
+.edge-label {
+  position: absolute;
+  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--panel);
+  border-radius: var(--r-chip);
+  padding: 1px 8px;
+  box-shadow: 0 0 0 1px var(--hairline);
+  pointer-events: none;
+}
 .react-flow__edge-text { font-size: 11px; fill: var(--ink-2); }
 .react-flow__edge-textbg { fill: var(--bg); }
 .react-flow__edge-path { stroke: var(--ink-3); stroke-width: 1.2; }

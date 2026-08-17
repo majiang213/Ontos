@@ -21,6 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects } from "../lib/layout";
+import FloatingEdge from "./FloatingEdge";
 
 export interface CanvasObject {
   name: string;
@@ -76,6 +77,7 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
 
 type ObjNodeData = Record<string, unknown> & CanvasObject & { label: string };
 const nodeTypes = { obj: ObjectNode };
+const edgeTypes = { floating: FloatingEdge };
 
 export default function OntologyCanvas(props: { objects: CanvasObject[]; links: CanvasLink[]; onSelect: (name: string) => void }) {
   return (
@@ -116,6 +118,7 @@ function Flow({ objects, links, onSelect }: { objects: CanvasObject[]; links: Ca
     () =>
       links.map((l) => ({
         id: l.name,
+        type: "floating",
         source: l.from,
         target: l.to,
         label: l.inverse ? `${l.name} / ${l.inverse}` : l.name,
@@ -130,6 +133,7 @@ function Flow({ objects, links, onSelect }: { objects: CanvasObject[]; links: Ca
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       fitView
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
