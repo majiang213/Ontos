@@ -7,7 +7,9 @@ import { filterSchema, type Filter } from "./config";
 /* ---------- 查询：一棵以类为根的树 ---------- */
 export const aggregateSchema = z.object({
   group_by: z.array(z.string()).nonempty(),
-  metrics: z.array(z.record(z.string(), z.string())).nonempty(), // [{ count: "*" }, { avg: "field" }]
+  metrics: z
+    .array(z.record(z.string(), z.string()).refine((m) => Object.keys(m).length === 1, { message: "每条聚合只写一个键" }))
+    .nonempty(), // [{ count: "*" }, { avg: "field" }]
 });
 export type Aggregate = z.infer<typeof aggregateSchema>;
 
@@ -31,7 +33,10 @@ export const queryRequestSchema = z.object({
   identity: z.union([z.string(), z.number()]).optional(), // 认准一个体
   properties: z.array(z.string()).optional(),
   filter: filterSchema.optional(),
-  order: z.record(z.string(), z.enum(["asc", "desc"])).optional(),
+  order: z
+    .record(z.string(), z.enum(["asc", "desc"]))
+    .refine((o) => Object.keys(o).length === 1, { message: "order 只支持单键" })
+    .optional(),
   limit: z.number().int().positive().max(1000).optional(), // 查询治理：上限
   aggregate: aggregateSchema.optional(), // 有它就不返回个体行
   expand: z.array(expandNodeSchema).optional(),

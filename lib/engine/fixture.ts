@@ -11,6 +11,8 @@ import {
 } from "./driver";
 
 const quote = (id: string) => `"${id}"`;
+// node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言
+const bind = (params: unknown[]) => params as never[];
 
 export class SqliteFixtureDriver implements SourceDriver {
   readonly dialect = "sqlite" as const;
@@ -31,13 +33,13 @@ export class SqliteFixtureDriver implements SourceDriver {
 
   select(connection: string, table: string, columns: string[], conditions: Condition[]) {
     const { sql, params } = buildSelect(table, columns, conditions, quote);
-    return this.db(connection).prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
+    return this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
   }
 
   insert(connection: string, table: string, row: Record<string, unknown>) {
     const cols = Object.keys(row);
     const sql = `INSERT INTO ${quote(table)} (${cols.map(quote).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
-    this.db(connection).prepare(sql).run(...(cols.map((c) => row[c]) as never[]));
+    this.db(connection).prepare(sql).run(...bind(cols.map((c) => row[c])));
   }
 
   update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): number {
@@ -46,7 +48,7 @@ export class SqliteFixtureDriver implements SourceDriver {
     const parts = conditions.map((c) => conditionSql(c, quote));
     const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
     const params = [...setCols.map((c) => set[c]), ...parts.flatMap((p) => p.params)];
-    const res = this.db(connection).prepare(`UPDATE ${quote(table)} SET ${setSql}${where}`).run(...(params as never[]));
+    const res = this.db(connection).prepare(`UPDATE ${quote(table)} SET ${setSql}${where}`).run(...bind(params));
     return Number(res.changes);
   }
 
@@ -55,7 +57,7 @@ export class SqliteFixtureDriver implements SourceDriver {
     const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
     const res = this.db(connection)
       .prepare(`DELETE FROM ${quote(table)}${where}`)
-      .run(...(parts.flatMap((p) => p.params) as never[]));
+      .run(...bind(parts.flatMap((p) => p.params)));
     return Number(res.changes);
   }
 
@@ -67,12 +69,11 @@ export class SqliteFixtureDriver implements SourceDriver {
 }
 
 /* 演示剧本数据：
-   - 采购源 po_item 120 行（SN-40000 ~ SN-40119）
+   - 采购源 po_item 121 行（SN-40000 ~ SN-40119，外加验收主角 SN-40217）
    - 设备源 device 100 行：40 台序列号与采购重合（SN-40080 ~ SN-40119，其中 3 台已报废），60 台设备独有（SN-60000 ~ SN-60059）
-   - SN-40217 只在采购源（在途），是验收演示的主角
    - 部门 D01~D08；D07 生产部（调拨演示目标）
    - 日期一律 UTC Unix 秒（INTEGER） */
-function seedDemo(d: SqliteFixtureDriver) {
+export function seedDemo(d: SqliteFixtureDriver) {
   const sn4 = (i: number) => `SN-4${String(i).padStart(4, "0")}`;
   const now = Math.floor(Date.now() / 1000);
   const DEPTS = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08"];

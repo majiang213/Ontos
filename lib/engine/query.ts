@@ -2,11 +2,13 @@
 // 先定列再下推；各源取回后按同一性标准对齐；派生按形状翻译；全程只读。
 
 import type { Filter, LinkType, OntologyConfig } from "../schema/config";
+import { FILTER_OPS } from "../schema/config";
 import type { ExpandNode, QueryRequest } from "../schema/request";
 import type { Condition, SourceDriver } from "./driver";
 import type { EvalContext } from "./expr";
 import {
   currentOf,
+  EngineReject,
   evalDerived,
   evalFilterOnIndividual,
   keyColumn,
@@ -35,11 +37,11 @@ function resolveLink(config: OntologyConfig, clsName: string, name: string): Res
   for (const link of Object.values(config.link_types)) {
     if (link.inverse === name && link.to === clsName) return { link, reversed: true };
   }
-  throw new Error(`关系名对不上配置：${clsName} 出发没有 ${name}`);
+  throw new EngineReject(`关系名对不上配置：${clsName} 出发没有 ${name}`);
 }
 
 /** 转化关系的两截判定（§6.4）：出发规则里值为 true 的源现在有没有行；到达规则现在是否整条命中。 */
-function transitionHolds(cls: Cls, ind: Individual, link: LinkType): boolean {
+function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: Env, ctx: EvalContext): boolean {
   const t = link.transition!;
   const clsOfLink = cls;
   const def = clsOfLink.def.properties[t.property];
@@ -50,7 +52,7 @@ function transitionHolds(cls: Cls, ind: Individual, link: LinkType): boolean {
   const fromSourcesHaveRows = Object.entries(fromRule.when)
     .filter(([, cond]) => cond === true)
     .every(([src]) => ind.rows[src] != null);
-  return fromSourcesHaveRows && whenRuleHits(clsOfLink, ind, toRule);
+  return fromSourcesHaveRows && whenRuleHits(clsOfLink, ind, toRule, env, ctx);
 }
 
 /** 组装求值环境：配置 + 驱动 + 关系判定 + 存在性检查。查询与动作共用。 */
@@ -65,8 +67,8 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
       const cls = mustCls(config, clsName);
       const { link, reversed } = resolveLink(config, clsName, linkName);
       if (link.transition) {
-        if (targetFilter !== undefined) throw new Error(`转化关系不支持目标侧过滤：${linkName}`);
-        return transitionHolds(cls, ind, link);
+        if (targetFilter !== undefined) throw new EngineReject(`转化关系不支持目标侧过滤：${linkName}`);
+        return transitionHolds(cls, ind, link, env, ctx);
       }
       // match 关系：两端属性值相等则成立。空值不连关系。
       const targetClsName = reversed ? link.from : link.to;
@@ -97,39 +99,40 @@ interface SelectOpts {
   path?: string[];
 }
 
-/** 本次涉及的属性：要返回的 + 过滤点到的 + 派生的输入 + 展开 match 的本侧。 */
+/** 本次涉及的属性：要返回的 + 过滤点到的 + 派生的输入 + 展开与 $link 的配对属性。 */
 function neededProps(cls: Cls, requested: string[] | undefined, filter: Filter | undefined, expands: ExpandNode[] | undefined, config: OntologyConfig): Set<string> {
   const need = new Set<string>();
+  const addLink = (name: string) => {
+    const { link, reversed } = resolveLink(config, cls.name, name);
+    if (link.match) for (const pair of link.match) addProp(reversed ? pair.to : pair.from);
+    if (link.transition) addProp(link.transition.property);
+  };
+  const addFilterKeys = (f: Filter) => {
+    for (const k of Object.keys(f)) {
+      if (k === "$link") for (const name of Object.keys(f.$link as Filter)) addLink(name);
+      else if (!k.startsWith("$")) addProp(k);
+    }
+  };
   const addProp = (p: string) => {
     if (need.has(p)) return;
     need.add(p);
     const def = cls.def.properties[p];
-    if (!def) throw new Error(`名字对不上配置：${cls.name}.${p}`);
+    if (!def) throw new EngineReject(`名字对不上配置：${cls.name}.${p}`);
     if (def.derived) {
       if (Array.isArray(def.derived)) {
         for (const rule of def.derived) {
           for (const cond of Object.values(rule.when)) {
-            if (typeof cond === "object") Object.keys(cond as Filter).forEach(addProp);
+            if (typeof cond === "object") addFilterKeys(cond as Filter);
           }
         }
       } else {
-        Object.keys(def.derived as Filter).filter((k) => !k.startsWith("$")).forEach(addProp);
+        addFilterKeys(def.derived as Filter);
       }
     }
   };
   requested?.forEach(addProp);
-  if (filter) Object.keys(filter).filter((k) => !k.startsWith("$")).forEach(addProp);
-  for (const ex of expands ?? []) {
-    const { link, reversed } = resolveLink(config, cls.name, ex.relation);
-    if (link.match) for (const pair of link.match) addProp(reversed ? pair.to : pair.from);
-    if (link.transition) addProp(link.transition.property);
-  }
-  // $link 里的转化关系也要读 transition.property
-  const linkBlock = filter?.$link as Record<string, unknown> | undefined;
-  for (const name of Object.keys(linkBlock ?? {})) {
-    const { link } = resolveLink(config, cls.name, name);
-    if (link.transition) addProp(link.transition.property);
-  }
+  if (filter) addFilterKeys(filter);
+  for (const ex of expands ?? []) addLink(ex.relation);
   return need;
 }
 
@@ -155,18 +158,32 @@ function toConditions(column: string, cv: unknown, ctx: EvalContext): Condition[
   try {
     if (cv !== null && typeof cv === "object" && !Array.isArray(cv)) {
       const rec = cv as Record<string, unknown>;
-      return Object.entries(rec).map(([op, operand]) => {
+      const keys = Object.keys(rec);
+      const isOpObject = keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k));
+      if (!isOpObject) {
+        // 裸的 { property, from } 视为等值；取不到值就留内存核对
+        const v = resolveOperand(cv, ctx);
+        return v === undefined ? null : [{ column, op: "eq", value: v }];
+      }
+      const conds: Condition[] = [];
+      for (const [op, operand] of Object.entries(rec)) {
         const v = resolveOperand(operand, ctx);
-        if (op === "eq" && v === null) return { column, op: "null" } as Condition;
-        if (op === "ne" && v === null) return { column, op: "notnull" } as Condition;
-        return { column, op: op as Condition["op"], value: v };
-      });
+        if (v === undefined) return null; // 依赖 current 等，留内存核对
+        if (v === null) {
+          if (op === "eq") conds.push({ column, op: "null" });
+          else if (op === "ne") conds.push({ column, op: "notnull" });
+          else return null; // 与 null 比大小：下推会改变语义（空按至今），留内存核对
+        } else {
+          conds.push({ column, op: op as Condition["op"], value: v });
+        }
+      }
+      return conds;
     }
     if (cv === null) return [{ column, op: "null" }];
     const v = resolveOperand(cv, ctx);
-    return [{ column, op: "eq", value: v }];
+    return v === undefined ? null : [{ column, op: "eq", value: v }];
   } catch {
-    return null; // 操作数依赖 current 等，留内存核对
+    return null; // 操作数取不到值（如依赖 current），留内存核对
   }
 }
 
@@ -176,15 +193,16 @@ export function selectIndividuals(env: Env, clsName: string, opts: SelectOpts = 
   const srcs = sourcesOf(cls);
   if (srcs.length === 0) return []; // 无源类（如 change）读不出个体
   const ctx: EvalContext = { identity: opts.identity as string | number | undefined, ...(opts.ctx ?? {}) };
-  const need = opts.allColumns ? null : neededProps(cls, opts.requested, opts.filter, opts.expands, env.config);
+  const need = neededProps(cls, opts.requested, opts.filter, opts.expands, env.config); // 始终计算：校验名字、供取列
+  const readAll = opts.allColumns || opts.requested === undefined; // 没点 properties 就要返回全部，列得取全
   const pushed = pushdownConditions(cls, opts.filter, ctx);
   const byKey = new Map<string, Individual>();
 
   for (const [srcName, entry] of srcs) {
     const keyCol = keyColumn(cls, entry);
     const cols = new Set<string>([keyCol]);
-    if (need) for (const p of need) { const c = entry.fields[p]; if (c) cols.add(c); }
-    else for (const c of Object.values(entry.fields)) cols.add(c);
+    if (readAll) for (const c of Object.values(entry.fields)) cols.add(c);
+    else for (const p of need) { const c = entry.fields[p]; if (c) cols.add(c); }
     const conds: Condition[] = [...(pushed.get(srcName) ?? [])];
     if (opts.identity !== undefined) conds.push({ column: keyCol, op: "eq", value: opts.identity });
     const rows = env.driver.select(entry.connection, entry.table, [...cols], conds);
@@ -234,12 +252,6 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
     path,
   });
 
-  if (req.aggregate) {
-    const rows = aggregate(cls, individuals, req.aggregate, env, ctx);
-    path.push(`聚合：${req.aggregate.group_by.join("、")} 分组，${rows.length} 组`);
-    return { rows, path };
-  }
-
   // 展开：按已声明关系进入目标类
   const expanded = new Map<string, Record<string, Record<string, unknown>[]>>();
   for (const item of req.expand ?? []) {
@@ -252,15 +264,31 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
     path.push(`展开 ${item.relation}`);
   }
 
-  let rows = individuals.map((ind) => {
-    const row = project(cls, ind, req.properties, env, ctx);
-    const bag = expanded.get(ind.key);
-    if (bag) Object.assign(row, bag);
-    return row;
-  });
+  let rows: Record<string, unknown>[];
+  if (req.aggregate) {
+    rows = aggregate(cls, individuals, req.aggregate, env, ctx, path);
+    path.push(`聚合：${req.aggregate.group_by.join("、")} 分组，${rows.length} 组`);
+  } else {
+    rows = individuals.map((ind) => {
+      const row = project(cls, ind, req.properties, env, ctx);
+      const bag = expanded.get(ind.key);
+      if (bag) Object.assign(row, bag);
+      return row;
+    });
+  }
 
   if (req.order) {
     const [[prop, dir]] = Object.entries(req.order);
+    const legal = req.aggregate
+      ? new Set([
+          ...req.aggregate.group_by,
+          ...req.aggregate.metrics.map((m) => {
+            const [op, f] = Object.entries(m)[0];
+            return f === "*" ? op : `${op}_${f}`;
+          }),
+        ])
+      : new Set(Object.keys(cls.def.properties));
+    if (!legal.has(prop)) throw new EngineReject(`order 里的名字对不上配置：${prop}`);
     rows.sort((a, b) => compareRows(a[prop], b[prop]) * (dir === "desc" ? -1 : 1));
   }
   const limit = req.limit ?? DEFAULT_LIMIT;
@@ -282,7 +310,7 @@ function expandItem(
 ): [string, Record<string, unknown>[]] {
   const { link, reversed } = resolveLink(env.config, cls.name, item.relation);
   if (link.transition) {
-    return [item.relation, transitionHolds(cls, ind, link) ? [project(cls, ind, item.properties, env, ctx)] : []];
+    return [item.relation, transitionHolds(cls, ind, link, env, ctx) ? [project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
   const conds: Filter = {};
@@ -290,7 +318,8 @@ function expandItem(
     const myProp = reversed ? pair.to : pair.from;
     const targetProp = reversed ? pair.from : pair.to;
     const v = propValue(cls, ind, myProp);
-    if (v != null) conds[targetProp] = v;
+    if (v == null) return [item.relation, []]; // 配对值为空：关系不成立，没有目标——与 linkHolds 同语义
+    conds[targetProp] = v;
   }
   const merged: Filter = { ...conds, ...(item.filter ?? {}) };
   const targetCls = mustCls(env.config, targetClsName);
@@ -318,37 +347,48 @@ function project(cls: Cls, ind: Individual, requested: string[] | undefined, env
   const row: Record<string, unknown> = {};
   for (const p of props) {
     const def = cls.def.properties[p];
-    if (!def) throw new Error(`properties 里的名字对不上配置：${cls.name}.${p}`);
+    if (!def) throw new EngineReject(`properties 里的名字对不上配置：${cls.name}.${p}`);
     row[p] = def.derived ? evalDerived(cls, ind, p, env, ctx) : propValue(cls, ind, p);
   }
   return row;
 }
 
-function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRequest["aggregate"]>, env: Env, ctx: EvalContext) {
+function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRequest["aggregate"]>, env: Env, ctx: EvalContext, path: string[]) {
+  const views = new Map<string, Record<string, unknown>>(); // 每个个体只算一遍（派生含 $link 查询）
+  const viewOf = (ind: Individual) => {
+    let v = views.get(ind.key);
+    if (!v) { v = currentOf(cls, ind, env, ctx); views.set(ind.key, v); }
+    return v;
+  };
   const groups = new Map<string, { key: Record<string, unknown>; members: Individual[] }>();
   for (const ind of individuals) {
-    const cur = currentOf(cls, ind, env, ctx);
+    const cur = viewOf(ind);
     const keyObj = Object.fromEntries(agg.group_by.map((g) => [g, cur[g]]));
     const k = JSON.stringify(keyObj);
     const g = groups.get(k) ?? { key: keyObj, members: [] };
     g.members.push(ind);
     groups.set(k, g);
   }
-  return [...groups.values()].map(({ key, members }) => {
+  let dropped = 0;
+  const rows = [...groups.values()].map(({ key, members }) => {
     const row: Record<string, unknown> = { ...key };
     for (const metric of agg.metrics) {
       const [op, field] = Object.entries(metric)[0];
-      const vals = members.map((m) => currentOf(cls, m, env, ctx)[field]).filter((v): v is number => typeof v === "number");
+      const all = members.map((m) => viewOf(m)[field]);
+      const vals = all.filter((v): v is number => typeof v === "number");
+      if (op !== "count") dropped += all.length - vals.length;
       const name = field === "*" ? op : `${op}_${field}`;
       if (op === "count") row[name] = members.length;
       else if (op === "avg") row[name] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
       else if (op === "sum") row[name] = vals.reduce((a, b) => a + b, 0);
       else if (op === "min") row[name] = vals.length ? Math.min(...vals) : null;
       else if (op === "max") row[name] = vals.length ? Math.max(...vals) : null;
-      else throw new Error(`未知聚合：${op}`);
+      else throw new EngineReject(`未知聚合：${op}`);
     }
     return row;
   });
+  if (dropped > 0) path.push(`聚合剔除非数值 ${dropped} 个`);
+  return rows;
 }
 
 function compareRows(a: unknown, b: unknown): number {

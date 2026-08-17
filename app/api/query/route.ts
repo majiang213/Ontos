@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { queryRequestSchema } from "@/lib/schema/request";
 import { runQuery } from "@/lib/engine/query";
+import { EngineReject } from "@/lib/engine/individual";
 import { demoDriver, loadConfig } from "@/lib/engine/load";
 import { ZodError } from "zod";
 
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ rows, path });
   } catch (e) {
     if (e instanceof ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
-    // 名字对不上配置、类不存在等：引擎拒绝，不猜
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 422 });
+    if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 }); // 引擎拒绝，不猜
+    return NextResponse.json({ error: "引擎内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }

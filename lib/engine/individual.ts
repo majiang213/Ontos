@@ -3,7 +3,7 @@
 
 import type { Filter, Literal, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
 import type { SourceDriver } from "./driver";
-import { evalDateExpr, isDateExpr, type EvalContext } from "./expr";
+import { evalDateExpr, isDateExpr, resolveLiteral, type EvalContext } from "./expr";
 
 /** 类名 + 类定义，成对传。 */
 export interface Cls {
@@ -24,9 +24,12 @@ export interface Env {
   existsIndividual(clsName: string, identityValue: unknown): boolean;
 }
 
+/** 引擎拒绝：请求或配置里的名字对不上已发布配置。路由按 422 处理；其它异常是引擎故障，按 500。 */
+export class EngineReject extends Error {}
+
 export function mustCls(config: OntologyConfig, name: string): Cls {
   const def = config.object_types[name];
-  if (!def) throw new Error(`配置中没有类：${name}`);
+  if (!def) throw new EngineReject(`配置中没有类：${name}`);
   return { name, def };
 }
 
@@ -67,15 +70,20 @@ export function propValueFrom(cls: Cls, ind: Individual, src: string, prop: stri
 /* ---------- when 规则 ---------- */
 
 /** when 里一个键是否成立：true=有行；false=无行；过滤=有行且已映射属性满足。 */
-function whenKeyHolds(cls: Cls, ind: Individual, src: string, cond: boolean | Filter): boolean {
+function whenKeyHolds(cls: Cls, ind: Individual, src: string, cond: boolean | Filter, env: Env, ctx: EvalContext): boolean {
   const row = ind.rows[src];
   if (cond === true) return row != null;
   if (cond === false) return row == null;
   if (row == null) return false;
-  // 过滤落在该源的已映射属性上；键写属性名，不写列名
+  // 过滤落在该源的已映射属性上；键写属性名，不写列名。$link 按附录 B 放行，其余 $ 键拒绝
   return Object.entries(cond).every(([prop, cv]) => {
+    if (prop === "$link") {
+      return Object.entries(cv as Record<string, unknown>).every(([linkName, target]) =>
+        linkCondHolds(cls, ind, linkName, target, env, ctx)
+      );
+    }
     if (prop.startsWith("$")) throw new Error(`when 下的过滤不支持 ${prop}`);
-    return conditionHolds(propValueFrom(cls, ind, src, prop), cv, { current: sourceView(cls, ind, src) });
+    return conditionHolds(propValueFrom(cls, ind, src, prop), cv, { ...ctx, current: sourceView(cls, ind, src) });
   });
 }
 
@@ -88,8 +96,8 @@ function sourceView(cls: Cls, ind: Individual, src: string): Record<string, unkn
   return out;
 }
 
-export function whenRuleHits(cls: Cls, ind: Individual, rule: WhenRule): boolean {
-  return Object.entries(rule.when).every(([src, cond]) => whenKeyHolds(cls, ind, src, cond as boolean | Filter));
+export function whenRuleHits(cls: Cls, ind: Individual, rule: WhenRule, env: Env, ctx: EvalContext): boolean {
+  return Object.entries(rule.when).every(([src, cond]) => whenKeyHolds(cls, ind, src, cond as boolean | Filter, env, ctx));
 }
 
 /** 派生属性求值。when 列表取第一条命中；一条过滤取布尔。 */
@@ -98,7 +106,7 @@ export function evalDerived(cls: Cls, ind: Individual, prop: string, env: Env, c
   const derived = def?.derived;
   if (!derived) throw new Error(`属性不是派生的：${prop}`);
   if (Array.isArray(derived)) {
-    const hit = derived.find((r) => whenRuleHits(cls, ind, r));
+    const hit = derived.find((r) => whenRuleHits(cls, ind, r, env, ctx));
     return hit?.value;
   }
   return evalFilterOnIndividual(cls, ind, derived as Filter, env, ctx);
@@ -106,36 +114,62 @@ export function evalDerived(cls: Cls, ind: Individual, prop: string, env: Env, c
 
 /* ---------- 行级比较 ---------- */
 
-/** 操作数求值：字面量、日期表达式、{ property, from }、{ from: identity }。 */
+/** 操作数求值：字面量、ISO 日期串（落成 UTC Unix 秒）、日期表达式、{ property, from }、{ from: identity }。 */
 export function resolveOperand(v: unknown, ctx: EvalContext): unknown {
+  if (Array.isArray(v)) return v; // in 的值是数组
   if (v !== null && typeof v === "object") {
     const rec = v as Record<string, unknown>;
     if (typeof rec.property === "string") {
-      const bag = rec.from === "request" ? ctx.request : ctx.current;
-      const hit = bag?.[rec.property];
-      if (hit === undefined && rec.from !== "request" && ctx.currentDerived) return ctx.currentDerived(rec.property);
-      return hit;
+      if (rec.from === "request") {
+        try {
+          return resolveLiteral(ctx.request?.[rec.property]); // 请求参数：严格，非法拒绝
+        } catch (e) {
+          throw new EngineReject(e instanceof Error ? e.message : String(e));
+        }
+      }
+      const hit = ctx.current?.[rec.property];
+      if (hit === undefined) {
+        if (ctx.currentDerived) return ctx.currentDerived(rec.property);
+        throw new EngineReject(`操作数取不到值：${rec.property}`); // 下推层接到这个错就退回内存核对
+      }
+      return dataLiteral(hit); // 源库数据：只转换，不抛错
     }
     if (rec.from === "identity") return ctx.identity;
-    throw new Error(`无法识别的操作数：${JSON.stringify(v)}`);
+    throw new EngineReject(`无法识别的操作数：${JSON.stringify(v)}`);
   }
-  if (isDateExpr(v)) return evalDateExpr(v);
-  return v;
+  try {
+    return resolveLiteral(v); // 请求侧表达式非法 → 422
+  } catch (e) {
+    throw new EngineReject(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** 字符串字面量里的日期与表达式在 expr.ts 的 resolveLiteral 里统一处理。 */
+export { resolveLiteral };
+
+/** 数据侧的值只做转换、不抛错：源列里写什么不归引擎管，形似而非法就按原字符串比。 */
+function dataLiteral(v: unknown): unknown {
+  try {
+    return resolveLiteral(v);
+  } catch {
+    return v;
+  }
 }
 
 /** 单个条件是否成立。actual 为 undefined（个体或该值不存在）时一律不成立；
- *  null（列在、值为空）按「空=至今」处理：gt/gte 成立，lt/lte 不成立。 */
+ *  null（列在、值为空）按「空=至今」处理：actual 为空时 gt/gte 成立；expected 为空时 lt/lte 成立。 */
 export function conditionHolds(actual: unknown, condVal: unknown, ctx: EvalContext): boolean {
+  const a = dataLiteral(actual); // ISO 日期串落成秒；脏数据不抛错
   if (condVal !== null && typeof condVal === "object" && !Array.isArray(condVal)) {
     const rec = condVal as Record<string, unknown>;
     const keys = Object.keys(rec);
     if (keys.length > 0 && keys.every((k) => ["eq", "ne", "lt", "lte", "gt", "gte", "in", "contains"].includes(k))) {
-      return keys.every((op) => compareOp(actual, op, resolveOperand(rec[op], ctx)));
+      return keys.every((op) => compareOp(a, op, resolveOperand(rec[op], ctx)));
     }
     // 裸的 { property, from } 视为等值
-    return compareOp(actual, "eq", resolveOperand(condVal, ctx));
+    return compareOp(a, "eq", resolveOperand(condVal, ctx));
   }
-  return compareOp(actual, "eq", condVal as Literal);
+  return compareOp(a, "eq", condVal as Literal);
 }
 
 function compareOp(actual: unknown, op: string, expected: unknown): boolean {
@@ -145,6 +179,12 @@ function compareOp(actual: unknown, op: string, expected: unknown): boolean {
     if (op === "ne") return expected !== null;
     if (op === "gt" || op === "gte") return true; // 空=至今，至今晚于任何日期
     return false;
+  }
+  if (expected === null) {
+    if (op === "lt" || op === "lte") return true; // 与至今比：任何值都不晚于至今
+    if (op === "gt" || op === "gte") return false;
+    if (op === "ne") return true;
+    return false; // eq / in / contains
   }
   switch (op) {
     case "eq": return actual === expected;
@@ -164,7 +204,12 @@ const num = (v: unknown) => typeof v === "number";
 /* ---------- 整条过滤在个体上的核对（前置、布尔派生、残余过滤共用） ---------- */
 
 export function evalFilterOnIndividual(cls: Cls, ind: Individual, filter: Filter, env: Env, ctx: EvalContext): boolean {
+  const current = currentView(cls, ind); // 进循环前算一份
+  const evalCtx: EvalContext = { ...ctx, current, currentDerived: (p) => evalDerived(cls, ind, p, env, ctx) };
   return Object.entries(filter).every(([key, v]) => {
+    if ((key === "$request" || key === "$exists") && !ctx.allowPreKeys) {
+      throw new EngineReject(`${key} 只属于前置，查询过滤不支持`);
+    }
     if (key === "$link") {
       return Object.entries(v as Record<string, unknown>).every(([linkName, target]) =>
         linkCondHolds(cls, ind, linkName, target, env, ctx)
@@ -186,9 +231,9 @@ export function evalFilterOnIndividual(cls: Cls, ind: Individual, filter: Filter
     }
     // 属性条件：派生属性先算，源列属性按映射取值
     const def = cls.def.properties[key];
-    if (!def) throw new Error(`过滤里的名字对不上配置：${cls.name}.${key}`);
+    if (!def) throw new EngineReject(`过滤里的名字对不上配置：${cls.name}.${key}`);
     const actual = def.derived ? evalDerived(cls, ind, key, env, ctx) : propValue(cls, ind, key);
-    return conditionHolds(actual, v, { ...ctx, current: currentView(cls, ind), currentDerived: (p) => evalDerived(cls, ind, p, env, ctx) });
+    return conditionHolds(actual, v, evalCtx);
   });
 }
 

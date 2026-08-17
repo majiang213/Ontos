@@ -11,7 +11,8 @@ export interface EvalContext {
   request?: Record<string, unknown>; // 请求参数
   current?: Record<string, unknown>; // 本条过滤或 update 正在谈的个体的源列属性值
   currentDerived?: (prop: string) => unknown; // 点名的属性是派生属性时，按需现算
-  nextSequence?: (key: string) => number; // generate 的计数器
+  nextSequence?: (key: string, start?: number) => number; // generate 的计数器
+  allowPreKeys?: boolean; // true 才许用 $request / $exists（它们只属于前置，见 §5.2）
 }
 
 /* ---------- 日期表达式 ----------
@@ -69,6 +70,22 @@ export function evalNumberExpr(expr: string, ctx: EvalContext): number {
   return m[2] === "+" ? a + b : a - b;
 }
 
+/** 字符串字面量里的日期：ISO 串转 UTC Unix 秒；now 系按表达式求值；形似表达式但不合语法的拒绝。
+ *  「形似」收紧为 now 后紧跟运算符/数字/斜杠，或 current./request. 前缀—— nowadays 这类文本不算。 */
+const EXPR_LIKE = /^(now([+\-/\d]|$)|(current|request)\.)/;
+
+export function resolveLiteral(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  if (isDateExpr(v)) return evalDateExpr(v);
+  if (EXPR_LIKE.test(v)) throw new Error(`非法表达式：${v}`);
+  if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
+    const ms = Date.parse(v);
+    if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${v}`);
+    return Math.floor(ms / 1000);
+  }
+  return v;
+}
+
 /* ---------- 属性值来源 ----------
    { from: request } 同名参数；{ property: 名, from: current|request } 点名的属性；
    { from: identity|action|object } 请求顶上的值；{ from: generated } 按 generate 发号；
@@ -95,6 +112,8 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
   if (typeof v === "string") {
     if (isDateExpr(v)) return evalDateExpr(v);
     if (isNumberExpr(v)) return evalNumberExpr(v, ctx);
+    if (EXPR_LIKE.test(v)) throw new Error(`非法表达式：${v}`); // 形似表达式但不合语法，拒绝而不是当字面量写库
+    if (/^\d{4}-\d{2}-\d{2}/.test(v)) return resolveLiteral(v);
   }
   return v;
 }
@@ -114,11 +133,17 @@ export function formatUtc(seconds: number, format: string): string {
 }
 
 function uuidV7(): string {
-  const ms = Date.now();
+  const ms = Date.now(); // 48 位毫秒时间戳
   const rnd = crypto.getRandomValues(new Uint8Array(10));
-  const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-  const ts = ms.toString(16).padStart(12, "0");
-  return `${ts.slice(0, 8)}-${ts.slice(8, 12)}-7${hex(rnd).slice(0, 3)}-${((rnd[0] & 0x3f) | 0x80).toString(16).padStart(2, "0")}${hex(rnd).slice(2, 6)}-${hex(rnd).slice(6, 18)}`;
+  const b = [
+    (ms / 2 ** 40) & 0xff, (ms / 2 ** 32) & 0xff, (ms / 2 ** 24) & 0xff,
+    (ms / 2 ** 16) & 0xff, (ms / 2 ** 8) & 0xff, ms & 0xff,
+    0x70 | (rnd[0] & 0x0f), rnd[1], // version 7
+    0x80 | (rnd[2] & 0x3f), rnd[3], // variant 10
+    rnd[4], rnd[5], rnd[6], rnd[7], rnd[8], rnd[9],
+  ];
+  const h = [...b].map((x) => Math.floor(x).toString(16).padStart(2, "0"));
+  return `${h.slice(0, 4).join("")}-${h.slice(4, 6).join("")}-${h.slice(6, 8).join("")}-${h.slice(8, 10).join("")}-${h.slice(10, 16).join("")}`;
 }
 
 export function generateValue(cls: string, prop: string, def: PropertyDef, ctx: EvalContext): string {
@@ -131,7 +156,7 @@ export function generateValue(cls: string, prop: string, def: PropertyDef, ctx: 
     if (rec.sequence) {
       if (!ctx.nextSequence) throw new Error("没有计数器，不能发号");
       const seq = rec.sequence as { start?: number; width?: number };
-      return pad(ctx.nextSequence(`${cls}.${prop}`), seq.width ?? 4);
+      return pad(ctx.nextSequence(`${cls}.${prop}`, seq.start ?? 1), seq.width ?? 4);
     }
     if (rec.uuid === "v7") return uuidV7();
     throw new Error(`无法识别的 generate 项：${JSON.stringify(item)}`);

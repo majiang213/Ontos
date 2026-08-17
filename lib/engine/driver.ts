@@ -35,8 +35,10 @@ export function conditionSql(cond: Condition, quote: (id: string) => string): { 
       if (vals.length === 0) return { sql: "1 = 0", params: [] };
       return { sql: `${col} IN (${vals.map(() => "?").join(", ")})`, params: vals };
     }
-    case "contains":
-      return { sql: `${col} LIKE ?`, params: [`%${String(cond.value)}%`] };
+    case "contains": {
+      const v = String(cond.value).replace(/[\\%_]/g, (c) => `\\${c}`); // 转义通配符，防 % 变全表匹配
+      return { sql: `${col} LIKE ? ESCAPE '\\'`, params: [`%${v}%`] };
+    }
     case "eq":
       return cond.value === null
         ? { sql: `${col} IS NULL`, params: [] }
