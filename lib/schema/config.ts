@@ -129,7 +129,7 @@ export const linkTypeSchema = z
       })
       .optional(),
   })
-  .refine((l) => !(l.match && l.transition), { message: "match 与 transition 互斥" });
+  .refine((l) => (l.match ? 1 : 0) + (l.transition ? 1 : 0) === 1, { message: "match 与 transition 必须且只能写一种" });
 export type LinkType = z.infer<typeof linkTypeSchema>;
 
 /* ---------- 根 ---------- */

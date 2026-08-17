@@ -96,10 +96,19 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
     const from = rec.from;
     if (typeof rec.property === "string") {
       const bag = from === "request" ? ctx.request : ctx.current;
-      return bag?.[rec.property as string];
+      const hit = bag?.[rec.property as string];
+      if (hit === undefined) throw new Error(`取不到值：${String(rec.property)}`);
+      return hit;
     }
-    if (from === "request") return ctx.request?.[propName];
-    if (from === "identity") return ctx.identity;
+    if (from === "request") {
+      const hit = ctx.request?.[propName];
+      if (hit === undefined) throw new Error(`请求缺参数：${propName}`);
+      return hit;
+    }
+    if (from === "identity") {
+      if (ctx.identity === undefined) throw new Error("请求缺识别值 identity");
+      return ctx.identity;
+    }
     if (from === "action") return ctx.action;
     if (from === "object") return ctx.object;
     if (from === "current") return ctx.current?.[propName];
@@ -151,7 +160,7 @@ export function generateValue(cls: string, prop: string, def: PropertyDef, ctx: 
   const parts = def.generate.map((item) => {
     if (typeof item === "string") return item;
     const rec = item as Record<string, unknown>;
-    if (rec.from) return String(resolveValue({ from: rec.from } as ValueSource, prop, ctx));
+    if (rec.from || rec.property) return String(resolveValue(item as ValueSource, prop, ctx)); // 整项交给 resolveValue，不拆键
     if (rec.date) return formatUtc(evalDateExpr(String(rec.date)), String(rec.format ?? "yyyyMMdd"));
     if (rec.sequence) {
       if (!ctx.nextSequence) throw new Error("没有计数器，不能发号");

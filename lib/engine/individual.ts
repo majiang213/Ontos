@@ -1,9 +1,10 @@
 // 个体 —— 同一性标准对齐之后，一个体 = 各源各一行（或缺行）。
 // 组装、属性取值、派生求值都在这里；过滤的行级核对也在这里。
 
-import type { Filter, Literal, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
+import type { Filter, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
 import type { SourceDriver } from "./driver";
-import { evalDateExpr, isDateExpr, resolveLiteral, type EvalContext } from "./expr";
+import { resolveLiteral, type EvalContext } from "./expr";
+import { FILTER_OPS } from "../schema/config";
 
 /** 类名 + 类定义，成对传。 */
 export interface Cls {
@@ -116,7 +117,7 @@ export function evalDerived(cls: Cls, ind: Individual, prop: string, env: Env, c
 
 /** 操作数求值：字面量、ISO 日期串（落成 UTC Unix 秒）、日期表达式、{ property, from }、{ from: identity }。 */
 export function resolveOperand(v: unknown, ctx: EvalContext): unknown {
-  if (Array.isArray(v)) return v; // in 的值是数组
+  if (Array.isArray(v)) return v.map((x) => resolveLiteral(x)); // in 的值是数组，元素级解析（ISO 串落成秒）
   if (v !== null && typeof v === "object") {
     const rec = v as Record<string, unknown>;
     if (typeof rec.property === "string") {
@@ -163,13 +164,14 @@ export function conditionHolds(actual: unknown, condVal: unknown, ctx: EvalConte
   if (condVal !== null && typeof condVal === "object" && !Array.isArray(condVal)) {
     const rec = condVal as Record<string, unknown>;
     const keys = Object.keys(rec);
-    if (keys.length > 0 && keys.every((k) => ["eq", "ne", "lt", "lte", "gt", "gte", "in", "contains"].includes(k))) {
+    if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
       return keys.every((op) => compareOp(a, op, resolveOperand(rec[op], ctx)));
     }
     // 裸的 { property, from } 视为等值
     return compareOp(a, "eq", resolveOperand(condVal, ctx));
   }
-  return compareOp(a, "eq", condVal as Literal);
+  // 等值位的字面量同样过解析：日期表达式、ISO 串落成秒，非法表达式拒绝
+  return compareOp(a, "eq", resolveOperand(condVal, ctx));
 }
 
 function compareOp(actual: unknown, op: string, expected: unknown): boolean {

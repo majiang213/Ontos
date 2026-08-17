@@ -376,6 +376,7 @@ describe("M8 动作的边界与补偿", () => {
     expect(res.notifications?.[0].to).toEqual(["payroll"]);
     expect(res.notifications?.[0].lines.map((l) => l.op)).toEqual(["update", "create"]);
     expect(res.notifications?.[0].lines[1].targets).toEqual([]); // create 行的识别值是 from: generated，不重复发号
+    expect(String(res.notifications?.[0].properties.change_id)).toMatch(/^transfer_post\|P001\|\d+$/); // change_id 三项合成
   });
 });
 
@@ -522,5 +523,65 @@ describe("第三轮修复的回归", () => {
   it("表达式判定只落在操作数位：等值位是纯文本，操作数位非法即拒", () => {
     expect(q({ object: "equipment", filter: { name: "nowhere 部门" } }).rows.length).toBe(0); // 不抛、不命中
     expect(() => q({ object: "repair", filter: { started_at: { gt: "current.qty-1d" } } })).toThrow();
+  });
+});
+
+describe("第五轮修复的回归", () => {
+  it("等值位的日期字面量也解析：ISO 串与表达式都能命中", () => {
+    expect(q({ object: "assignment", filter: { valid_from: "2025-01-01" } }).rows.length).toBe(1);
+    expect(q({ object: "assignment", filter: { valid_from: "now/d" } }).rows.length).toBe(0); // 不是今天 0 点
+  });
+
+  it("create 幂等：补偿重发不重复插（已有行的源跳过）", () => {
+    class FaultDriver extends SqliteFixtureDriver {
+      fail = true;
+      insert(connection: string, table: string, row: Record<string, unknown>) {
+        if (this.fail && table === "device") throw new Error("注入故障");
+        super.insert(connection, table, row);
+      }
+    }
+    const d = new FaultDriver();
+    seedDemo(d);
+    runAction(config, d, { action: "convert", object: "equipment", identity: "SN-40217" }); // device 失败、asset/warranty 成功
+    d.fail = false;
+    const retry = runAction(config, d, { action: "convert", object: "equipment", identity: "SN-40217" });
+    expect(retry.ok).toBe(true);
+    const cards = runQuery(config, d, { object: "warranty_card", filter: { serial_no: "SN-40217" } });
+    expect(cards.rows.length).toBe(1); // 不是两张
+  });
+
+  it("generate 的 { property, from } 项按点名的属性取值", () => {
+    const v = generateValue("c", "p", { type: "string", generate: [{ property: "title", from: "request" }] }, { request: { title: "经理" } });
+    expect(v).toBe("经理");
+    expect(() => generateValue("c", "p", { type: "string", generate: [{ property: "nope", from: "request" }] }, { request: {} })).toThrow(); // 缺参不拼 "undefined"
+  });
+
+  it("in 的元素级解析：ISO 日期串也能命中", () => {
+    expect(q({ object: "assignment", filter: { valid_from: { in: ["2025-01-01"] } } }).rows.length).toBe(1);
+  });
+
+  it("order 键必须在返回属性里；关系必须 match/transition 二选一且必居其一", () => {
+    expect(() => q({ object: "equipment", properties: ["name"], order: { serial_no: "asc" } })).toThrow();
+    expect(() => configSchema.parse({ object_types: {}, link_types: { bad: { from: "a", to: "b" } } })).toThrow();
+  });
+
+  it("转化关系不支持嵌套展开，拒绝", () => {
+    const driver = freshDriver();
+    runAction(config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
+    expect(() =>
+      runQuery(config, driver, {
+        object: "equipment",
+        identity: "SN-40217",
+        expand: [{ relation: "converted", properties: ["serial_no"], expand: [{ relation: "belongs_to" }] }],
+      })
+    ).toThrow();
+  });
+
+  it("效应取值缺请求参数：报错指到缺哪个参数", () => {
+    const res = runAction(config, freshDriver(), {
+      action: "register", object: "equipment", identity: "SN-90003", request: { dept: "D07" }, // 缺 name
+    });
+    expect(res.ok).toBe(false);
+    expect(res.projections.some((p) => p.error?.includes("缺参数：name"))).toBe(true);
   });
 });

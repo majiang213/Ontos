@@ -26,6 +26,7 @@ export interface ProjectionRecord {
   op: "insert" | "update" | "delete";
   ok: boolean;
   error?: string;
+  note?: string;
 }
 
 export interface ActionResult {
@@ -157,10 +158,16 @@ function buildNotifications(
   projections: ProjectionRecord[]
 ): NotificationRecord[] {
   const anyFail = projections.some((r) => !r.ok);
-  return (action.inform ?? []).map((inf) => ({
-    object: inf.object,
-    to: inf.to,
-    properties: Object.fromEntries(Object.entries(inf.properties).map(([prop, spec]) => [prop, resolveValue(spec, prop, ctx)])),
+  return (action.inform ?? []).map((inf) => {
+    const properties = Object.fromEntries(Object.entries(inf.properties).map(([prop, spec]) => [prop, resolveValue(spec, prop, ctx)]));
+    // change_id 由 action + subject + occurred_at 合成（§6.5）
+    if (properties.action != null && properties.subject != null && properties.occurred_at != null) {
+      properties.change_id = `${properties.action}|${properties.subject}|${properties.occurred_at}`;
+    }
+    return {
+      object: inf.object,
+      to: inf.to,
+      properties,
     lines: plan.map((p) => {
       if (p.kind === "create") {
         const idProp = p.cls.def.identity;
@@ -179,7 +186,8 @@ function buildNotifications(
     note: anyFail
       ? "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）"
       : "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
-  }));
+    };
+  });
 }
 
 /* ---------- 效应计划 ---------- */
@@ -296,6 +304,17 @@ function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Pr
     if (targets.length === 0) throw new Error(`没有源能承接 ${p.cls.name} 的全部所赋属性`);
     for (const [srcName, entry] of targets) {
       try {
+        // 幂等：对齐属性（源条目的 key，省略则是类的 identity）的值已有行就跳过——补偿重发不会重复插（§6.3）
+        const keyProp = entry.key ?? p.cls.def.identity;
+        const idVal = keyProp ? vals[keyProp] : undefined;
+        if (keyProp && idVal !== undefined && entry.fields[keyProp]) {
+          const keyCol = keyColumn(p.cls, entry);
+          const dup = driver.select(entry.connection, entry.table, [keyCol], [{ column: keyCol, op: "eq", value: idVal }]);
+          if (dup.length > 0) {
+            out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有行，跳过（幂等）" });
+            continue;
+          }
+        }
         const row: Record<string, unknown> = {};
         for (const [prop, col] of Object.entries(entry.fields)) if (vals[prop] !== undefined) row[col] = vals[prop];
         driver.insert(entry.connection, entry.table, row); // 未映射的 pk 由源库自生

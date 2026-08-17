@@ -287,7 +287,7 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
             return f === "*" ? op : `${op}_${f}`;
           }),
         ])
-      : new Set(Object.keys(cls.def.properties));
+      : new Set(req.properties ?? Object.keys(cls.def.properties)); // 按未返回的属性排序等于按 undefined 排，拒绝
     if (!legal.has(prop)) throw new EngineReject(`order 里的名字对不上配置：${prop}`);
     rows.sort((a, b) => compareRows(a[prop], b[prop]) * (dir === "desc" ? -1 : 1));
   }
@@ -310,6 +310,7 @@ function expandItem(
 ): [string, Record<string, unknown>[]] {
   const { link, reversed } = resolveLink(env.config, cls.name, item.relation);
   if (link.transition) {
+    if (item.expand?.length) throw new EngineReject(`转化关系不支持嵌套展开：${item.relation}`);
     return [item.relation, transitionHolds(cls, ind, link, env, ctx) ? [project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
