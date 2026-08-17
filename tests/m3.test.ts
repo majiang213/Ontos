@@ -1,0 +1,133 @@
+// M3 测试：归一化、交集率（真实读源计算）、裁决写草稿的四种结论。
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pickRule, normalizeWith, RULES } from "../lib/engine/normalize";
+import { computeOverlap } from "../lib/engine/overlap";
+import { applyVerdict } from "../lib/engine/adjudicate";
+import { freshDriver } from "../lib/engine/load";
+import { freshMetaStore } from "../lib/meta/store";
+import { configSchema, type OntologyConfig } from "../lib/schema/config";
+import { load } from "js-yaml";
+import { readFileSync } from "node:fs";
+
+const seedConfig = () => configSchema.parse(load(readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8")));
+
+describe("归一化", () => {
+  it("序列号：去横杠统一大写；手机号：去 +86 与分隔符；身份证 X 大写", () => {
+    const serial = pickRule(["SN-40217", "SN-40080", "SN-40081"]);
+    expect(serial.name).toBe("serial");
+    expect(normalizeWith(serial, "sn-40217")).toBe("SN40217");
+    const phone = pickRule(["+86 138-0000-1111", "13800001111", "+86 139-0000-2222"]);
+    expect(phone.name).toBe("phone");
+    expect(normalizeWith(phone, "+86 138-0000-1111")).toBe("13800001111");
+    const idc = RULES.find((r) => r.name === "id_card")!;
+    expect(normalizeWith(idc, "11010119800101123x")).toBe("11010119800101123X");
+    expect(pickRule(["随便什么"]).name).toBe("plain");
+  });
+});
+
+describe("交集率", () => {
+  it("采购×设备：40 台重合 / max(121,100) ≈ 三分之一；只落计数", async () => {
+    const config = seedConfig();
+    const meta = freshMetaStore(join(mkdtempSync(join(tmpdir(), "ontos-olap-")), "m.db"));
+    // 两个视角的类：采购侧的 po_item、设备侧的 device
+    const poItem: OntologyConfig["object_types"][string] = {
+      kind: "thing",
+      identity: "sn",
+      properties: { sn: { type: "string" }, name: { type: "string" } },
+      sources: { purchase: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } },
+    };
+    const deviceCls = config.object_types.equipment; // 已挂 purchase/device/asset 三源
+    void deviceCls;
+    const config2 = seedConfig();
+    config2.object_types.purchase_item = poItem;
+    const a = { name: "purchase_item", def: poItem };
+    const b = { name: "device_view", def: {
+      kind: "thing" as const,
+      identity: "serial_no",
+      properties: { serial_no: { type: "string" as const } },
+      sources: { device: { connection: "device_sys", table: "device", pk: "dev_id", fields: { serial_no: "serial_no" } } },
+    } };
+    const result = await computeOverlap(freshDriver(), a, b, meta);
+    expect(result.count_a).toBe(121);
+    expect(result.count_b).toBe(100);
+    expect(result.count_hit).toBe(40);
+    expect(result.rate).toBeCloseTo(40 / 121, 2);
+    meta.close();
+  });
+});
+
+describe("裁决写草稿", () => {
+  let tmp: string;
+  let repoRoot: string;
+  beforeEach(() => {
+    repoRoot = process.cwd();
+    tmp = mkdtempSync(join(tmpdir(), "ontos-adj-"));
+    mkdirSync(join(tmp, "lib/config"), { recursive: true });
+    cpSync(join(repoRoot, "lib/config/ontology.yaml"), join(tmp, "lib/config/ontology.yaml"));
+    process.chdir(tmp);
+  });
+  afterEach(() => {
+    process.chdir(repoRoot);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function twoClasses(): OntologyConfig {
+    const d = seedConfig();
+    d.object_types.po_a = {
+      kind: "thing",
+      identity: "sn",
+      properties: { sn: { type: "string" }, name: { type: "string" }, extra_a: { type: "string" } },
+      sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } },
+    };
+    d.object_types.po_b = {
+      kind: "thing",
+      identity: "sn",
+      properties: { sn: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } },
+      sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } },
+    };
+    return d;
+  }
+
+  it("同一：B 的源并进 A，同名对上、特有列加成属性，B 撤掉", () => {
+    const d = twoClasses();
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "同一");
+    expect(d.object_types.po_b).toBeUndefined();
+    expect(Object.keys(d.object_types.po_a.sources!)).toEqual(["sa", "sb"]);
+    expect(d.object_types.po_a.sources!.sb.fields.sn).toBe("serial_no"); // 同名属性对上 B 的列
+    expect(d.object_types.po_a.properties.extra_b).toBeDefined(); // 特有列加成属性
+  });
+
+  it("阶段：收成一类 + 派生 status + transition 关系 + 转化动作", () => {
+    const d = twoClasses();
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "阶段", { from: "在途", to: "在役" });
+    const A = d.object_types.po_a;
+    expect(d.object_types.po_b).toBeUndefined();
+    expect(Object.keys(A.sources!)).toEqual(["sa", "sb"]);
+    expect(A.properties.status.derived).toBeDefined();
+    const link = d.link_types["po_a_to_在役"];
+    expect(link.transition).toEqual({ property: "status", from: "在途", to: "在役" });
+    expect(A.actions!.convert_to_在役.effect).toEqual([{ link: "po_a_to_在役" }]);
+  });
+
+  it("部分重叠：公共属性立上位对象并移走，两边源只带公共列", () => {
+    const d = twoClasses();
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "部分重叠");
+    const parent = d.object_types.shared_po_a_po_b;
+    expect(parent).toBeDefined();
+    expect(Object.keys(parent.properties).sort()).toEqual(["name", "sn"]);
+    expect(d.object_types.po_a.properties.sn).toBeUndefined(); // 移上去了
+    expect(d.object_types.po_a.properties.extra_a).toBeDefined(); // 特有留下
+    expect(parent.sources!.sa.fields).toEqual({ sn: "sn", name: "item_name" });
+  });
+
+  it("仅名称相似：配置不动", () => {
+    const d = twoClasses();
+    const before = JSON.stringify(d);
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "仅名称相似");
+    expect(JSON.stringify(d)).toBe(before);
+  });
+});

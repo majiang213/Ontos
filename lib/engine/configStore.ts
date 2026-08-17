@@ -1,7 +1,7 @@
 // 配置存储 —— M4 雏形。工作副本（草稿）与已发布版本的唯一出入口。
 // 画布读写副本；引擎只读已发布。发布 = 校验 + 写版本文件 + 升版本（git revert 语义，历史链不断）。
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dump, load } from "js-yaml";
 import { configSchema, type OntologyConfig } from "../schema/config";
@@ -244,6 +244,14 @@ function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] 
   return [...refs];
 }
 
+/** 直接改草稿（裁决应用等成组改动走这里），改完按结构重算 dirty。 */
+export function mutateDraft(fn: (draft: OntologyConfig) => void): DraftState {
+  const state = getDraft();
+  fn(state.draft);
+  state.dirty = !sameConfig(state.draft, getPublished().config);
+  return state;
+}
+
 /* ---------- 发布与放弃 ---------- */
 
 export function publishDraft(): { version: number } {
@@ -264,6 +272,40 @@ export function publishDraft(): { version: number } {
 
 export function discardDraft(): void {
   store.draft = undefined; // 回到已发布快照；摆位存在独立小文件里，不随草稿丢
+}
+
+/* ---------- 版本历史与回滚 ---------- */
+
+export function listVersions(): { version: number; file: string; createdAt: string }[] {
+  const out = [{ version: 1, file: seedFile(), createdAt: "（首版，种子配置）" }];
+  if (existsSync(versionsDir())) {
+    const versions = readdirSync(versionsDir())
+      .map((f) => /^v(\d+)\.yaml$/.exec(f)?.[1])
+      .filter((v): v is string => Boolean(v))
+      .map(Number)
+      .sort((a, b) => a - b);
+    for (const v of versions) {
+      const file = join(versionsDir(), `v${v}.yaml`);
+      out.push({ version: v, file, createdAt: statSync(file).mtime.toISOString() });
+    }
+  }
+  return out;
+}
+
+/** 回滚 = Git revert 语义：把旧版本内容作为新版本发布，历史链不断。 */
+export function rollbackTo(version: number): { version: number } {
+  const entry = listVersions().find((v) => v.version === version);
+  if (!entry) throw new DraftReject(`版本不存在：v${version}`);
+  const config = configSchema.parse(load(readFileSync(entry.file, "utf8")));
+  validateSemantics(config);
+  const newVersion = latestVersionFile().version + 1;
+  mkdirSync(versionsDir(), { recursive: true });
+  const target = join(versionsDir(), `v${newVersion}.yaml`);
+  writeFileSync(`${target}.tmp`, dump(config, { lineWidth: 120, noRefs: true }), "utf8");
+  renameSync(`${target}.tmp`, target);
+  store.published = { config, version: newVersion };
+  store.draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: loadLayout() };
+  return { version: newVersion };
 }
 
 /** 测试用：清空内存态。 */

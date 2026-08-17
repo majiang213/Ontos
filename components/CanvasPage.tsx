@@ -31,6 +31,10 @@ export default function CanvasPage() {
   const [creating, setCreating] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
+  const [pairs, setPairs] = useState<PairAdvice[]>([]);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [versions, setVersions] = useState<{ version: number; createdAt: string }[] | null>(null);
+  const [questionsOpen, setQuestionsOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -167,10 +171,99 @@ export default function CanvasPage() {
 
       {/* 左上：发布状态 + 入口 */}
       <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span className="eyebrow">已发布 v{ont?.version ?? "…"}</span>
+        <button
+          className="eyebrow"
+          style={{ cursor: "pointer", border: "none" }}
+          title="版本历史"
+          onClick={async () => {
+            const r = await fetch("/api/versions");
+            const data = await r.json();
+            setVersions(data.versions ?? []);
+          }}
+        >
+          已发布 v{ont?.version ?? "…"} ▾
+        </button>
         <button className="btn" onClick={() => setCreating(true)}>新建对象</button>
         <button className="btn" onClick={() => setConnecting(true)}>连接数据源</button>
+        <button
+          className="btn"
+          onClick={async () => {
+            const r = await fetch("/api/candidates");
+            const data = await r.json();
+            setPairs(data.candidates ?? []);
+            setPanelOpen(true);
+          }}
+        >
+          候选对
+        </button>
+        <button className="btn" onClick={() => setQuestionsOpen((v) => !v)}>验收问题集</button>
       </div>
+
+      {/* 版本历史卡（点版本号展开；回滚 = 旧内容作为新版本发布） */}
+      {versions && (
+        <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>
+                <button className="chip" onClick={() => setVersions(null)}>✕</button>
+              </div>
+              {versions.map((v) => (
+                <div key={v.version} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
+                  <span>
+                    <strong>v{v.version}</strong>　<span style={{ color: "var(--ink-3)" }}>{v.createdAt.slice(0, 16).replace("T", " ")}</span>
+                  </span>
+                  {v.version !== ont?.version && (
+                    <button
+                      className="chip"
+                      onClick={async () => {
+                        const r = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: v.version }) });
+                        const data = await r.json();
+                        if (r.ok) {
+                          showToast(`已回滚到 v${v.version} 的内容（发布为 v${data.version}）`);
+                          setVersions(null);
+                          await refresh();
+                        } else showToast(data.error ?? "回滚失败");
+                      }}
+                    >
+                      回滚到这版
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 验收问题集卡 */}
+      {questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
+
+      {/* 底中：裁决面板（候选对） */}
+      {panelOpen && !ont?.dirty && (
+        <div className="float-card float-bc" style={{ width: 520, maxHeight: "60%" }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "56vh" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>候选对裁决（{pairs.length} 对）</span>
+                <button className="chip" onClick={() => setPanelOpen(false)}>✕</button>
+              </div>
+              {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有跨源候选对。单源对象不进裁决，可以直接发布。</div>}
+              {pairs.map((p) => (
+                <PairCard
+                  key={`${p.class_a}|${p.class_b}`}
+                  pair={p}
+                  onDone={(msg) => {
+                    setPairs((prev) => prev.filter((x) => !(x.class_a === p.class_a && x.class_b === p.class_b)));
+                    showToast(msg);
+                    void refresh();
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 底中：发布条（有未发布改动时） */}
       {ont?.dirty && (
@@ -378,6 +471,154 @@ export default function CanvasPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+interface PairAdvice {
+  class_a: string;
+  class_b: string;
+  tendency: string;
+  reason: string;
+}
+
+/** 裁决面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。 */
+function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
+  const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number } | null>(null);
+  const [stage, setStage] = useState({ from: "", to: "" });
+  const [busy, setBusy] = useState(false);
+
+  const decide = async (verdict: string) => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/decisions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          class_a: pair.class_a,
+          class_b: pair.class_b,
+          verdict,
+          stage_names: verdict === "阶段" && stage.from && stage.to ? stage : undefined,
+          llm_advice: `${pair.tendency}：${pair.reason}`,
+          rate: rate?.rate,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) onDone(data.error ?? "裁决被拒");
+      else onDone(`已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ borderTop: "1px solid var(--hairline)", padding: "10px 0" }}>
+      <div style={{ fontSize: 13 }}>
+        <code>{pair.class_a}</code> × <code>{pair.class_b}</code>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "4px 0" }}>
+        建议：{pair.tendency}（{pair.reason}）
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "4px 0" }}>
+        {rate ? (
+          <>交集率 {(rate.rate * 100).toFixed(0)}%（{pair.class_a} {rate.count_a} 条 / {pair.class_b} {rate.count_b} 条 / 重合 {rate.count_hit}）</>
+        ) : (
+          <button
+            className="chip"
+            onClick={async () => {
+              const r = await fetch("/api/overlap", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ class_a: pair.class_a, class_b: pair.class_b }),
+              });
+              const data = await r.json();
+              if (r.ok) setRate(data);
+            }}
+          >
+            计算交集率
+          </button>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
+        <button className="chip" disabled={busy} onClick={() => decide("同一")}>同一</button>
+        <button className="chip" disabled={busy} onClick={() => decide("部分重叠")}>部分重叠</button>
+        <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+          <button className="chip" disabled={busy || !stage.from || !stage.to} onClick={() => decide("阶段")}>阶段</button>
+          <input placeholder="前阶段" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 64, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)" }} />
+          <input placeholder="后阶段" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 64, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)" }} />
+        </span>
+        <button className="chip" disabled={busy} onClick={() => decide("仅名称相似")}>仅名称相似</button>
+        <button className="chip" disabled={busy} onClick={() => decide("跳过")}>跳过</button>
+      </div>
+    </div>
+  );
+}
+
+/** 验收问题集：增删 + 对着引擎跑通过/失败。问数验收基准，不参与裁决。 */
+function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
+  const [items, setItems] = useState<{ id: number; question: string; status: string }[]>([]);
+  const [text, setText] = useState("");
+  const load = useCallback(async () => {
+    const r = await fetch("/api/questions");
+    const data = await r.json();
+    setItems(data.questions ?? []);
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <div className="float-card float-tl" style={{ top: 120, width: 360 }}>
+      <div className="bezel">
+        <div className="bezel-core" style={{ padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
+            <button className="chip" onClick={onClose}>✕</button>
+          </div>
+          {items.map((q) => (
+            <div key={q.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
+              <span>{q.question}</span>
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span className={`tag ${q.status === "通过" ? "tag-ok" : q.status === "失败" ? "tag-warn" : ""}`}>{q.status}</span>
+                <button
+                  className="chip"
+                  onClick={async () => {
+                    await fetch("/api/questions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
+                    await load();
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
+            </div>
+          ))}
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!text.trim()) return;
+              await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
+              setText("");
+              await load();
+            }}
+            style={{ display: "flex", gap: 6, marginTop: 8 }}
+          >
+            <input className="text-in" style={{ flex: 1, fontSize: 12, padding: "6px 10px" }} placeholder="加一条业务问题" value={text} onChange={(e) => setText(e.target.value)} />
+            <button type="submit" className="btn" style={{ fontSize: 12 }}>加</button>
+          </form>
+          <button
+            className="btn-cta"
+            style={{ fontSize: 12, padding: "6px 16px", marginTop: 10 }}
+            onClick={async () => {
+              const r = await fetch("/api/questions?run=1", { method: "POST" });
+              const data = await r.json();
+              const failed = (data.results ?? []).filter((x: { status: string }) => x.status === "失败");
+              showToast(failed.length ? `${failed.length} 条失败，回 M2/M3 修本体或映射` : `全部通过（v${data.version}）`);
+              await load();
+            }}
+          >
+            全量跑一遍
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
