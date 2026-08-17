@@ -1,61 +1,62 @@
 # Ontos（安托斯）— 通用 Ontology 平台 MVP 设计文档
 
 > 命名：Ontos 为 Ontology 的希腊词根（存在/本体）。Slogan：**让系统回归存在本身**。
-> V1.7（2026-08-13）｜ 定位：老系统上的本体中间件 —— 逆向建模 → 多源整合 → 原库上受控读写（问数 + 动作）
-> V1.1 变更：查询 Agent 从 V1.5 提前至 V1 演示链路，V1 形成"建模→整合→生成→问数"四步闭环（语义层 + 半个动力层）。
-> V1.2 变更：明确数据边界——业务数据零落地，M7 问数走只读联邦查询实时查源库；交集验证补充"先归一化再比对"前提。
-> V1.3 变更：M7 定为结构化查询+确定性编译，跨源内存拼装限复杂度；交集计算内存完成不落地；②/③区分补状态/时间证据；元模型补五概念、③示例与主键策略。
-> V1.4 变更：元模型加 identity 匹配键；③示例 status 标注派生规则；M7 补跨源匹配语义。
-> V1.5 变更：附录 A，划清本体论内核与工程外壳。
-> V1.6 变更：§8 写与 Agent 边界——不造新库、动作由平台执行器投影回原库；生成用人驱动再生成，不做 ReAct。
-> V1.6.1 变更：§8.5 补完整 YAML 实例——元素说明、画布持久化内容、一次读/一次写的执行物。
-> V1.7 变更：§1/3/5/6/7 与 §8 对齐——不造新库、不出码；产出改为已发布本体 + 问数/动作执行器；Nest/Refine/Nunjucks 撤出本期选型。
-> V1.8 变更：§8.6 多样业务按本体论适配——同个体多源投影 / 关联对象诞生 / 另立动作；JSON 只选哪条已发布定义。
-> V1.8.1 变更：§8.5 YAML/JSON 实例补全入职下发考勤·工资、工资账户诞生、绩效另立动作。
+> V2.0（2026-08-17）｜ 定位：老系统上的本体中间件 —— 逆向建模 → 多源整合 → 原库上受控读写（问数 + 动作）
+> V2.0 变更：按《ontos-article.md》重写。配置键、查询与写入请求、派生属性、转化关系、写回、告知，以该文附录 B/C 为准；本文不另维护一份模式定义。演示案例从招聘/HR 换成该文的设备域（采购 → 设备 → 资产）。V1.1–V1.8.1 的变更记录见 git 历史。
+> V2.1 变更：数据库只接 MySQL 和 PG；补平台元数据库设计（§6）、M7/M8 的源库防护（§3、§8）、Agent 循环三分说（§9）。
+> V2.2 变更：元数据库表名按类别加前缀（conn_ / ont_ / adj_ / log_），补字段与索引设计。
+> V2.2.1 变更：元数据库设计落成 SQL DDL，附方言注记。
+> V2.3 变更：前缀 ont_ 改 onto_；补字段——conn_source 加 options 与 updated_at，onto_version 加 note 与 revert_of，adj_decision 加 source_a / source_b，log_query 加 session_id 与 model，log_action 加 error 与 duration_ms。
+> V2.3.1 变更：DDL 定为 MySQL 8 方言（AUTO_INCREMENT、MEDIUMTEXT、ENGINE/CHARSET 后缀、ON UPDATE CURRENT_TIMESTAMP），PG/SQLite 适配见方言注记。
+> V2.4 变更：裁决分级——合并类永远人定案，仅名称相似类可升级为机器定案、人抽检，升级节奏由裁决接受率决定（§2、§3 M3）。
 
 ## 1. 产品定位
 
-**一句话**：从企业存量库（MySQL/PG）逆向出业务本体，跨源整合成单一事实源；以本体为读写层盖在原库上——问数与动作都走平台执行器。不造新库，不改客户应用。
+**一句话**：平台从企业存量库（MySQL/PG）逆向出业务本体，跨源整合成单一事实源；本体盖在原库上——查询由引擎按类型与关系下推到原库执行，写入请求只说存在上发生了什么，执行器再按已发布动作把变化投影回源表。不造新库，不改客户应用。
 
-**MVP 演示链路（30 分钟）**：连两个老库 → AI 生草稿 → 人工裁决（人员按 ③）→ 发布本体 → **问数**（转正员工及部门）→ **录用一人写回 HR** → 再问，状态已变（含取数路径）。
+**MVP 演示链路（30 分钟）**：连采购、设备、资产三个老库 → AI 生成对象草稿 → 人裁决两对候选对：在途设备 × 在役设备（序列号交集率约三分之一）裁为**阶段**，设备 × 资产台账裁为**同一** → 发布本体 → **问数**「在役设备及其所属部门」（附取数路径）→ **验收一台在途设备**：设备源、资产源各插入一行，并立一张保修卡 → 再问，这台设备的阶段已是在役。
 
-**需求结论**：①场景=存量逆向建模与整合；②第一用途=在原系统上盖语义读写层，不是重建一套应用；③数据源=关系库（暂不含 Oracle）；④产出=已发布本体 + 问数/动作 API；⑤整合为主，客户业务代码不改，最多给可写账号。
+**需求结论**：①场景 = 存量逆向建模与整合；②第一用途 = 在原系统上盖语义读写层，不是重建一套应用；③数据源 = 只接 MySQL 和 PG，其它数据库本期不接；④产出 = 已发布本体 + 问数/动作两条 API；⑤整合为主，客户业务代码不改，最多给一个可写账号。
 
-**与本体论完整定义的关系**：完整 Ontology = 语义层 + 动力层（Action/Function/Rules）。本期交付语义层全部 + 动力层最小集（读懂数据 + 录用这类动作执行）。根因推理、Rules 正式化仍留以后。动作定义见 §8.5，不是「整块动力层留 V2」。
+**与本体论完整定义的关系**：本体论的要素清单比本期交付的多。本期交付：类、属性、关系、同一性标准、派生属性（两种形状）、公理（写入时校验）、动作（前置 / 效应 / 写回）、转化关系。本期不交付：子类型定案、部分与整体、规则与推理、OWL。函数不单设立构造，逐个体的计算统一写成派生属性。变更事件与告知已设计，本期不交付。逐条对照见附录 A；概念展开见《ontos-article.md》第 2 节。
 
-**竞品一句话**（2026-08 调研）：逆向建模、MDM（记录层合并）、代码生成器三条赛道均无「逆向本体 → 模型层整合留痕 → 原库上受控读写」的闭环。定位是原系统上的**语义对齐 + 受控读写层**。护城河=裁决知识库 + 映射资产 + 血缘；执行器可复制，不是护城河。
+**竞品一句话**（2026-08 调研）：逆向建模、MDM（记录层合并）、代码生成器三条赛道，都没有「逆向本体 → 模型层整合留痕 → 原库上受控读写」的闭环。本产品的定位是原系统上的**语义对齐 + 受控读写层**。护城河 = 裁决知识库 + 映射资产 + 血缘；执行器可复制，不是护城河。
 
-## 2. 核心方法论：建模准确性如何保障
+## 2. 核心方法论：合并准确性如何保障
 
-**合并决策不是二元判断，而是五种关系类型裁决**（以招聘系统 vs HR 系统为例）：
+**合并决策不是二元判断，而是五种结论的裁决。** 人判定两个类之间是什么关系，判定的依据是两类个体的重合程度：
 
-| 类型 | 建模方式 | 案例 |
+| 结论 | 情形 | 写进本体 |
 |---|---|---|
-| ①完全等价 | 合并为单对象，多源映射 | 两系统的"部门" |
-| ②部分重叠 | 上位对象（"人员"）+ 各自特有属性 | 候选人/员工共享基础信息 |
-| ③生命周期阶段 | 统一对象+状态属性+转化关系 | 候选人→员工（最可能答案） |
-| ④子类型 | Interface 继承（V2 实现） | 内部推荐候选人 ⊂ 候选人 |
-| ⑤仅名字像 | 不合并 | 招聘"职位JD" vs HR"岗位编制" |
+| 同一 | 两个名字指同一类 | 合并为一个对象类型，挂多个源 |
+| 部分重叠 | 个体有交集，又各有一部分不属于对方 | 公共部分立上位对象，各自特有的留在原类 |
+| 阶段 | 两条记录是同一实体的不同时期 | 只留一个对象类型；阶段是派生属性，读时按规则现算；转化关系由动作在写入时记录 |
+| 仅名称相似 | 名字像而所指不同 | 各自独立，互不映射 |
+| 子类型 | 一类完全含于另一类 | 声明子类型；本期不做，不定案 |
 
 **三层证据链**：
 
 | 层 | 证据 | 强度 | 要点 |
 |---|---|---|---|
-| 1. Schema 语义 | LLM 建议+理由 | 软 | 只建议，不定案 |
-| 2. 数据交集率 | 标识字段（身份证/手机号）集合交集，只读采样 | 硬 | ≈0%→⑤；≈100%→①/②（按属性重合度细分）；中间值→②/③（按状态/时间字段细分） |
-| 3. 人工裁决 | 业务测试问题集 | 定案 | "查所有已转正人员"答对才算通过 |
+| 1. schema 语义 | 模型比对类型名、字段名、字段类型，给出倾向和依据 | 软 | 只建议，不定案；建议大约六到八成准 |
+| 2. 数据交集率 | 两端识别字段归一化后算取值交集 | 硬 | 接近零 → 仅名称相似；接近全交 → 同一或部分重叠（按属性重合度再分）；介于中间 → 部分重叠或阶段（按状态、时间字段再分） |
+| 3. 人工裁决 | 人对候选对定案，结论写进本体 | 定案 | 裁决留痕，发布可回滚 |
 
-为什么算交集：五种关系类型本质是"两系统记录是否同一批现实实体"的五种答案，交集率是最直接的量化——命名会骗人，数据不会。交集**先归一化再比对**（去区号/分隔符、跳过脱敏字段），规则记入证据快照，否则硬证据本身会出错。分工：归一化规则库（手机号/身份证/邮箱等）按格式自动匹配优先，LLM 兜底建议（只看格式模式与脱敏样例）；归一化与交集计算全走确定性 SQL——模型当顾问，不当计算器。
+为什么算交集：五种结论是「两个系统的记录是不是同一批现实实体」的五种答案，交集率是最直接的量化证据——命名会骗人，数据不会。比对之前先归一化：用确定性规则把识别字段的取值洗成统一格式（去分隔符、统一大小写）。已脱敏的按脱敏值比；明文出不了库的，平台把指纹计算下推到源库里做，拿回指纹再比。归一化与交集计算都是确定性的，模型不参与计算——模型当顾问，不当计算器。平台对源库只读采样，在内存里算交集，取值集合算完即弃。
 
-**评估体系**：M2 用 3-5 个标注测试库跑回归（对象识别 P/R、属性映射准确率）；北星指标=**人工修改率**（草稿→确认稿编辑距离）+**裁决接受率**；可执行性验证（本体生成查询 vs 手写 SQL 结果比对）是唯一全自动客观验证。LLM 只产草稿、裁决权永远在人——底线不动摇（实测 LLM 建模准确率仅 68–86%）。
+**评估体系**：M2 用 3–5 个标注测试库跑回归（对象识别 P/R、属性映射准确率）；北星指标 = **人工修改率**（草稿到发布稿的编辑距离）+ **裁决接受率**；可执行性验证（本体查询结果与手写 SQL 比对）是唯一全自动客观验证。回归与指标评测排在 demo 之后另行安排，不占 W1–W4。模型只产草稿，裁决权永远在人——这条底线不动摇。
+
+**裁决按后果分级，「裁决权在人」的行使方式不同。** 合并类（同一、部分重叠、阶段）改写本体结构，判错比不合并更糟，这类永远由人定案。注意交集率 100% 也可能是假证据：两端的识别字段若都是自增 ID，值域天然重合，「证据硬」不等于「可以自动并」。保持现状类（仅名称相似、跳过）不改本体，定错了以后能翻回来，这类可以升级自动化。自动化的形态是预分拣，不是替人裁：机器把高置信的「各自独立」直接定案，人批量确认、事后抽检；合并类候选永远排进裁决队列等人定案。人从逐题作答变成保留否决权——库大、候选对多时，这是唯一扛得住的形态。
+
+**自动化等级是挣来的，不是设计出来的。** 上线先全人工，用评估体系盯裁决接受率：「仅名称相似」类建议的接受率长期接近满分，这一类才毕业成机器定案加抽检；合并类无论接受率多高都不毕业——一次错并的代价与一百次对的好处不对称。
 
 ## 3. 系统架构与模块
 
 ```
-源库A(MySQL) ─┐              ┌─ M4 本体管理（YAML + 画布 + 版本）
+源库A(MySQL) ─┐              ┌─ M4 本体管理（配置 + 画布 + 版本）
 源库B(PG)   ──┼→ M1 连接器 → M2 AI逆向建模 → M3 整合工作台
-              │   (内省+采样)   (草稿，人改/再生成)  (五类型裁决+交集)
-              │                         ↓ 发布
+              │  (读表结构+采样)  (草稿，人改/再生成)  (结论裁决+交集)
+              │                          ↓ 发布
               │              已发布本体（单一事实源）
               │                    ├─ M7 查询服务（只读账号）
               │                    ├─ M8 动作执行器（可写账号）
@@ -65,427 +66,396 @@
 
 | 模块 | 职责 | 关键点 |
 |---|---|---|
-| M1 连接器 | 连 MySQL/PG，内省 schema + 采样 | 问数用只读账号；动作另备可写账号（或同一连接升权） |
-| M2 AI 逆向建模 | schema → 本体草稿（YAML） | `generateObject` 一次产草稿；人改或再说一句再生成。无 ReAct |
-| M3 整合工作台 | 五关系类型裁决、交集验证、留痕 | **差异化核心** |
-| M4 本体管理 | YAML 版本化 + 画布 | 画布存的即 §8.5 A |
-| M5 正向生成器 | ~~本体→新库+CRUD+Refine~~ | **本期不做** |
-| M6 血缘 | 本体属性 → 源表列；问数=取数路径 | 没有「新系统字段」这一跳 |
-| M7 查询服务 | NL→结构化查询→编译执行 | 确定性编译；不是对话 Agent |
-| M8 动作执行器 | StructuredAction→校验→投影原库 | 与 M7 对等、同一进程；见 §8 |
+| M1 连接器 | 连 MySQL/PG，读取表结构 + 脱敏采样 | 问数用只读账号；动作另备可写账号（或同一连接升权） |
+| M2 AI 逆向建模 | 表结构 → 本体草稿 | `generateObject` 一次产草稿；人改，或再说一句再生成。无 ReAct |
+| M3 整合工作台 | 候选对、交集验证、结论裁决（子类型本期不定案；仅名称相似类可由机器定案、人抽检）、留痕 | **差异化核心** |
+| M4 本体管理 | 配置版本化 + 画布 | 画布是工作副本；已发布后的改动攒成「待发布」，点发布才升版本；引擎只读已发布快照 |
+| M5 正向生成器 | ~~本体 → 新库 + CRUD~~ | **本期不做** |
+| M6 血缘 | 本体属性 → 源表列 | 问数场景叫取数路径 |
+| M7 查询服务 | 查询 JSON → 按已发布配置求值 | 确定性求值：下推各源、内存对齐，求值不含模型；默认查询治理：强制超时、`limit` 上限、聚合下推 |
+| M8 动作执行器 | 动作 JSON → 前置/公理校验 → 投影原库 | 与 M7 对等、同一进程；写回按效应和源映射推出；每条投影是源库上的短事务，更新带条件（要改的列仍等于读到的值），条件不成立则判该条投影失败、重读重发。这是执行层防护，不改请求与配置的口径 |
 
-**只有平台两条 API**：`POST /api/query` 只读原库；`POST /api/action` 投影写原库。没有「新系统 CRUD」。跨源读：各源下推、内存拼装，统一对象按 `identity` 匹配。写：按该动作 `project` 列表逐条投影（可多库）；跨库不做分布式事务，失败策略见 §8.6。大规模联合查询 / CDC 现不做。
+**对外只有两条 API**：`POST /api/query` 只读原库；`POST /api/action` 按已发布动作投影写原库。没有「新系统 CRUD」。跨源读：各源分别下推，引擎内按同一性标准指定的属性把不同源的行对齐成同一个体。跨库写：不做分布式事务，失败条目进留痕，补偿是重发同一动作或人工修库。大规模联合查询、CDC 本期不做。
 
-## 4. 最小元模型（5 个概念）
+## 4. 元模型骨架
 
-五个概念：对象类型、属性、关系、源映射、接口（V1 只留扩展位，V2 用于④子类型）。
+配置的完整键定义以《ontos-article.md》附录 B 为准，这里只定骨架。配置文本由两棵树加一份出站清单组成：`object_types` 下每个键是一个类，`link_types` 下每个键是一条关系，`outlets` 下每个键是一个出站（告知的接收方，见下文「动作」）。有名字的条目在 YAML 里一律写成映射，键就是机器名；列表只用于四处：`when` 规则、效应操作、告知条目、`match` 的配对。各层都可写 `description`，给人和 Agent 读，引擎不读；下面的键清单从略。
 
-```yaml
-object_types:
-  customer:
-    label: 客户
-    properties:
-      - { name: id, type: int, pk: true }
-      - { name: name, type: string, label: 姓名 }
-    sources:                       # 多源映射（整合的关键结构）
-      - { connection: old_erp, table: customers, pk: cust_id,
-          fields: { name: cust_name } }
-      - { connection: old_crm, table: t_client,  pk: client_no,
-          fields: { name: client_name } }
-link_types:
-  - { name: placed, from: customer, to: order, via: { fk: orders.customer_id } }
-```
+- **类**：`kind`（thing 或 event）/ `identity` / `properties` / `sources` / `axioms` / `actions`。`identity` 是同一性标准：取值为该类的一个源列属性的名。跨源对齐、问数认人、动作认人三处共用这条标准；界面上它叫识别字段。某源没有这一列时，该源条目写 `key`。
+- **属性**：`type` / `description` / `values` / `generate`，以及可选的 `derived`。有 `derived` 就是派生属性：不对应源列，读时现算，不得出现在任何源的 `fields` 里。派生只有两种形状，没有第三种专用键。`when` 规则列表谈源：按个体出现在哪些源、已映射属性取什么值定值，从上到下取第一条命中。一条过滤取布尔：当前个体满足这条过滤则为真，过滤可含 `$link`。
+- **源映射**：`connection` / `table` / `pk` / `fields` / `key`。`fields` 把源列属性对到列名。`pk` 只定位行，不是同一性标准。
+- **关系**：`from` / `to` / `inverse` / `card`，外加 `match` 或 `transition` 二选一。`match`：两端各出一个属性配成一对，值相等则关系成立；可多对并列。`transition`：同一个体的阶段转化，块内 `property` 是派生属性名，`from` / `to` 是两个阶段值；判定规则见《ontos-article.md》§6.4。
+- **动作**：`pre` / `effect` / `inform`。前置与查询过滤是同一套写法，多两个键：`$request` 把请求参数拉进比较；`$exists` 声明请求点名的个体在各源现在有没有行。效应是列表，每项四种操作之一：`update` / `create` / `delete` / `link`。其中 `link` 只用于转化关系；`match` 关系靠 `create` / `update` 写上的配对字段自然成立，效应里不另写。`inform` 是告知：写回之后引擎把这次变更收成一条变更事件，发给出站；本期预留，引擎不执行，机制见《ontos-article.md》§6.5。
+- **公理**：挂在类上，键是 `type` / `property`。引擎在效应定完之后、投影之前校验：若这次变化发生，存在上是否仍合法。本期 `type` 只有 `mutex` 一种：挡住会让同一属性在同一时刻取两个值的写入。
+- **写回**：动作定义里不出现表名。插还是改，看读出个体时该源有没有行。写哪张表由两部分推出：效应改了哪些属性，`sources` 里哪些源映射了这些属性。属性名按该源条目的 `fields` 对照成源列名。
 
-五种关系类型的表达：①=单对象多 sources；②=上位对象+属性上移；③=统一对象+状态属性+转化 link；④=Interface（预留）；⑤=无映射。动作须写成 `pre`/`effect`/`project`（§8.5），不能只留白话。问数/动作的上下文都由本 YAML 来。完整实例以 §8.5 为准。
-
-③生命周期阶段的完整示例（即 demo 案例：候选人 → 员工）：
+演示案例的切片（完整可发布配置见《ontos-article.md》附录 C）：
 
 ```yaml
 object_types:
-  person:
-    label: 人员
-    identity: id_card                          # 匹配键：跨源"认人"的属性
+  equipment:
+    description: 设备
+    kind: thing
+    identity: serial_no               # 同一性标准：出厂序列号
     properties:
-      - { name: id,      type: uuid, pk: true }                      # 本体侧代理键，不写回原库
-      - { name: name,    type: string, label: 姓名 }
-      - { name: id_card, type: string, label: 身份证 }
-      - { name: status,  type: enum, values: [候选人, 在职, 离职], label: 状态 }
-        # 派生属性：仅在招聘源→候选人；命中 HR 源→在职（HR 状态=离职→离职）
+      name:     { type: string, description: 名称 }
+      serial_no: { type: string, description: 出厂序列号 }
+      dept:     { type: string, description: 所属部门编号 }
+      mark:     { type: enum, values: [scrapped], description: 台账标记 }   # 源列属性，映射设备表的 status 列
+      status:
+        type: enum
+        values: [in_transit, in_service, scrapped]
+        description: 阶段
+        derived:                      # 派生：不进任何源的 fields
+          - when:
+              device:
+                mark: scrapped        # 设备源有行，且 mark 为报废
+            value: scrapped
+          - when:
+              purchase: true          # 采购源必须有行
+              device: false           # 设备源必须无行
+            value: in_transit
+          - when:
+              device: true            # 设备源必须有行
+            value: in_service
     sources:
-      - { connection: recruiting, table: candidate, pk: cand_id,
-          fields: { name: candidate_name, id_card: idcard_no } }
-      - { connection: hr,         table: employee,  pk: emp_no,
-          fields: { name: emp_name, id_card: id_card } }
+      purchase:
+        connection: purchase_sys
+        table: po_item
+        pk: po_id
+        fields:
+          name: item_name
+          serial_no: sn
+      device:
+        connection: device_sys
+        table: device
+        pk: dev_id
+        fields:
+          name: name
+          serial_no: serial_no
+          dept: dept_id
+          mark: status                # 设备表的 status 列对到属性 mark
+      asset:                          # 第二对裁为同一后并入的源
+        connection: asset_sys
+        table: asset
+        pk: asset_id
+        fields:
+          name: asset_name
+          serial_no: sn
+    axioms:
+      status_one:
+        type: mutex
+        property: status            # 同一时刻一个阶段；引擎在投影前校验
+    actions:
+      convert:
+        description: 验收入库
+        pre:
+          status: in_transit          # 现在必须在途
+          $link:
+            converted: false          # 转化尚未发生
+        effect:
+          - link: converted           # 转化没有另一端，作用在请求点名的那台设备上
+          - create:
+              object: warranty_card   # 保修卡类见附录 C，切片从略
+              properties:
+                serial_no: { from: identity }
+                expiry: now+1y        # 到期日=今天起一年
+  department:
+    description: 部门
+    kind: thing
+    identity: dept_id
+    properties:
+      name:    { type: string, description: 部门名称 }
+      dept_id: { type: string, description: 部门编号 }
+    sources:
+      org:
+        connection: device_sys
+        table: department
+        pk: dept_id
+        fields:
+          name: dept_name
+          dept_id: dept_id
 link_types:
-  - { name: converted, from: person, to: person,
-      via: { transition: { status: [候选人, 在职] } } }              # 阶段转化关系
+  converted:
+    description: 转化为
+    from: equipment
+    to: equipment                     # 同一台设备的两个阶段
+    inverse: converted_from
+    card: 1:1
+    transition:
+      property: status
+      from: in_transit
+      to: in_service
+  belongs_to:
+    description: 属于
+    from: equipment
+    to: department
+    inverse: has_equipment
+    card: N:1
+    match:
+      - { from: dept, to: dept_id }   # 两端属性值相等则关系成立
 ```
 
-**主键**：不建新库，无需「新库 uuid 策略」。源表主键留在 `sources.pk` 做投影锚。YAML 里的 `id: uuid` 只是本体侧可选代理键，不写回原库。
+切片只示 `convert` 一条动作；调拨、报废、登记、结束维修与保修卡类见《ontos-article.md》附录 C。五种结论在配置里的表达：同一 = 一个类挂多个 `sources`；部分重叠 = 上位对象加属性上移；阶段 = 派生属性加 `transition` 关系加转化动作；仅名称相似 = 互不映射；子类型 = 本期不做。
 
-**identity（匹配键）**：声明跨源"认人"的属性，裁决时选定，交集验证、问数拼人、动作认人共用。`status` 派生规则写在对象上，读的时候算，禁止当普通字段写。
+## 5. 对外两个请求：查询与写入
 
-## 5. 技术选型（随 V1.7 修订）
+请求的完整写法与求值规则见《ontos-article.md》第 5、6 节，这里各给一份演示案例上的实例。
 
-本期不造新应用，选型从「出码全栈」收回「一个平台进程」。
+**查询：`POST /api/query`。** 一次查询是一棵以类为根的树：
 
-| 层 | 选型 | 理由 / 相对旧稿 |
+```json
+{
+  "object": "equipment",
+  "properties": ["name"],
+  "filter": { "status": "in_service" },
+  "expand": [
+    { "relation": "belongs_to", "properties": ["name"] }
+  ]
+}
+```
+
+这份请求的意思是：在役设备的名称，以及各自所属部门的名称。要点四条。`filter` 直挂的是属性条件（含派生属性）；关系条件收在 `$link` 下。类名、属性名、关系名对不上已发布配置，引擎拒绝，不猜。`expand` 按 `link_types` 里声明的关系进入目标类，反向写这条关系的 `inverse` 名；项内可以再套 `filter` 和 `expand`。根上写 `identity` 表示认准一个体，不再筛一批；写 `aggregate` 表示返回分组统计，不返回个体行。
+
+**写入：`POST /api/action`。** 请求只点名，不描述怎么改：
+
+```json
+{ "action": "convert", "object": "equipment", "identity": "SN-40217" }
+```
+
+`action` 必须是该类 `actions` 里已发布的一条，不是引擎写死的枚举。带参数时第四个键是 `request`，例如调拨的目标部门。引擎按定义执行：读出个体，核对前置，按效应确定存在上的变化，校验公理，再按效应和 `sources` 逐条投影回源表，并记下留痕。投影语句即用即弃。跨库部分失败不回滚已成功的投影；补偿是重发同一动作：执行器重读个体，各源此刻有行就改、没行就插，已成功的源再投影一遍，结果不变；或者人工修库。
+
+**Agent 编请求。** 类名、属性名、关系名、动作名全部读自已发布配置，不写死在 Agent 里。Agent 按需读三个视图，而不是整份配置：列出类；读取一个类（返回属性、关系、动作，不返回 `sources`、`pk`、`axioms`）；检索（类很多时按相关度返回类名、关系名）。问数答错时，由人回 M2/M3 修正本体或映射，不给 Agent 开自由 SQL。
+
+## 6. 技术选型
+
+本期不造新应用，选型从「出码全栈」收敛到「一个平台进程」。
+
+| 层 | 选型 | 理由 |
 |---|---|---|
 | 前端 | 现有 Next.js + React Flow + 画布面板 | 已够。不上 Refine（那是给生成出来的管理界面的） |
-| 平台后端 | **先用 Next.js Route Handlers**（已有 `/api/query` 等） | 撤 NestJS：Nest 是为出码/模块拆分预备的，本期无出码。问数与动作同一进程 |
-| 连原库 | Drizzle 或 mysql2/pg | 问数只读连接；动作可写连接。Oracle 仍以后 |
-| LLM | Vercel AI SDK：`generateObject` + Zod | **不要 tool 循环、不要 Mastra**。三个槽：建模草稿、合并建议、NL→StructuredQuery / StructuredAction |
+| 平台后端 | Next.js Route Handlers（已有 `/api/query` 等） | 问数与动作同一进程；本期无出码，不上 NestJS |
+| 连原库 | Drizzle 或 mysql2/pg | 问数只读连接；动作可写连接。只接 MySQL 和 PG，其它数据库以后再说 |
+| LLM | Vercel AI SDK：`generateObject` + Zod | 三个槽：建模草稿、合并建议、自然语言 → 查询/动作 JSON。不要 tool 循环，不要 Mastra |
 | 出码模板 | **本期不做** | Nunjucks / drizzle-kit migrations / @dataui/crud 从本期拿掉 |
 | 对外调用 | HTTP；可选 MCP（`query` / `run_action` / `propose_*`） | Claude Code 等是调用方，循环不做进 Ontos |
-| 存储 | 只存平台元数据 | connections / ontologies / ontology_versions / object_mappings / merge_decisions / overlap_analyses / query_logs / **action_logs**。**不存业务行**。Demo 可先内存 |
+| 存储 | 只存平台元数据 | 表结构见下文「平台元数据库」。**不存业务行** |
 
-**留门**：信创→后端换 Java 时 YAML 与前端不受影响；真要出码再另议，不倒逼本期架构。
+**留门**：信创要求后端换 Java 时，配置文本与前端不受影响；真要出码再另议，不倒逼本期架构。
 
-## 6. 四周计划与验收
+### 平台元数据库
+
+平台只存元数据。表结构按数据边界定：任何表没有业务数据列；交集只存计数与比率，标识值集合不落盘；日志存请求与成败，不存结果集；连接账号加密存，不进 ontology.yaml。验收问题集同样存平台库，不进 ontology.yaml。
+
+表名按类别加前缀，新表先归类、再起名：
+
+| 前缀 | 类别 | 表 |
+|---|---|---|
+| `conn_` | 接入 | conn_source |
+| `onto_` | 本体 | onto_ontology、onto_version、onto_draft、onto_question |
+| `adj_` | 裁决 | adj_decision、adj_overlap |
+| `log_` | 留痕 | log_query、log_action |
+
+```sql
+-- 接入
+CREATE TABLE conn_source (                     -- 数据源连接
+  id         BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name       VARCHAR(128) NOT NULL UNIQUE,     -- 连接名，ontology.yaml 按它引用
+  type       VARCHAR(8)   NOT NULL,            -- mysql | pg
+  host       TEXT         NOT NULL,
+  port       INT          NOT NULL,
+  db_name    TEXT         NOT NULL,
+  ro_user    VARCHAR(128) NOT NULL,            -- 只读账号
+  ro_pass    TEXT         NOT NULL,            -- 密码加密存
+  rw_user    VARCHAR(128),                     -- 可写账号，可空
+  rw_pass    TEXT,                             -- 密码加密存
+  options    JSON,                             -- ssl、超时等方言项
+  created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 本体
+CREATE TABLE onto_ontology (                   -- 本体；demo 一行
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name        VARCHAR(128) NOT NULL UNIQUE,
+  description TEXT,                            -- 这个本体覆盖哪个领域
+  created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE onto_version (                    -- 版本快照
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ontology_id BIGINT      NOT NULL REFERENCES onto_ontology(id),
+  version     INT         NOT NULL,            -- 首版为 1
+  yaml        MEDIUMTEXT  NOT NULL,            -- 全量快照
+  origin      VARCHAR(8)  NOT NULL,            -- publish | rollback
+  revert_of   INT,                             -- 回滚自哪个版本；origin=rollback 时有值
+  note        TEXT,                            -- 发布说明
+  created_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (ontology_id, version)                -- 取最新版按 version 倒序
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE onto_draft (                      -- 画布工作副本；每个本体一份
+  ontology_id  BIGINT PRIMARY KEY REFERENCES onto_ontology(id),
+  draft_yaml   MEDIUMTEXT NOT NULL,            -- 草稿文本
+  layout       JSON,                           -- 节点坐标
+  base_version INT       NOT NULL,             -- 基于哪个已发布版本
+  dirty        BOOLEAN   NOT NULL DEFAULT FALSE, -- 是否有待发布改动
+  updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE onto_question (                   -- 验收问题集
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ontology_id BIGINT NOT NULL REFERENCES onto_ontology(id),
+  version     INT    NOT NULL,
+  question    TEXT   NOT NULL,
+  expected    JSON,
+  status      VARCHAR(8) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX idx_question_version ON onto_question (ontology_id, version);
+
+-- 裁决
+CREATE TABLE adj_decision (                    -- 裁决留痕
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ontology_id BIGINT NOT NULL REFERENCES onto_ontology(id),
+  version     INT,                             -- 结论生效的已发布版本，发布时回填
+  class_a     VARCHAR(128) NOT NULL,           -- 候选对的两个类
+  class_b     VARCHAR(128) NOT NULL,
+  source_a    VARCHAR(128) NOT NULL,           -- 两个类各自来自的源条目
+  source_b    VARCHAR(128) NOT NULL,
+  llm_advice  TEXT,                            -- 模型建议与依据
+  rate        DECIMAL(5,4),                    -- 裁决时看到的交集率
+  evidence    JSON,                            -- 证据快照：归一化规则、样本量、交集数
+  verdict     VARCHAR(16)  NOT NULL,           -- 同一 | 部分重叠 | 阶段 | 仅名称相似 | 跳过
+  decided_by  VARCHAR(128) NOT NULL,           -- 裁决人
+  created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX idx_decision_version ON adj_decision (ontology_id, version);
+CREATE INDEX idx_decision_pair    ON adj_decision (ontology_id, class_a, class_b);
+
+CREATE TABLE adj_overlap (                     -- 交集计算记录
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ontology_id BIGINT NOT NULL REFERENCES onto_ontology(id),
+  class_a     VARCHAR(128) NOT NULL,
+  class_b     VARCHAR(128) NOT NULL,
+  norm_rule   TEXT,                            -- 归一化规则
+  count_a     INT NOT NULL,                    -- 两端数量与交集数
+  count_b     INT NOT NULL,
+  count_hit   INT NOT NULL,
+  rate        DECIMAL(5,4) NOT NULL,
+  computed_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX idx_overlap_pair ON adj_overlap (ontology_id, class_a, class_b);
+
+-- 留痕
+CREATE TABLE log_query (                       -- 问数留痕
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ontology_id BIGINT NOT NULL REFERENCES onto_ontology(id),
+  version     INT    NOT NULL,                 -- 配置版本
+  session_id  VARCHAR(64),                     -- 关联的会话
+  model       VARCHAR(64),                     -- 编查询用的模型
+  question    TEXT   NOT NULL,                 -- 自然语言
+  query_json  JSON   NOT NULL,                 -- 编出的查询
+  row_count   INT,                             -- 当时返回的行数；不是结果集
+  error       TEXT,                            -- 失败原因摘要
+  duration_ms INT,
+  ok          BOOLEAN  NOT NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX idx_query_time ON log_query (ontology_id, created_at);
+
+CREATE TABLE log_action (                      -- 动作留痕
+  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+  ontology_id  BIGINT NOT NULL REFERENCES onto_ontology(id),
+  version      INT    NOT NULL,
+  action       VARCHAR(128) NOT NULL,          -- 动作名
+  object_type  VARCHAR(128) NOT NULL,          -- 类名
+  subject      VARCHAR(128) NOT NULL,          -- 识别值
+  request_json JSON,                           -- 请求参数
+  projections  JSON,                           -- 各条投影的成败；演示期不拆子表
+  error        TEXT,                           -- 前置/公理拒绝的原因；拒绝发生在投影之前
+  duration_ms  INT,
+  ok           BOOLEAN NOT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX idx_action_time    ON log_action (ontology_id, created_at);
+CREATE INDEX idx_action_subject ON log_action (ontology_id, object_type, subject);
+```
+
+方言注记：DDL 按 MySQL 8 方言写。换 PG 时：自增主键改 `GENERATED ALWAYS AS IDENTITY`，`MEDIUMTEXT` 改 `TEXT`，`JSON` 可换 `JSONB`，去掉 `ENGINE` / `CHARSET` 后缀；`ON UPDATE CURRENT_TIMESTAMP` 在 PG 里没有，`updated_at` 由应用层写。换 SQLite 时：自增主键改 `INTEGER PRIMARY KEY`，`JSON`、`BOOLEAN` 按 TEXT、INTEGER 存。
+
+索引只建服务于已知查询路径的：按连接名找连接、按版本取快照、按候选对查历史、日志按时间回放、动作按个体追查。小表只有唯一约束。
+
+三个取舍。版本存全量快照，不存增量 diff：本体文本不大，全量快照让回滚和版本比较都简单。裁决与交集分两张表：交集是机器算的，可重算；裁决是人定的，不可重算——两者生命周期不同。裁决留痕里的证据快照是对交集记录的有意冗余：交集重算后数字可能变，快照留住裁决时点看到的证据。`onto_ontology` 只存锚字段：本体的内容在追加式的版本快照里，「当前已发布版」永远等于 `MAX(version)`，不缓存 `current_version` 指针——它带不来信息，只会带来不一致的可能。demo 阶段可以先内存或 SQLite，表结构不变。
+
+## 7. 四周计划与验收
 
 | 周 | 交付 | 验收 |
 |---|---|---|
-| W1 | 工程骨架 + M1 连接器 + schema 浏览界面 | 连上两个 mock 库，页面看到表结构与采样 |
-| W2 | M2 AI 建模 + M4 YAML 管理 | 10 表库生成本体草稿，人工改两处保存 |
-| W3 | M3 整合工作台 + M6 血缘 | 招聘/HR 案例按③建模成功，交集证据可查 |
-| W4 | M7 查询服务 + M8 动作执行器 + 演示打磨 | 问数答对业务测试题；录用一人后 HR 有行、再问状态已变 |
+| W1 | 工程骨架（含元数据库建表；演示期可用内存或 SQLite 实现）+ M1 连接器 + 表结构浏览界面 | 连上 mock 库，页面看到表结构与采样 |
+| W2 | M2 AI 建模 + M4 版本化与画布 | 另备的 10 表测试库（与演示三库分开，回归评测将此库纳入标注集）生成本体草稿，人工改两处保存 |
+| W3 | M3 整合工作台 + M6 血缘 + 验收问题集初稿 | 在途/在役案例按阶段裁决成功，交集证据可查 |
+| W4 | M7 查询服务 + M8 动作执行器 + 演示打磨 | 问数答对验收问题集；验收一台在途设备后，设备源、资产源各有新行，保修卡已立，再问阶段已在役 |
 
-**Demo 脚本**（mock 招聘 + HR）：配置连接 → 生草稿 → 候选人/员工交集率 34%，按 ③ 裁决 → 发布本体 → 问「转正员工及部门」（取数路径）→ **录用一名候选人**（写 HR）→ 再问，此人已在职（≤30min 含讲解）。无「一键生成新系统」。
+**Demo 脚本**（mock 采购 + 设备 + 资产三个库）：配置连接 → 生成对象（设备库同时带出部门对象和「属于」关系）→ 两对候选对分别裁为阶段、同一 → 发布本体 → 问「在役设备及其所属部门」（展示取数路径）→ 验收一台在途设备（设备源、资产源各插入一行，立一张保修卡）→ 再问，这台设备已在役。全程 ≤30 分钟含讲解，没有「一键生成新系统」。
 
-## 7. 红线与风险
+## 8. 红线与风险
 
-**本期不做**：根因推理与 Rules 正式化、golden record / 存量迁移、CDC、出码与新应用骨架、模板市场/多租户、图数据库、Oracle。动作只做「投影回原库」这一条（录用），不做任意存储过程/审批流封装。
+**本期不做**：规则与推理、OWL、子类型定案、部分与整体、golden record 与存量迁移、CDC、出码与新应用骨架、模板市场与多租户、图数据库、MySQL 和 PG 以外的数据库。函数不单设立构造。变更事件与告知已设计，本期不交付。动作只执行已发布定义，不封装任意存储过程与审批流。
 
-**数据边界（不可协商）**：不迁移、不复制业务数据；个体不进平台。问数只读实时查源库；写只按动作 `project` 打原库，平台留 `action_log` 摘要不留行。交集内存算，标识集合不落地；`query_logs` / `action_logs` 不存结果集。
+**数据边界（不可协商）**：不迁移、不复制业务数据，个体不进平台。问数只读实时查源库；写只按已发布动作的效应与源映射投影原库，平台留 `log_action` 摘要，不留业务行。交集在内存里算，识别字段的取值集合不落地；`log_query` 与 `log_action` 不存结果集。
 
-**三大风险**：①LLM 建模质量不稳 → 草稿+人改+再生成+评测集；②关系类型判错 → 证据快照+裁决+可回滚；③被快速复制 → 护城河在裁决知识库与映射/血缘，不在执行器、更不在生成器。
+**风险**：①模型建模质量不稳 → 草稿 + 人改 + 再生成 + 评测集；②结论判错 → 证据快照 + 裁决留痕 + 发布可回滚，合并判错类型比不合并更糟，所以定案权在人；③被快速复制 → 护城河在裁决知识库与映射/血缘，不在执行器，更不在生成器；④客户真实库不给可写账号 → 动作链路失去前提，写回段改在 mock 库上演示，问数不受影响；⑤源库的负载与并发写传导进平台 → 问数与采样走只读账号并限额，可接只读副本；查询强制超时与限量；投影更新带条件，条件不成立则判该条投影失败、重读重发。
 
-**问数专项风险**：NL 查询答错 → Agent 只能走本体 API（禁自由 SQL），query_logs 全量记录可回放；业务测试问题集即问数验收基准，答错即本体或映射有误，回 M2/M3 修正。
+**问数专项风险**：自然语言查询答错 → Agent 只能走本体 API（禁自由 SQL），`log_query` 全量记录可回放。验收问题集有两个用途：裁决之后核对本体（《ontos-article.md》§3.2），以及作为问数验收基准。它随本体版本一并保存；问数答错即说明本体或映射有误，由人回 M2/M3 修正。
 
-## 8. 写与 Agent 边界（V1.6）
+## 9. 写与 Agent 边界
 
-不造新库、不给每个源系统定制执行器。读仍联邦原库；写是对本体世界的合法变更，再投影回原库。客户业务代码不用改，最多给 Ontos 一个可写账号。
+**不造新库。** 写是对本体世界的合法变更，再投影回原库。执行器写在 Ontos 后端一份，与查询服务对等，不为每个源系统定制执行器。
 
-### 8.1 写是什么
+**进新系统只加数据**：连接、映射、动作定义。先回答「那个系统里的对象和已有的类是什么关系」。答案有三种，各对应一步配置。是同一个体的又一源——在本类 `sources` 加一行；是挂在个体上的新对象——立一个新类、加一条关系到本类，效应用 `create`；是另一件事——本类不动，另立一条动作，另发一次请求。禁止按行业在执行器里写分支。
 
-写不是 `UPDATE` 表。种类：诞生/消亡、改特征、改关系、改存在方式（阶段/类型）。「录用」是最后一种：同一 `person`（`identity`）从候选人转为在职，并多一条 `converted`。不能 PATCH 派生 `status`。
+**生成要模型，执行不要。** 模型只产草稿（对象、关系、动作定义），人裁决、发布。执行器解释已发布配置，禁自由 SQL。画布上的再生成是人驱动的：拿上一版草稿加人的一句话，让模型再生成一次——`generateObject` 一次，草稿上画布，停。模型不自己选工具、不自己写库。
 
-动作改对象；`sources` + 五关系决定怎么投影。禁止再写 `record: hr.employee`（那是跳过变更集直接绑表）。
+**循环分三种，只禁一种。** 禁止的是模型自转的 ReAct 循环：建模没有即时反馈信号，数据库不会告诉模型建错了，模型自己判自己对错只会漂移；每次循环走的路径不同，标注库回归就没法跑；循环的中间产物没人读，裁决权也就丢了。要保留的是人驱动的再生成，以及确定性流水线里嵌多个模型槽位：表多了逐批产类，由代码做确定性合并，再产关系建议与动作草稿——下一步走什么由代码决定，停不停由人决定，模型只在槽位里填空。槽位再多也落在「写出配置」这一个用途里；模型的另一个用途是把自然语言编成查询或写入请求，两个用途之外没有模型。真想要 agent 式探索，循环放在 Ontos 之外，由外部 Agent 驱动，Ontos 内部永远保持确定性。
 
-- ① 等价：先定每个属性谁收写。  
-- ② 重叠：公共属性写下位，特有只写自己。  
-- ③ 阶段：在职 = 这人在 HR 里存在 → 投影常是 upsert `employee`，招聘表不动。  
-- ⑤ 同名不同类：写一侧绝不碰另一侧。
+**入口两个，内核同一套**：画布点「生成对象」走后端 `generateObject`；Claude Code 等外部 Agent 经 MCP 调 `propose_ontology` / `propose_action` / `query` / `run_action`。
 
-`person.status` 是读的规则（映射原列，或 ③ 派生）。录用前置只看 `status === 候选人`，不另做「两库侦察」。HR 的 `employee.status` 与本体 `person.status` 不是同一个东西。
+**持久化与即用即弃**：本体、映射、动作定义、`log_query`、`log_action` 持久化；每次执行编出的 SQL 即用即弃；业务行留在原库。
 
-### 8.2 动作语言与一次录用
-
-Agent / 按钮 / MCP 都只许发 Zod JSON，与结构化查询成对：
-
-```json
-{ "action": "hire", "object": "person", "identity": "1101011980..." }
-```
-
-本体里的定义必须机器可读（白话 `does` 只给人看）：
-
-```yaml
-actions:
-  - name: hire
-    pre: { status: 候选人 }
-    effect: { transition: { from: 候选人, to: 在职 } }
-    project:
-      - { connection: hr, table: employee, mode: upsert, by: identity, fields: [name, id_card] }
-```
-
-对照：`JSON.object` + `JSON.action` 去已发布本体里 **find 那一条**，不用 `if (action==="hire")`。校验用这条的 `pre`/`axioms`，改数用这条的 `project`（列值从刚读到的个体 + `sources` 映射取）。
-
-YAML 谁写：建模时模型写入草稿（③ 就建议 `hire`），人改、发布进 vN。执行时不再写 YAML，对话只编 JSON。
-
-跑法：校验 → 读此人 `status` → `pre` 不通过则拒 → 按 `project` 逐条投影 → `action_log` → 再读验收。缺参先补全。某条投影失败则记失败，已写出的库不自动回滚（跨库无分布式事务）。
-
-### 8.3 代码写在哪、进新系统加什么
-
-执行器是 **Ontos 产品代码，写一次**：认 `upsert` / `update` / `delete`。Demo 与问数对等——`actionService` + `POST /api/action`，同一进程。不进客户招聘/HR 进程，不为每个源系统再写一份执行器。
-
-每进一个系统只加数据：连接、映射、动作定义。换的是 YAML 里的 `connection` / `table` / `fields`。
-
-| 持久化 | 即用即弃 |
-|---|---|
-| 本体、动作定义、映射、每次 `action_log` | 这一次编出的 SQL |
-| 业务行仍在原库 | 不在平台存个体副本 |
-
-原系统里有人直接录用：Ontos 当时无感；下次联邦一读就能看见。要连动作日志也有，才需要回调或 CDC（现不做）。
-
-### 8.4 生成要模型，执行不要；不是 ReAct
-
-| | 做什么 | 要不要模型 |
-|---|---|---|
-| **生成** | 对象、关系、识别字段、五关系建议、动作定义 | 要。只产草稿，人裁决 |
-| **执行** | 按已发布本体问数、录用 | 不要。执行器解释说明书 |
-
-理解发生在生成期（`hire` 写进本体时）。执行期再让模型「理解着写库」= 发明表、写一半。准确性不靠循环：结构 schema 卡住、交集率挡合并、人改画布/裁决。LLM 建模本就 68–86%。
-
-画布上「上一版 + 用户一句话 → 再生成」是**人驱动的再生成**，不是 ReAct：人说一句 → `generateObject` 一次 → 草稿上画布 → **停**。模型不自己选工具、不自己写库。ReAct 是模型在内部转圈直到它自己觉得完了。不要在后端做会转圈的 Agent。
-
-入口可以两个，内核同一套：画布点「生成对象」→ 后端 `generateObject`；Claude Code / Claude 调 MCP（`propose_ontology` / `propose_action` / `query` / `run_action`）。不是把 Ontos「接入 Claude 里改它」。Skill 只是说明书，不能单独写库。问数/录用对外部 Agent 就是工具调用，Ontos 内无 ReAct。
-
-### 8.5 完整实例：元素、画布存什么、读/写这次跑什么
-
-以招聘+HR 按 ③ 裁决后为准，并已接入考勤、工资、绩效：考勤/工资人员表 = 同一人的源；工资账户 = 入职时诞生的关联对象；绩效周期 = 另一件事、另立动作。三样东西不要混：
-
-| 东西 | 是什么 | 存哪 |
-|---|---|---|
-| 画布 / `ontology.yaml` | 世界上有什么（类、字段、关系、动作定义） | 持久化，随版本 |
-| 一次读 | `StructuredQuery` JSON | 可存成问数 API；SQL 即弃 |
-| 一次写 | `StructuredAction` JSON | `action_log`；SQL 即弃 |
-| 业务行 | 张三那一行 | **只在原库**，YAML 里没有 |
-
-#### 元素对照（YAML 键 = 本体论要素）
-
-| YAML | 本体论 | 画布上 |
-|---|---|---|
-| `object_types` | 类 | 一个节点 |
-| `properties` | 属性 | 节点里的字段 |
-| `identity` | 识别标准 | 「识别字段」 |
-| `kind` | 事物 / 事件 | 节点类型 |
-| `parent` / `equivalent` | 子类型 / 类等价 | ④ 未做；① 多用多 `sources` |
-| `derived` | 派生属性 | 字段旁的规则，不可直写 |
-| `sources` | 概念→原表列 | 不单独成节点；表结构抽屉里看到去向 |
-| `link_types` | 关系 | 节点之间的边 |
-| `axioms` | 公理 | 约束，须结构化才能执行 |
-| `functions` | 可计算谓词 | 展示用；问数也可写成 filter |
-| `actions` | 动作（`pre`/`effect`/`project`） | 对象上的可发动操作 |
-| `questions` | 验收题 | 不画在图上 |
-
-连接账号（主机、密码）不进这份 YAML，在连接配置里。
-
-#### A. 画布保存的（已发布 vN）
-
-```yaml
-# ontology.yaml —— 画布工作副本 / 发布快照。无业务行。
-object_types:
-  person:
-    label: 人员
-    kind: thing
-    identity: id_card
-    properties:
-      - { name: id, type: uuid, pk: true }
-      - { name: name, type: string, label: 姓名 }
-      - { name: id_card, type: string, label: 身份证 }
-      - name: status
-        type: enum
-        values: [候选人, 在职, 离职]
-        label: 状态
-        derived:
-          - { sources: [recruiting], value: 候选人 }
-          - { sources_includes: hr, from: { connection: hr, table: employee, column: status } }
-      - { name: hired_at, type: date, label: 入职日期 }
-    sources:
-      - { connection: recruiting, table: candidate, pk: cand_id,
-          fields: { name: candidate_name, id_card: idcard_no } }
-      - { connection: hr, table: employee, pk: emp_no,
-          fields: { name: emp_name, id_card: id_card, hired_at: hired_at } }
-      # 同一人的源（身份证能认）——不是新对象
-      - { connection: attendance, table: staff, pk: staff_id,
-          fields: { name: name, id_card: id_no } }
-      - { connection: payroll, table: employee, pk: emp_id,
-          fields: { name: emp_name, id_card: id_card } }
-    axioms:
-      - { name: status_one, type: mutex, property: status }
-    functions:
-      - { name: is_converted, label: 是否已转正, rule: "status 从候选人变为在职" }
-    actions:
-      - name: hire
-        label: 录用
-        does: 候选人转为在职；此人出现在 HR/考勤/工资人员表，并开一个工资账户
-        pre: { status: 候选人 }
-        effect:
-          transition: { from: 候选人, to: 在职 }
-          link: converted
-          create:
-            - { object: payroll_account, link: has_account }
-        project:
-          # 同人多源
-          - { connection: hr, table: employee, mode: upsert, by: identity, fields: [name, id_card] }
-          - { connection: attendance, table: staff, mode: upsert, by: identity, fields: [name, id_card] }
-          - { connection: payroll, table: employee, mode: upsert, by: identity, fields: [name, id_card] }
-          # 关联对象
-          - { connection: payroll, table: account, mode: upsert, by: identity, fields: [id_card],
-              for: payroll_account }
-      - name: open_review
-        label: 开启绩效
-        does: 为在职人员建本周期绩效档案——不是入职的同一变更
-        pre: { status: 在职 }
-        effect:
-          create:
-            - { object: performance_cycle, link: reviewed_in }
-        project:
-          - { connection: perf, table: review, mode: upsert, by: identity,
-              fields: [id_card], extra: [cycle], for: performance_cycle }
-
-  payroll_account:
-    label: 工资账户
-    kind: thing
-    identity: id_card
-    properties:
-      - { name: id_card, type: string, label: 身份证 }
-      - { name: opened_at, type: date, label: 开户日, derived: "随 hire 创建" }
-    sources:
-      - { connection: payroll, table: account, pk: acct_id,
-          fields: { id_card: id_card } }
-
-  performance_cycle:
-    label: 绩效周期档案
-    kind: event
-    properties:
-      - { name: id_card, type: string, label: 身份证 }
-      - { name: cycle, type: string, label: 周期 }
-    sources:
-      - { connection: perf, table: review, pk: review_id,
-          fields: { id_card: id_card, cycle: cycle } }
-
-  department:
-    label: 部门
-    identity: name
-    properties:
-      - { name: code, type: string, pk: true, label: 部门编号 }
-      - { name: name, type: string, label: 部门名 }
-    sources:
-      - { connection: recruiting, table: department, pk: dept_code, fields: { code: dept_code, name: dept_name } }
-      - { connection: hr, table: department, pk: dept_id, fields: { code: dept_id, name: dept_name } }
-
-  job_posting:
-    label: 招聘职位
-    properties:
-      - { name: id, type: int, pk: true }
-      - { name: title, type: string, label: 职位名 }
-      - { name: jd_text, type: string, label: JD描述 }
-    sources:
-      - { connection: recruiting, table: job_posting, pk: job_id, fields: { id: job_id, title: title, jd_text: jd_text } }
-
-  headcount_position:
-    label: 岗位编制
-    properties:
-      - { name: id, type: int, pk: true }
-      - { name: title, type: string, label: 岗位名 }
-      - { name: headcount, type: int, label: 编制数 }
-    sources:
-      - { connection: hr, table: headcount_position, pk: pos_id, fields: { id: pos_id, title: title, headcount: headcount } }
-
-link_types:
-  - { name: converted, label: 转正, from: person, to: person, inverse: converted_from, card: "1:1",
-      via: { transition: { status: [候选人, 在职] } } }
-  - { name: works_in, label: 任职于, from: person, to: department, inverse: staffed_by, card: "n:1",
-      via: { fk: "hr.employee.dept_id → hr.department.dept_id" } }
-  - { name: applied_to, label: 应聘, from: person, to: job_posting,
-      via: { column: "applied_position ↔ title" } }
-  - { name: has_account, label: 拥有工资账户, from: person, to: payroll_account, card: "1:1",
-      via: { identity: id_card } }
-  - { name: reviewed_in, label: 参加绩效, from: person, to: performance_cycle, card: "1:n",
-      via: { identity: id_card } }
-
-questions:
-  - 查所有从候选人转正的员工及其部门
-  - 现在还有多少候选人
-  - 张三的工资账户开了没有
-```
-
-画布节点 = `person` / `payroll_account` / `performance_cycle` / `department` / `job_posting` / `headcount_position`。表不当节点。
-
-#### B. 读这次执行的（不写进 YAML）
-
-「查所有从候选人转正的员工及其部门」：
-
-```json
-{ "object": "person", "filter": { "converted": true }, "expand": ["department"] }
-```
-
-「张三的工资账户开了没有」：
-
-```json
-{ "object": "person", "identity": "110101198001011234", "expand": ["payroll_account"] }
-```
-
-执行器拿 A 的 YAML + 这份 JSON：按 `sources` 下推、用 `id_card` 拼人、按 `derived` 算 `status`、沿 `link_types` expand。YAML 不变，原库不变。
-
-#### C. 写这次执行的（只进 action_log）
-
-**录用张三**（一次变更：阶段 + 同人三源 + 开账户）：
-
-```json
-{ "action": "hire", "object": "person", "identity": "110101198001011234" }
-```
-
-`find person.actions.hire` → `pre.status===候选人` → `effect` 变更集 → 按序投影（即用即弃）：
-
-```sql
--- 同人：HR / 考勤 / 工资人员表
-INSERT INTO hr.employee      (emp_name, id_card) VALUES ('张三', '110101198001011234') ON CONFLICT (id_card) DO UPDATE SET emp_name = EXCLUDED.emp_name;
-INSERT INTO attendance.staff (name, id_no)       VALUES ('张三', '110101198001011234') ON CONFLICT (id_no)   DO UPDATE SET name = EXCLUDED.name;
-INSERT INTO payroll.employee (emp_name, id_card) VALUES ('张三', '110101198001011234') ON CONFLICT (id_card) DO UPDATE SET emp_name = EXCLUDED.emp_name;
--- 关联对象：工资账户
-INSERT INTO payroll.account  (id_card)           VALUES ('110101198001011234')         ON CONFLICT (id_card) DO NOTHING;
-```
-
-招聘库不动。不写 `status` 列。再读：`status=在职`，expand `payroll_account` 有行。
-
-**开启绩效**（另一件事，另一次 JSON；入职当时不会自动跑）：
-
-```json
-{ "action": "open_review", "object": "person", "identity": "110101198001011234", "fields": { "cycle": "2026Q3" } }
-```
-
-`pre.status===在职` → 创建 `performance_cycle` →
-
-```sql
-INSERT INTO perf.review (id_card, cycle) VALUES ('110101198001011234', '2026Q3')
-ON CONFLICT (id_card, cycle) DO NOTHING;
-```
-
-#### 8.6 多样业务：按本体论适配，不按行业写分支
-
-入职后还要出现在考勤、绩效、工资——这不是「hire 的特殊逻辑」，是同一种存在论问题的三种落法。执行器仍然只认 `pre`/`effect`/`project`。
-
-先问：那个系统里的东西，和 `person` 是什么关系？（还是五关系，不是工作流）
-
-| 裁成 | 含义 | 写进本体 |
-|---|---|---|
-| 同一人的又一源（①/③） | 考勤/工资里就是这个人，身份证能认 | `person.sources` 加一行；`hire.project` 加一条 upsert。一次世界变更（变成在职），多处投影 |
-| 关联对象诞生 | 工资账户、绩效档案不是「人」，是挂在人上的新个体 | 新 `object_types` + `link_types`；`hire.effect` 写「创建并连上」；`project` 投到对应表 |
-| 另一件事 | 绩效下个月才建档，不是入职的同一变更 | **不要塞进 hire**。另立动作（如 `open_review`），另一次 JSON 调用 |
-
-连上新库时走现有建模：模型建议「又一源 / 新对象 / 无关」，人裁决，改 YAML，发布。执行器一行 TypeScript 都不用为考勤重写。
-
-JSON 始终只有「对谁、发动哪个已发布动作」。下发到几个系统，由那条动作当时的 `project`/`effect` 决定，不由模型在执行期临时发明。
-
-跨库失败：不做两阶段提交。已成功的投影留下，失败条进 `action_log`；派生 `status` 仍按读规则算（只写下了 HR 就是在职，考勤没有行就是考勤源未命中）。补偿=再发一次同一动作（upsert 幂等）或人修。
-
-本期验收仍可以只有 HR 一条 `project`。多源下发是同一套定义加行，不是新模块。
-
----
+**绕过平台的写**：源库被原地改动时，平台当时无感，下次读才看见。如果连这种变更也要进动作日志，就需要回调或 CDC；本期不做。
 
 ## 附录 A：本体论要素 × 本产品落地
 
-本体论里有哪些东西，我们做成了哪些。连库、出码、画布壳不在此表。
-
 | 本体论要素 | 一句话 | 现状 |
 |---|---|---|
-| 类（对象类型） | 领域里有哪些种东西 | **已落地**。画布节点 = 对象 |
-| 属性 | 一类有哪些特征 | **已落地**。UI 叫字段 |
-| 关系 | 类与类怎么连 | **已落地**。含逆关系、基数 |
-| 识别标准 | 两实例何时是同一个 | **已落地**。`identity`，跨源认人与问数共用 |
-| 个体（ABox） | 具体某个人、某条记录 | **不做**。数据留源库，平台不存个体 |
-| 类等价 | 两个名字是同一个类 | **已落地**。① → 单对象挂多源；`equivalent` 字段有 |
-| 上位 / 概括 | 两边部分重叠，抽公共类 | **已落地**。② → 上位对象 + 两侧特有属性 |
-| 生命周期 / 阶段 | 同一实体的时间阶段 | **已落地**。③ → 派生 `status` + `converted` |
-| 子类型（is-a） | 一类是另一类的特化 | **未做**。`parent` 字段有，④ 留 V2 |
-| 同形异义 | 同名不是一类 | **已落地**。⑤ → 各自独立 |
-| 事物 vs 事件 | 持续物 / 发生的事 | **字段有**。`kind`，未约束建模 |
-| 派生属性 | 无源列、由规则推出 | **已落地**。`status` 由「出现在哪些源」推出 |
-| 部分—整体 | A 是 B 的部分 | **未做** |
-| 公理 | 必须遵守的约束 | **能写不跑**。YAML 白话字符串，无推理机 |
-| 可计算谓词 | 「是否已转正」这类 | **能写不跑**。问数里 `converted` 写死双源命中 |
-| 动作 | 对世界做什么（录用） | **已设计未落地**。见 §8；不绑表，改对象再投影原库 |
-| 规则 / 推理 | 从已知推出新知 | **未做**。无 OWL、无包含检测、无一致性检查 |
-| 形式语言 | OWL / RDF / 描述逻辑 | **未做**。用 YAML |
+| 类（对象类型） | 领域里有哪些种东西 | 已落地。`object_types`，画布节点 |
+| 属性 | 一类有哪些特征 | 已落地。界面上叫字段 |
+| 关系 | 类与类怎么连 | 已落地。`link_types`：`match` 或 `transition`，含 `inverse`、`card` |
+| 同一性标准 | 两条记录何时指向同一个体 | 已落地。`identity`，源条目可写 `key`；交集验证、跨源对齐、动作认人共用；界面上叫识别字段 |
+| 个体（ABox） | 具体某台设备、某个人 | 不做。数据留源库，平台不存个体 |
+| 类等价 | 两个名字指同一类 | 已落地。同一 → 单类挂多源 |
+| 上位对象 | 部分重叠时抽出的公共类 | 已落地。属性上移，不带继承语义 |
+| 生命周期 / 阶段 | 同一实体的时间阶段 | 已落地。派生属性 + `transition` 关系 + 转化动作 |
+| 子类型（is-a） | 一类完全含于另一类 | 本期不做，不定案 |
+| 同形异义 | 名字相同而所指不同 | 已落地。各自独立，互不映射 |
+| 事物 / 事件 | 持续存在 / 发生过即确定 | 已落地。`kind`：thing 可经历阶段，event 不可 |
+| 派生属性 | 不对应源列、读时现算 | 已落地。两种形状：`when` 列表谈源；一条过滤取布尔 |
+| 可计算谓词 | 一个是非判断，如「是否在保」 | 已落地。即布尔派生属性 |
+| 函数 | 给定对象唯一确定结果 | 不单设构造。逐个体的计算统一写成派生属性 |
+| 部分与整体 | A 是 B 的部分 | 未做 |
+| 公理 | 必须成立的约束 | 已落地。效应定完后、投影前校验；本期一种类型 `mutex` |
+| 动作 | 一个对象允许发生什么变化 | 已落地。`pre` / `effect`，写回按 `sources` 推出 |
+| 变更事件与告知 | 把变更发给没有映射的系统 | 已设计，本期不交付。`inform` + `outlets`，泛化的 `change` / `change_line` |
+| 规则与推理 | 从已写下的事实推出没写下的事实 | 未做。只到派生属性的取值规则 |
+| 形式语言 | OWL / RDF / 描述逻辑 | 未做。用 YAML |
+
+## 附录 B：细节去《ontos-article.md》哪里读
+
+| 本文章节 | 细节在哪 |
+|---|---|
+| §2 五种结论与三层证据链 | 文章 §3.2：五种结论的处理、三步判定、候选对、交集率 |
+| §4 元模型骨架 | 文章附录 B：全部键、保留字、键的命名空间；附录 C：完整可发布配置 |
+| §5 查询 | 文章 §5：请求写法、过滤语法、派生属性求值、多源对齐 |
+| §5 写入 | 文章 §6：前置、效应、写回规则、转化关系判定、告知 |
+| §8 红线 | 文章 §7：局限的完整论证 |
