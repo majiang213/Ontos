@@ -1,11 +1,12 @@
 {
-  "name": "ontos-demo-prototype",
+  "name": "ontos",
   "private": true,
-  "description": "PROTOTYPE — 可丢弃。验证 Ontos 四步闭环的开发思路，数据全假。",
+  "description": "Ontos 平台（Next.js 前后端一体）：引擎 lib/engine/，种子配置 lib/config/ontology.yaml，测试 tests/。",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "vitest run"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -14,12 +15,14 @@
     "js-yaml": "^5.2.3",
     "next": "^15.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

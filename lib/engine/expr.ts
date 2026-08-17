@@ -1,0 +1,140 @@
+// 表达式求值 —— 日期一套、数字一套，表面都跟 Elasticsearch。
+// 语义见《ontos-article.md》§6.2 与附录 B「保留字」。
+
+import type { PropertyDef, ValueSource } from "../schema/config";
+
+/* 求值上下文：一次过滤核对或一条效应赋值能看到的全部来源。 */
+export interface EvalContext {
+  identity?: string | number; // 请求顶上的识别值
+  action?: string; // 请求顶上的动作名
+  object?: string; // 请求顶上的类名
+  request?: Record<string, unknown>; // 请求参数
+  current?: Record<string, unknown>; // 本条过滤或 update 正在谈的个体的源列属性值
+  currentDerived?: (prop: string) => unknown; // 点名的属性是派生属性时，按需现算
+  nextSequence?: (key: string) => number; // generate 的计数器
+}
+
+/* ---------- 日期表达式 ----------
+   锚点只有 now（此刻，UTC Unix 秒）；+1d/-1d 是步进；/d /h 是向下取整。
+   单位：y M w d h m s。没有单独的 today。 */
+const UNIT_S: Record<string, number> = {
+  y: 365 * 86400, M: 30 * 86400, w: 7 * 86400, d: 86400, h: 3600, m: 60, s: 1,
+};
+const DATE_RE = /^now(?:[+-]\d+[yMwdhms])*(?:\/[yMwdhms])?$/;
+
+export function isDateExpr(v: unknown): v is string {
+  return typeof v === "string" && DATE_RE.test(v);
+}
+
+export function evalDateExpr(expr: string, now = Math.floor(Date.now() / 1000)): number {
+  if (!DATE_RE.test(expr)) throw new Error(`非法日期表达式：${expr}`);
+  let t = now;
+  const steps = expr.match(/[+-]\d+[yMwdhms]/g) ?? [];
+  for (const s of steps) {
+    const n = parseInt(s.slice(1, -1), 10) * UNIT_S[s[s.length - 1]];
+    t = s[0] === "+" ? t + n : t - n;
+  }
+  const floor = /\/([yMwdhms])$/.exec(expr)?.[1];
+  if (floor) {
+    if (floor === "y" || floor === "M") throw new Error(`日期取整只支持 /w /d /h /m /s：${expr}`);
+    t = Math.floor(t / UNIT_S[floor]) * UNIT_S[floor];
+  }
+  return t;
+}
+
+/* ---------- 数字表达式 ----------
+   同样写 + -，但没有单位、不能取整。锚点是 current.属性名、request.参数名或数字字面量。 */
+const NUM_RE = /^((?:current|request)\.[A-Za-z_]\w*|\d+(?:\.\d+)?)([+-])((?:current|request)\.[A-Za-z_]\w*|\d+(?:\.\d+)?)$/;
+
+export function isNumberExpr(v: unknown): v is string {
+  return typeof v === "string" && NUM_RE.test(v);
+}
+
+function numOperand(tok: string, ctx: EvalContext): number {
+  if (/^\d/.test(tok)) return parseFloat(tok);
+  const dot = tok.indexOf(".");
+  const scope = tok.slice(0, dot);
+  const prop = tok.slice(dot + 1);
+  const bag = scope === "current" ? ctx.current : ctx.request;
+  const v = bag?.[prop];
+  if (typeof v !== "number") throw new Error(`数字表达式取不到数：${tok}`);
+  return v;
+}
+
+export function evalNumberExpr(expr: string, ctx: EvalContext): number {
+  const m = NUM_RE.exec(expr);
+  if (!m) throw new Error(`非法数字表达式：${expr}`);
+  const a = numOperand(m[1], ctx);
+  const b = numOperand(m[3], ctx);
+  return m[2] === "+" ? a + b : a - b;
+}
+
+/* ---------- 属性值来源 ----------
+   { from: request } 同名参数；{ property: 名, from: current|request } 点名的属性；
+   { from: identity|action|object } 请求顶上的值；{ from: generated } 按 generate 发号；
+   字符串按日期/数字表达式求值；其余字面量原样。 */
+export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext, gen?: () => unknown): unknown {
+  if (v !== null && typeof v === "object") {
+    const rec = v as Record<string, unknown>;
+    const from = rec.from;
+    if (typeof rec.property === "string") {
+      const bag = from === "request" ? ctx.request : ctx.current;
+      return bag?.[rec.property as string];
+    }
+    if (from === "request") return ctx.request?.[propName];
+    if (from === "identity") return ctx.identity;
+    if (from === "action") return ctx.action;
+    if (from === "object") return ctx.object;
+    if (from === "current") return ctx.current?.[propName];
+    if (from === "generated") {
+      if (!gen) throw new Error(`属性 ${propName} 没有 generate，不能 from: generated`);
+      return gen();
+    }
+    throw new Error(`无法识别的取值来源：${JSON.stringify(v)}`);
+  }
+  if (typeof v === "string") {
+    if (isDateExpr(v)) return evalDateExpr(v);
+    if (isNumberExpr(v)) return evalNumberExpr(v, ctx);
+  }
+  return v;
+}
+
+/* ---------- generate：按列表拼编号 ---------- */
+const pad = (n: number, w: number) => String(n).padStart(w, "0");
+
+export function formatUtc(seconds: number, format: string): string {
+  const d = new Date(seconds * 1000);
+  return format
+    .replace("yyyy", String(d.getUTCFullYear()))
+    .replace("MM", pad(d.getUTCMonth() + 1, 2))
+    .replace("dd", pad(d.getUTCDate(), 2))
+    .replace("HH", pad(d.getUTCHours(), 2))
+    .replace("mm", pad(d.getUTCMinutes(), 2))
+    .replace("ss", pad(d.getUTCSeconds(), 2));
+}
+
+function uuidV7(): string {
+  const ms = Date.now();
+  const rnd = crypto.getRandomValues(new Uint8Array(10));
+  const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  const ts = ms.toString(16).padStart(12, "0");
+  return `${ts.slice(0, 8)}-${ts.slice(8, 12)}-7${hex(rnd).slice(0, 3)}-${((rnd[0] & 0x3f) | 0x80).toString(16).padStart(2, "0")}${hex(rnd).slice(2, 6)}-${hex(rnd).slice(6, 18)}`;
+}
+
+export function generateValue(cls: string, prop: string, def: PropertyDef, ctx: EvalContext): string {
+  if (!def.generate) throw new Error(`${cls}.${prop} 没有 generate`);
+  const parts = def.generate.map((item) => {
+    if (typeof item === "string") return item;
+    const rec = item as Record<string, unknown>;
+    if (rec.from) return String(resolveValue({ from: rec.from } as ValueSource, prop, ctx));
+    if (rec.date) return formatUtc(evalDateExpr(String(rec.date)), String(rec.format ?? "yyyyMMdd"));
+    if (rec.sequence) {
+      if (!ctx.nextSequence) throw new Error("没有计数器，不能发号");
+      const seq = rec.sequence as { start?: number; width?: number };
+      return pad(ctx.nextSequence(`${cls}.${prop}`), seq.width ?? 4);
+    }
+    if (rec.uuid === "v7") return uuidV7();
+    throw new Error(`无法识别的 generate 项：${JSON.stringify(item)}`);
+  });
+  return parts.join("");
+}

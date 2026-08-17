@@ -1,0 +1,479 @@
+# 已发布配置 —— 《ontos-article.md》附录 C 全文。引擎加载的就是这份文本。
+object_types:
+  equipment:
+    description: 设备
+    kind: thing
+    identity: serial_no
+    properties:
+      name:
+        type: string
+        description: 名称
+      serial_no:
+        type: string
+        description: 出厂序列号
+      dept:
+        type: string
+        description: 所属部门编号
+      mark:
+        type: enum
+        values: [scrapped]
+        description: 台账标记
+      status:
+        type: enum
+        description: 阶段
+        values: [in_transit, in_service, scrapped]
+        derived:                               # 不进 fields。从上到下第一条命中
+          - when:
+              device:
+                mark: scrapped                 # 设备源有行且 mark=报废
+            value: scrapped
+          - when:
+              purchase: true                   # 采购源必须有行
+              device: false                    # 设备源必须无行
+            value: in_transit
+          - when:
+              device: true                     # 只看设备源
+            value: in_service
+      in_warranty:
+        type: boolean
+        description: 是否在保
+        derived:                               # 布尔=一条过滤
+          $link:
+            covered_by:
+              expiry: { gte: now/d }           # 有到期日不早于今天的保修卡
+    sources:
+      purchase:
+        connection: purchase_sys
+        table: po_item
+        pk: po_id                              # 表主键，不是同一性标准
+        fields:
+          name: item_name
+          serial_no: sn
+      device:
+        connection: device_sys
+        table: device
+        pk: dev_id
+        fields:
+          name: name
+          serial_no: serial_no
+          dept: dept_id
+          mark: status                         # 设备表 status 列
+      asset:
+        connection: asset_sys
+        table: asset
+        pk: asset_id
+        fields:
+          name: asset_name
+          serial_no: sn
+    axioms:
+      status_one:
+        description: 同一时刻一个阶段
+        type: mutex
+        property: status
+    actions:
+      convert:
+        description: 验收入库
+        pre:
+          status: in_transit                   # 现在必须在途
+          $link:
+            converted: false                   # 转化尚未发生
+        effect:
+          - link: converted                    # 转化没有另一端；作用在请求点名的那台设备上
+          - create:
+              object: warranty_card
+              properties:
+                serial_no: { from: identity }  # 与设备序列号相同，covers 靠 match 成立
+                expiry: now+1y
+      transfer:
+        description: 调拨
+        pre:
+          status: in_service
+          dept: { ne: { property: dept, from: request } }  # 新部门不得等于当前
+          $link:
+            belongs_to: true
+          $request:
+            dept: { object: department }       # request.dept 必须能认到部门
+        effect:
+          - update:
+              object: equipment
+              identity: { from: identity }
+              properties:
+                dept: { from: request }        # 部门=请求里的部门
+      scrap:
+        description: 报废
+        pre:
+          status: in_service
+        effect:
+          - update:
+              object: equipment
+              identity: { from: identity }
+              properties:
+                mark: scrapped                 # 台账标记改为报废
+      register:
+        description: 登记
+        pre:
+          $exists: false                       # 各源都还没有这个序列号
+          $request:
+            dept: { object: department }
+        effect:
+          - create:
+              object: equipment
+              properties:
+                name: { from: request }
+                dept: { from: request }
+                serial_no: { from: identity }  # 序列号=请求顶上的 identity
+      finish_repair:
+        description: 结束维修
+        pre:
+          $link:
+            under_repair:
+              is_open: true                    # 前置在设备上，用设备出发的关系名
+        effect:
+          - update:
+              object: repair
+              filter:
+                is_open: true
+                serial_no: { eq: { from: identity } }   # 过滤落在维修上，用维修自己的字段
+              properties:
+                ended_at: now                  # 结束时刻=此刻
+  department:
+    description: 部门
+    kind: thing
+    identity: dept_id
+    properties:
+      name:
+        type: string
+        description: 部门名称
+      dept_id:
+        type: string
+        description: 部门编号
+    sources:
+      org:
+        connection: device_sys
+        table: department
+        pk: dept_id
+        fields:
+          name: dept_name
+          dept_id: dept_id
+
+  assignment:
+    description: 履历                          # 设备某段时间属于某部门。不是设备
+    kind: event
+    identity: asgn_no
+    properties:
+      asgn_no:
+        type: string
+        description: 履历编号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      serial_no:
+        type: string
+        description: 设备序列号
+      dept_id:
+        type: string
+        description: 部门编号
+      valid_from:
+        type: date
+        description: 生效日
+      valid_to:
+        type: date
+        description: 失效日
+    sources:
+      history:
+        connection: device_sys
+        table: assignment
+        pk: id
+        fields:
+          asgn_no: asgn_no
+          serial_no: sn
+          dept_id: dept_id
+          valid_from: valid_from
+          valid_to: valid_to
+
+  warranty_card:
+    description: 保修卡                        # 挂在设备上，不是设备自己
+    kind: thing
+    identity: serial_no                        # 与设备同一序列号
+    properties:
+      serial_no:
+        type: string
+        description: 出厂序列号
+      expiry:
+        type: date
+        description: 到期日
+    sources:
+      cards:
+        connection: asset_sys
+        table: warranty_card
+        pk: card_id
+        fields:
+          serial_no: sn
+          expiry: expiry
+
+  repair:
+    description: 维修                          # 一次维修记录。不是设备
+    kind: event
+    identity: repair_no
+    properties:
+      repair_no:
+        type: string
+        description: 维修单号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      serial_no:
+        type: string
+        description: 设备序列号
+      started_at:
+        type: date
+        description: 开始时刻
+      ended_at:
+        type: date
+        description: 结束时刻
+      is_open:
+        type: boolean
+        description: 是否未结束
+        derived:
+          ended_at: null                       # 结束时刻为空=未结束
+    sources:
+      repairs:
+        connection: device_sys
+        table: repair
+        pk: id
+        fields:
+          repair_no: repair_no
+          serial_no: serial_no
+          started_at: started_at
+          ended_at: ended_at
+
+  person:
+    description: 人员
+    kind: thing
+    identity: person_no                        # 工号
+    properties:
+      person_no:
+        type: string
+        description: 人员编号
+      name:
+        type: string
+        description: 姓名
+    sources:
+      hr:
+        connection: hr_sys
+        table: person
+        pk: person_no
+        fields:
+          person_no: person_no
+          name: name
+    actions:
+      transfer_post:
+        description: 调岗                         # 挂在人员上：对某个人调岗，不改人本身
+        pre:
+          $link:
+            appointments:                        # 前置在人上，用人出发的关系名
+              is_current: true
+          $request:
+            dept: { object: department }
+        effect:
+          - update:
+              object: appointment           # 改任职，不改人
+              filter:
+                is_current: true
+                person_no: { eq: { from: identity } }  # 过滤落在任职上：这个人工号 + 在任
+              properties:
+                valid_to: now-1d/d          # 只改失效日。职务、部门、生效日保持原值
+          - create:
+              object: appointment           # 再新建一条任职
+              properties:                   # 只写这次要赋的源列属性。held_by 靠 person_no 的 match 成立
+                appt_no: { from: generated }   # 任职编号。按该类该属性的计数器发号
+                person_no: { from: identity }  # 人员编号=请求顶上的工号
+                title: { from: request }       # 职务=request.title
+                dept: { from: request }        # 部门=request.dept
+                valid_from: now/d              # 生效日=今天 0 点。valid_to 不写，空着表示至今
+        inform:
+          - object: change
+            to: [payroll]
+            properties:
+              action: { from: action }
+              occurred_at: now
+              subject: { from: identity }
+              subject_class: { from: object }
+
+  appointment:
+    description: 任职                            # 谁在哪个部门任什么职、从哪天到哪天。不是人
+    kind: event                                 # 一条记录发生过即确定；在任与否用日期算，不另改类
+    identity: appt_no
+    properties:
+      appt_no:
+        type: string
+        description: 任职编号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { sequence: { start: 1, width: 4 } }
+      person_no:
+        type: string
+        description: 人员编号                    # 用来和人对上；held_by 比的就是它
+      title:
+        type: string
+        description: 职务
+      dept:
+        type: string
+        description: 部门编号
+      valid_from:
+        type: date
+        description: 生效日
+      valid_to:
+        type: date
+        description: 失效日                      # 空=至今
+      is_current:
+        type: boolean
+        description: 是否在任                    # 派生，表上没有这一列
+        derived:
+          valid_from: { lte: now/d }            # 生效日不晚于今天
+          valid_to: { gte: now/d }              # 失效日不早于今天；空按至今
+    sources:
+      posts:
+        connection: hr_sys
+        table: appointment
+        pk: id
+        fields:
+          appt_no: appt_no
+          person_no: person_no
+          title: title
+          dept: dept_id
+          valid_from: valid_from
+          valid_to: valid_to
+
+  change:
+    description: 变更                            # 一次动作做完后的那包变更
+    kind: event
+    identity: change_id                         # 由 action、subject、occurred_at 合成
+    properties:
+      change_id:
+        type: string
+        description: 变更编号
+      action:
+        type: string
+        description: 动作名                      # inform：{ from: action }
+      occurred_at:
+        type: date
+        description: 发生时间                    # inform：now
+      subject:
+        type: string
+        description: 请求点名个体的识别值        # inform：{ from: identity }
+      subject_class:
+        type: string
+        description: 请求点名个体的类名          # inform：{ from: object }
+
+  change_line:
+    description: 变更条目
+    kind: event
+    identity: line_id
+    properties:
+      line_id:
+        type: string
+        description: 条目编号
+      change_id:
+        type: string
+        description: 所属变更
+      op:
+        type: enum
+        values: [update, create, delete, link]
+        description: 操作种类，与效应相同
+      object:
+        type: string
+        description: 被操作个体的类名
+      target:
+        type: string
+        description: 被操作个体的识别值
+
+link_types:
+  converted:
+    description: 转化为
+    from: equipment
+    to: equipment                              # 同一台设备的两个阶段
+    inverse: converted_from
+    card: 1:1
+    transition:
+      property: status
+      from: in_transit
+      to: in_service
+  belongs_to:
+    description: 属于
+    from: equipment
+    to: department
+    inverse: has_equipment                     # 从部门查设备时写这个名字
+    card: N:1
+    match:
+      - { from: dept, to: dept_id }
+  of_equipment:
+    description: 哪台设备
+    from: assignment
+    to: equipment
+    inverse: assignments
+    card: N:1
+    match:
+      - { from: serial_no, to: serial_no }
+  of_department:
+    description: 哪个部门
+    from: assignment
+    to: department
+    inverse: has_assignments
+    card: N:1
+    match:
+      - { from: dept_id, to: dept_id }
+  covers:
+    description: 保修
+    from: warranty_card
+    to: equipment
+    inverse: covered_by
+    card: N:1
+    match:
+      - { from: serial_no, to: serial_no }
+  on_equipment:
+    description: 维修哪台
+    from: repair
+    to: equipment
+    inverse: under_repair                      # 从设备查维修时写这个名字
+    card: N:1
+    match:
+      - { from: serial_no, to: serial_no }
+  held_by:
+    description: 任职于谁                         # 任职 → 人。不是保留字
+    from: appointment
+    to: person
+    inverse: appointments                        # 人 → 任职。前置里写这个名字
+    card: N:1                                    # 一人可有多条任职，一条任职只属于一人
+    match:
+      - { from: person_no, to: person_no }       # 任职.person_no = 人.person_no 则关系成立
+  posted_in:
+    description: 任职于哪
+    from: appointment
+    to: department
+    inverse: has_posts
+    card: N:1
+    match:
+      - { from: dept, to: dept_id }
+  has_line:
+    description: 变更包含条目
+    from: change
+    to: change_line
+    inverse: of_change
+    card: 1:N
+    match:
+      - { from: change_id, to: change_id }
+
+outlets:
+  payroll:
+    description: 薪酬侧收件
+    connection: payroll_hook
