@@ -14,7 +14,11 @@ interface OntologyResp {
   link_types: Record<string, any>;
 }
 interface IntrospectResp {
-  sources: { connection: string; tables: { name: string; columns: { name: string; type: string; pk: boolean }[] }[] }[];
+  sources: {
+    connection: string;
+    error?: string;
+    tables: { name: string; columns: { name: string; type: string; pk: boolean }[]; sample?: Record<string, unknown>[] }[];
+  }[];
 }
 
 const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
@@ -25,6 +29,8 @@ export default function CanvasPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -83,6 +89,28 @@ export default function CanvasPage() {
     await refresh();
   };
 
+  /** 多选表 → 生成对象 → 直接上画布并收起抽屉。 */
+  const generateFromTables = async () => {
+    const tables = [...selectedTables].map((key) => {
+      const [connection, table] = key.split(".");
+      return { connection, table };
+    });
+    const r = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tables }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error ?? "生成失败");
+      return;
+    }
+    showToast(`已生成对象：${data.created.join("、")}（草稿，发布后生效）`);
+    setSelectedTables(new Set());
+    setDrawerOpen(false);
+    await refresh();
+  };
+
   const objects: CanvasObject[] = useMemo(
     () =>
       Object.entries(ont?.object_types ?? {}).map(([name, t]) => ({
@@ -137,10 +165,11 @@ export default function CanvasPage() {
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
       <OntologyCanvas objects={objects} links={links} layout={ont?.layout} onSelect={setSelected} onLayoutChange={saveLayout} />
 
-      {/* 左上：发布状态 + 新建对象 */}
+      {/* 左上：发布状态 + 入口 */}
       <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <span className="eyebrow">已发布 v{ont?.version ?? "…"}</span>
         <button className="btn" onClick={() => setCreating(true)}>新建对象</button>
+        <button className="btn" onClick={() => setConnecting(true)}>连接数据源</button>
       </div>
 
       {/* 底中：发布条（有未发布改动时） */}
@@ -169,6 +198,27 @@ export default function CanvasPage() {
       {toast && (
         <div className="float-card" style={{ top: 76, left: "50%", translate: "-50% 0", zIndex: 40 }}>
           <div className="bezel"><div className="bezel-core" style={{ padding: "8px 16px", fontSize: 13 }}>{toast}</div></div>
+        </div>
+      )}
+
+      {/* 连接数据源卡（左上） */}
+      {connecting && (
+        <div className="float-card float-tl" style={{ top: 120, width: 320 }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>连接数据源</div>
+              <ConnectForm
+                onCancel={() => setConnecting(false)}
+                onDone={async (msg) => {
+                  setConnecting(false);
+                  showToast(msg);
+                  const s = await fetch("/api/introspect").then((r) => r.json());
+                  setSchema(s);
+                  setDrawerOpen(true); // 保存后自动打开表结构抽屉
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -274,29 +324,55 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底部抽屉：表结构（只看列定义，不取业务行） */}
+      {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象） */}
       {drawerOpen && (
         <div className="drawer">
+          {selectedTables.size > 0 && (
+            <div style={{ position: "sticky", top: 0, zIndex: 5, paddingBottom: 10, background: "var(--bg-deep)" }}>
+              <button className="btn-cta" style={{ fontSize: 13, padding: "6px 8px 6px 16px" }} onClick={generateFromTables}>
+                生成对象（{selectedTables.size} 张表）
+              </button>
+              <button className="btn" style={{ marginLeft: 8 }} onClick={() => setSelectedTables(new Set())}>清空选择</button>
+            </div>
+          )}
           {schema?.sources.map((s) => (
             <div key={s.connection} style={{ marginBottom: 20 }}>
               <span className="eyebrow">{s.connection}</span>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10 }}>
-                {s.tables.map((t) => (
-                  <div key={t.name} className="bezel" style={{ minWidth: 260 }}>
-                    <div className="bezel-core" style={{ padding: 12 }}>
-                      <code style={{ fontSize: 13 }}>{t.name}</code>
-                      {t.columns.map((c) => (
-                        <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
-                          <span>
-                            <code>{c.name}</code>
-                            <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
-                          </span>
-                          <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
-                        </div>
-                      ))}
+                {s.tables.map((t) => {
+                  const key = `${s.connection}.${t.name}`;
+                  const checked = selectedTables.has(key);
+                  return (
+                    <div key={t.name} className="bezel" style={{ minWidth: 260, outline: checked ? "2px solid var(--accent)" : "none" }}>
+                      <div className="bezel-core" style={{ padding: 12 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setSelectedTables((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(key)) next.delete(key);
+                                else next.add(key);
+                                return next;
+                              })
+                            }
+                          />
+                          <code style={{ fontSize: 13 }}>{t.name}</code>
+                        </label>
+                        {t.columns.map((c) => (
+                          <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
+                            <span>
+                              <code>{c.name}</code>
+                              <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
+                            </span>
+                            <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -335,6 +411,80 @@ function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, descripti
       </select>
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }}>加入画布</button>
+        <button type="button" className="btn" onClick={onCancel}>取消</button>
+      </div>
+    </form>
+  );
+}
+
+function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<"sqlite" | "mysql" | "pg">("sqlite");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [dbName, setDbName] = useState("");
+  const [user, setUser] = useState("");
+  const [pass, setPass] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputStyle: React.CSSProperties = { fontSize: 13, padding: "8px 12px" };
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!name.trim() || busy) return;
+        setBusy(true);
+        setError(null);
+        try {
+          const r = await fetch("/api/connections", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: name.trim(),
+              type,
+              host: host || undefined,
+              port: port ? Number(port) : undefined,
+              db_name: dbName || undefined,
+              ro_user: user || undefined,
+              ro_pass: pass || undefined,
+              test: true, // 先测连通再保存
+            }),
+          });
+          const data = await r.json();
+          if (!r.ok) setError(data.error ?? "连不上");
+          else onDone(data.warning ?? `已连接 ${name}，读到 ${data.tables?.length ?? 0} 张表`);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <input className="text-in" style={inputStyle} placeholder="连接名（小写，如 purchase_sys）" value={name} onChange={(e) => setName(e.target.value)} />
+      <select value={type} onChange={(e) => setType(e.target.value as "sqlite" | "mysql" | "pg")} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" }}>
+        <option value="sqlite">SQLite 文件（演示）</option>
+        <option value="mysql">MySQL</option>
+        <option value="pg">PostgreSQL</option>
+      </select>
+      {type === "sqlite" ? (
+        <input className="text-in" style={inputStyle} placeholder="文件路径（如 /data/demo.db）" value={dbName} onChange={(e) => setDbName(e.target.value)} />
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input className="text-in" style={{ ...inputStyle, flex: 1 }} placeholder="主机" value={host} onChange={(e) => setHost(e.target.value)} />
+            <input className="text-in" style={{ ...inputStyle, width: 90 }} placeholder="端口" value={port} onChange={(e) => setPort(e.target.value)} />
+          </div>
+          <input className="text-in" style={inputStyle} placeholder="库名" value={dbName} onChange={(e) => setDbName(e.target.value)} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input className="text-in" style={{ ...inputStyle, flex: 1 }} placeholder="只读账号" value={user} onChange={(e) => setUser(e.target.value)} />
+            <input className="text-in" style={{ ...inputStyle, flex: 1 }} placeholder="密码" type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
+          </div>
+        </>
+      )}
+      {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }} disabled={busy}>
+          {busy ? "测试中…" : "测试并保存"}
+        </button>
         <button type="button" className="btn" onClick={onCancel}>取消</button>
       </div>
     </form>

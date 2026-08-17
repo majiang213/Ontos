@@ -1,20 +1,22 @@
-// M1 连接器（雏形）：GET /api/introspect
-// 读当前驱动下各连接的表结构。源表是只读原料，不取业务行。
+// M1 连接器：GET /api/introspect
+// 读驱动注册表里每个连接的表结构 + 3 行脱敏采样。源表是只读原料。
 
 import { NextResponse } from "next/server";
 import { demoDriver } from "@/lib/engine/load";
-import type { SqliteFixtureDriver } from "@/lib/engine/fixture";
 
 export async function GET() {
-  const driver = demoDriver();
-  // 鸭子判断，不用 instanceof：Next dev 下路由包与本模块可能各有类实例
-  const fixture = driver as Partial<SqliteFixtureDriver>;
-  if (typeof fixture.connections !== "function" || typeof fixture.introspect !== "function") {
-    return NextResponse.json({ error: "当前驱动不支持内省" }, { status: 501 });
+  const registry = demoDriver();
+  const sources = [];
+  for (const connection of registry.connectionNames()) {
+    try {
+      const tables = await registry.introspect(connection);
+      const withSample = await Promise.all(
+        tables.map(async (t) => ({ ...t, sample: await registry.sample(connection, t.name, 3).catch(() => []) }))
+      );
+      sources.push({ connection, tables: withSample });
+    } catch (e) {
+      sources.push({ connection, tables: [], error: e instanceof Error ? e.message : String(e) });
+    }
   }
-  const sources = fixture.connections().map((connection) => ({
-    connection,
-    tables: fixture.introspect!(connection),
-  }));
   return NextResponse.json({ sources });
 }

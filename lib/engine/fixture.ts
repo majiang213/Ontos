@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   buildSelect,
   conditionSql,
+  maskValue,
   type Condition,
   type SourceDriver,
 } from "./driver";
@@ -25,24 +26,29 @@ export class SqliteFixtureDriver implements SourceDriver {
     return db;
   }
 
+  /** 注册一个 SQLite 文件库作为连接（连接表单里的 sqlite 类型走这里）。 */
+  registerFile(connection: string, path: string): void {
+    this.dbs.set(connection, new DatabaseSync(path));
+  }
+
   private db(connection: string): DatabaseSync {
     const db = this.dbs.get(connection);
     if (!db) throw new Error(`未注册的连接：${connection}`);
     return db;
   }
 
-  select(connection: string, table: string, columns: string[], conditions: Condition[]) {
+  async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
     const { sql, params } = buildSelect(table, columns, conditions, quote);
     return this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
   }
 
-  insert(connection: string, table: string, row: Record<string, unknown>) {
+  async insert(connection: string, table: string, row: Record<string, unknown>) {
     const cols = Object.keys(row);
     const sql = `INSERT INTO ${quote(table)} (${cols.map(quote).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
     this.db(connection).prepare(sql).run(...bind(cols.map((c) => row[c])));
   }
 
-  update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): number {
+  async update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): Promise<number> {
     const setCols = Object.keys(set);
     const setSql = setCols.map((c) => `${quote(c)} = ?`).join(", ");
     const parts = conditions.map((c) => conditionSql(c, quote));
@@ -52,13 +58,18 @@ export class SqliteFixtureDriver implements SourceDriver {
     return Number(res.changes);
   }
 
-  delete(connection: string, table: string, conditions: Condition[]): number {
+  async delete(connection: string, table: string, conditions: Condition[]): Promise<number> {
     const parts = conditions.map((c) => conditionSql(c, quote));
     const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
     const res = this.db(connection)
       .prepare(`DELETE FROM ${quote(table)}${where}`)
       .run(...bind(parts.flatMap((p) => p.params)));
     return Number(res.changes);
+  }
+
+  async sample(connection: string, table: string, limit = 3) {
+    const rows = this.db(connection).prepare(`SELECT * FROM ${quote(table)} LIMIT ?`).all(...bind([limit])) as Record<string, unknown>[];
+    return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, maskValue(k, v)])));
   }
 
   static seeded(): SqliteFixtureDriver {
@@ -72,7 +83,7 @@ export class SqliteFixtureDriver implements SourceDriver {
     return [...this.dbs.keys()];
   }
 
-  introspect(connection: string): { name: string; columns: { name: string; type: string; pk: boolean }[] }[] {
+  async introspect(connection: string): Promise<{ name: string; columns: { name: string; type: string; pk: boolean }[] }[]> {
     const db = this.db(connection);
     const tables = db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)

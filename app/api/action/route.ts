@@ -12,7 +12,7 @@ import { ZodError } from "zod";
 export async function POST(req: Request) {
   try {
     const action = actionRequestSchema.parse(await req.json());
-    const result = runAction(loadConfig(), demoDriver(), action);
+    const result = await runAction(loadConfig(), demoDriver(), action);
     // 领域内的失败（前置、公理、投影失败）装在结果里返回 422；抛出来的才是引擎故障
     return NextResponse.json(result, { status: result.ok ? 200 : 422 });
   } catch (e) {

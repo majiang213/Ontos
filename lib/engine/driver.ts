@@ -12,14 +12,48 @@ export interface Condition {
   value?: unknown; // in 时是数组；null / notnull 不带值
 }
 
+export interface TableInfo {
+  name: string;
+  columns: { name: string; type: string; pk: boolean }[];
+}
+
 export interface SourceDriver {
-  readonly dialect: "sqlite" | "mysql" | "pg";
-  // 下推只读查询：取哪些列、按什么条件筛，在库内完成
-  select(connection: string, table: string, columns: string[], conditions: Condition[]): Record<string, unknown>[];
+  readonly dialect?: "sqlite" | "mysql" | "pg"; // 注册表是多方言混合，不带此属性
+  // 下推只读查询：取哪些列、按什么条件筛，在库内完成。异步：真库走网络
+  select(connection: string, table: string, columns: string[], conditions: Condition[]): Promise<Record<string, unknown>[]>;
   // 写回三种：插、条件更新（返回受影响行数）、条件删除
-  insert(connection: string, table: string, row: Record<string, unknown>): void;
-  update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): number;
-  delete(connection: string, table: string, conditions: Condition[]): number;
+  insert(connection: string, table: string, row: Record<string, unknown>): Promise<void>;
+  update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): Promise<number>;
+  delete(connection: string, table: string, conditions: Condition[]): Promise<number>;
+  // M1：内省表结构（不取业务行）与脱敏采样（3 行）
+  introspect?(connection: string): Promise<TableInfo[]>;
+  sample?(connection: string, table: string, limit?: number): Promise<Record<string, unknown>[]>;
+}
+
+/* ---------- 方言 ---------- */
+
+/** 标识符引号：mysql 反引号，pg/sqlite 双引号。 */
+export function quoteFor(dialect: "sqlite" | "mysql" | "pg"): (id: string) => string {
+  return dialect === "mysql" ? (id) => `\`${id}\`` : (id) => `"${id}"`;
+}
+
+/** 占位符风格：sqlite/mysql 用 ?，pg 用 $1..$n。 */
+export function renderPlaceholders(sql: string, dialect: "sqlite" | "mysql" | "pg"): string {
+  if (dialect !== "pg") return sql;
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+
+/* ---------- 脱敏采样 ---------- */
+
+const SENSITIVE = /id_?card|idcard|phone|mobile|身份证|手机|邮箱|email/i;
+
+/** 敏感列只留头尾：身份证/手机号这类标识字段，采样时脱敏。 */
+export function maskValue(column: string, value: unknown): unknown {
+  if (value == null) return value;
+  if (!SENSITIVE.test(column)) return value;
+  const s = String(value);
+  return s.length <= 6 ? "******" : `${s.slice(0, 4)}******${s.slice(-2)}`;
 }
 
 /* 条件 → WHERE 片段。占位符统一用 ?；标识符引号按方言给。 */

@@ -12,7 +12,7 @@ import { ZodError } from "zod";
 export async function POST(req: Request) {
   try {
     const query = queryRequestSchema.parse(await req.json());
-    const { rows, path } = runQuery(loadConfig(), demoDriver(), query);
+    const { rows, path } = await runQuery(loadConfig(), demoDriver(), query);
     return NextResponse.json({ rows, path });
   } catch (e) {
     if (e instanceof ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });

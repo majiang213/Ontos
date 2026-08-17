@@ -61,7 +61,7 @@ function emptyIndividual(cls: Cls): Individual {
 
 const reject = (stage: ActionResult["stage"], error: string): ActionResult => ({ ok: false, stage, error, projections: [] });
 
-export function runAction(config: OntologyConfig, driver: SourceDriver, req: ActionRequest): ActionResult {
+export async function runAction(config: OntologyConfig, driver: SourceDriver, req: ActionRequest): Promise<ActionResult> {
   if (!config.object_types[req.object]) return reject("pre", `配置中没有类：${req.object}`);
   const cls = mustCls(config, req.object);
   const action: ActionDef | undefined = cls.def.actions?.[req.action];
@@ -78,14 +78,14 @@ export function runAction(config: OntologyConfig, driver: SourceDriver, req: Act
   };
 
   // 第 3 步：读出目标个体（各源有没有行都算合法状态）
-  const found = selectIndividuals(env, cls.name, { identity: req.identity, allColumns: true, ctx });
+  const found = await selectIndividuals(env, cls.name, { identity: req.identity, allColumns: true, ctx });
   const subject = found[0] ?? emptyIndividual(cls);
 
   // 第 4、5 步：核前置（与过滤同一套写法，多 $request、$exists）
   if (action.pre) {
     let preOk = false;
     try {
-      preOk = evalFilterOnIndividual(cls, subject, action.pre, env, ctx);
+      preOk = await evalFilterOnIndividual(cls, subject, action.pre, env, ctx);
     } catch (e) {
       return reject("pre", e instanceof Error ? e.message : String(e));
     }
@@ -95,7 +95,8 @@ export function runAction(config: OntologyConfig, driver: SourceDriver, req: Act
   // 第 6 步：按效应确定存在上的变化（先解析出计划，不急着投影）
   let plan: Planned[];
   try {
-    plan = action.effect.map((item) => planEffect(env, cls, item, subject, ctx));
+    plan = [];
+    for (const item of action.effect) plan.push(await planEffect(env, cls, item, subject, ctx));
   } catch (e) {
     return reject("effect", e instanceof Error ? e.message : String(e));
   }
@@ -127,7 +128,7 @@ export function runAction(config: OntologyConfig, driver: SourceDriver, req: Act
   for (const p of plan) {
     const op = p.kind === "update" ? "update" : p.kind === "delete" ? "delete" : "insert";
     try {
-      const recs = project(env, p, req, ctx);
+      const recs = await project(env, p, req, ctx);
       if (recs.length === 0) {
         projections.push({ source: "-", table: "-", op, ok: false, error: "没有源承接这次变化（属性未映射或第 3 步无行）" });
       } else {
@@ -198,7 +199,7 @@ type Planned =
   | { kind: "delete"; cls: Cls; targets: Individual[] }
   | { kind: "link"; linkName: string; subject: Individual };
 
-function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Individual, ctx: EvalContext): Planned {
+async function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Individual, ctx: EvalContext): Promise<Planned> {
   if ("link" in item) {
     const link = env.config.link_types[item.link];
     if (!link?.transition) throw new Error(`link 只用于转化关系：${item.link}`);
@@ -218,9 +219,9 @@ function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Individual
   if (op.identity !== undefined) {
     const id = resolveValue(op.identity, cls.def.identity ?? "identity", ctx);
     if (op.object === reqCls.name && id === ctx.identity) targets = [subject];
-    else targets = selectIndividuals(env, cls.name, { identity: id, allColumns: true, ctx: filterCtx });
+    else targets = await selectIndividuals(env, cls.name, { identity: id, allColumns: true, ctx: filterCtx });
   } else if (op.filter) {
-    targets = selectIndividuals(env, cls.name, { filter: op.filter, allColumns: true, ctx: filterCtx });
+    targets = await selectIndividuals(env, cls.name, { filter: op.filter, allColumns: true, ctx: filterCtx });
   } else {
     throw new Error(`认人必须写明：${op.object} 缺 identity 或 filter`);
   }
@@ -242,7 +243,7 @@ function rejectIfDerived(cls: Cls, prop: string) {
 
 const err = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): ProjectionRecord[] {
+async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Promise<ProjectionRecord[]> {
   const driver = env.driver;
   const out: ProjectionRecord[] = [];
 
@@ -278,7 +279,7 @@ function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Pr
             { column: keyCol, op: "eq" as const, value: row[keyCol] },
             ...changed.map((prop) => ({ column: entry.fields[prop], op: "eq" as const, value: row[entry.fields[prop]] ?? null })),
           ];
-          const n = driver.update(entry.connection, entry.table, set, conds);
+          const n = await driver.update(entry.connection, entry.table, set, conds);
           out.push(
             n > 0
               ? { source: srcName, table: entry.table, op: "update", ok: true }
@@ -309,7 +310,7 @@ function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Pr
         const idVal = keyProp ? vals[keyProp] : undefined;
         if (keyProp && idVal !== undefined && entry.fields[keyProp]) {
           const keyCol = keyColumn(p.cls, entry);
-          const dup = driver.select(entry.connection, entry.table, [keyCol], [{ column: keyCol, op: "eq", value: idVal }]);
+          const dup = await driver.select(entry.connection, entry.table, [keyCol], [{ column: keyCol, op: "eq", value: idVal }]);
           if (dup.length > 0) {
             out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有行，跳过（幂等）" });
             continue;
@@ -317,7 +318,7 @@ function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Pr
         }
         const row: Record<string, unknown> = {};
         for (const [prop, col] of Object.entries(entry.fields)) if (vals[prop] !== undefined) row[col] = vals[prop];
-        driver.insert(entry.connection, entry.table, row); // 未映射的 pk 由源库自生
+        await driver.insert(entry.connection, entry.table, row); // 未映射的 pk 由源库自生
         out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
       } catch (e) {
         out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
@@ -340,7 +341,7 @@ function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Pr
           const v = prop === idProp ? req.identity : propValue(cls, subject, prop);
           if (v !== undefined && v !== null) row[col] = v;
         }
-        driver.insert(entry.connection, entry.table, row);
+        await driver.insert(entry.connection, entry.table, row);
         out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
       } catch (e) {
         out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
@@ -355,7 +356,7 @@ function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Pr
       if (!target.rows[srcName]) continue;
       try {
         const keyCol = keyColumn(p.cls, entry);
-        driver.delete(entry.connection, entry.table, [{ column: keyCol, op: "eq", value: target.rows[srcName]![keyCol] }]);
+        await driver.delete(entry.connection, entry.table, [{ column: keyCol, op: "eq", value: target.rows[srcName]![keyCol] }]);
         out.push({ source: srcName, table: entry.table, op: "delete", ok: true });
       } catch (e) {
         out.push({ source: srcName, table: entry.table, op: "delete", ok: false, error: err(e) });

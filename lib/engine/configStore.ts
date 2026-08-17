@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from "node:path";
 import { dump, load } from "js-yaml";
 import { configSchema, type OntologyConfig } from "../schema/config";
+import { objectTypeSchema } from "../schema/config";
 import type { DraftOpInput as DraftOp } from "../schema/ops";
 import { validateSemantics } from "./validate";
 
@@ -133,6 +134,13 @@ export function applyOp(input: DraftOp): DraftState {
       state.layout = { ...state.layout, ...input.positions };
       writeFileSync(layoutFile(), JSON.stringify(state.layout), "utf8"); // 摆位落小文件，重启不丢
       return state; // 摆位不算本体改动，不碰 dirty
+    }
+    case "import_objects": {
+      for (const [name, raw] of Object.entries(input.objects)) {
+        if (d.object_types[name]) throw new DraftReject(`类已存在：${name}`);
+        d.object_types[name] = objectTypeSchema.parse(raw); // 逐类过结构校验
+      }
+      break;
     }
     default:
       throw new DraftReject(`未知操作：${JSON.stringify(input)}`);

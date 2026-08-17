@@ -10,7 +10,7 @@ export interface EvalContext {
   object?: string; // 请求顶上的类名
   request?: Record<string, unknown>; // 请求参数
   current?: Record<string, unknown>; // 本条过滤或 update 正在谈的个体的源列属性值
-  currentDerived?: (prop: string) => unknown; // 点名的属性是派生属性时，按需现算
+  currentDerived?: (prop: string) => unknown | Promise<unknown>; // 点名的属性是派生属性时，按需现算（异步：可能要查源）
   nextSequence?: (key: string, start?: number) => number; // generate 的计数器
   allowPreKeys?: boolean; // true 才许用 $request / $exists（它们只属于前置，见 §5.2）
 }

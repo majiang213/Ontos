@@ -41,7 +41,7 @@ function resolveLink(config: OntologyConfig, clsName: string, name: string): Res
 }
 
 /** 转化关系的两截判定（§6.4）：出发规则里值为 true 的源现在有没有行；到达规则现在是否整条命中。 */
-function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: Env, ctx: EvalContext): boolean {
+async function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: Env, ctx: EvalContext): Promise<boolean> {
   const t = link.transition!;
   const clsOfLink = cls;
   const def = clsOfLink.def.properties[t.property];
@@ -52,7 +52,7 @@ function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: Env, ct
   const fromSourcesHaveRows = Object.entries(fromRule.when)
     .filter(([, cond]) => cond === true)
     .every(([src]) => ind.rows[src] != null);
-  return fromSourcesHaveRows && whenRuleHits(clsOfLink, ind, toRule, env, ctx);
+  return fromSourcesHaveRows && (await whenRuleHits(clsOfLink, ind, toRule, env, ctx));
 }
 
 /** 组装求值环境：配置 + 驱动 + 关系判定 + 存在性检查。查询与动作共用。 */
@@ -60,10 +60,10 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
   const env: Env = {
     config,
     driver,
-    existsIndividual(clsName, identityValue) {
-      return selectIndividuals(env, clsName, { identity: identityValue }).length > 0;
+    async existsIndividual(clsName, identityValue) {
+      return (await selectIndividuals(env, clsName, { identity: identityValue })).length > 0;
     },
-    linkHolds(clsName, ind, linkName, targetFilter, ctx) {
+    async linkHolds(clsName, ind, linkName, targetFilter, ctx) {
       const cls = mustCls(config, clsName);
       const { link, reversed } = resolveLink(config, clsName, linkName);
       if (link.transition) {
@@ -81,7 +81,7 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
         conds[targetProp] = v;
       }
       const merged: Filter = { ...conds, ...((targetFilter as Filter | undefined) ?? {}) };
-      return selectIndividuals(env, targetClsName, { filter: merged, ctx }).length > 0;
+      return (await selectIndividuals(env, targetClsName, { filter: merged, ctx })).length > 0;
     },
   };
   return env;
@@ -137,24 +137,24 @@ function neededProps(cls: Cls, requested: string[] | undefined, filter: Filter |
 }
 
 /** 能下推的平推条件：非派生、只在一个源有映射、操作数不依赖 current。其余留在内存核对。 */
-function pushdownConditions(cls: Cls, filter: Filter | undefined, ctx: EvalContext): Map<string, Condition[]> {
+async function pushdownConditions(cls: Cls, filter: Filter | undefined, ctx: EvalContext): Promise<Map<string, Condition[]>> {
   const out = new Map<string, Condition[]>();
   if (!filter) return out;
   for (const [prop, cv] of Object.entries(filter)) {
     if (prop.startsWith("$")) continue;
     const def = cls.def.properties[prop];
-    if (!def) throw new Error(`过滤里的名字对不上配置：${cls.name}.${prop}`);
+    if (!def) throw new EngineReject(`过滤里的名字对不上配置：${cls.name}.${prop}`);
     if (def.derived) continue;
     const mapped = sourcesOf(cls).filter(([, e]) => e.fields[prop]);
     if (mapped.length !== 1) continue; // 多源都有时按声明顺序取值，推送会改变语义，留内存
-    const conds = toConditions(mapped[0][1].fields[prop], cv, ctx);
+    const conds = await toConditions(mapped[0][1].fields[prop], cv, ctx);
     if (!conds) continue;
     out.set(mapped[0][0], [...(out.get(mapped[0][0]) ?? []), ...conds]);
   }
   return out;
 }
 
-function toConditions(column: string, cv: unknown, ctx: EvalContext): Condition[] | null {
+async function toConditions(column: string, cv: unknown, ctx: EvalContext): Promise<Condition[] | null> {
   try {
     if (cv !== null && typeof cv === "object" && !Array.isArray(cv)) {
       const rec = cv as Record<string, unknown>;
@@ -162,12 +162,12 @@ function toConditions(column: string, cv: unknown, ctx: EvalContext): Condition[
       const isOpObject = keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k));
       if (!isOpObject) {
         // 裸的 { property, from } 视为等值；取不到值就留内存核对
-        const v = resolveOperand(cv, ctx);
+        const v = await resolveOperand(cv, ctx);
         return v === undefined ? null : [{ column, op: "eq", value: v }];
       }
       const conds: Condition[] = [];
       for (const [op, operand] of Object.entries(rec)) {
-        const v = resolveOperand(operand, ctx);
+        const v = await resolveOperand(operand, ctx);
         if (v === undefined) return null; // 依赖 current 等，留内存核对
         if (v === null) {
           if (op === "eq") conds.push({ column, op: "null" });
@@ -180,7 +180,7 @@ function toConditions(column: string, cv: unknown, ctx: EvalContext): Condition[
       return conds;
     }
     if (cv === null) return [{ column, op: "null" }];
-    const v = resolveOperand(cv, ctx);
+    const v = await resolveOperand(cv, ctx);
     return v === undefined ? null : [{ column, op: "eq", value: v }];
   } catch {
     return null; // 操作数取不到值（如依赖 current），留内存核对
@@ -188,14 +188,14 @@ function toConditions(column: string, cv: unknown, ctx: EvalContext): Condition[
 }
 
 /** 组装个体：各源分别下推，按对齐键配成同一个体，再做内存过滤核对。 */
-export function selectIndividuals(env: Env, clsName: string, opts: SelectOpts = {}): Individual[] {
+export async function selectIndividuals(env: Env, clsName: string, opts: SelectOpts = {}): Promise<Individual[]> {
   const cls = mustCls(env.config, clsName);
   const srcs = sourcesOf(cls);
   if (srcs.length === 0) return []; // 无源类（如 change）读不出个体
   const ctx: EvalContext = { identity: opts.identity as string | number | undefined, ...(opts.ctx ?? {}) };
   const need = neededProps(cls, opts.requested, opts.filter, opts.expands, env.config); // 始终计算：校验名字、供取列
   const readAll = opts.allColumns || opts.requested === undefined; // 没点 properties 就要返回全部，列得取全
-  const pushed = pushdownConditions(cls, opts.filter, ctx);
+  const pushed = await pushdownConditions(cls, opts.filter, ctx);
   const byKey = new Map<string, Individual>();
 
   for (const [srcName, entry] of srcs) {
@@ -205,7 +205,7 @@ export function selectIndividuals(env: Env, clsName: string, opts: SelectOpts = 
     else for (const p of need) { const c = entry.fields[p]; if (c) cols.add(c); }
     const conds: Condition[] = [...(pushed.get(srcName) ?? [])];
     if (opts.identity !== undefined) conds.push({ column: keyCol, op: "eq", value: opts.identity });
-    const rows = env.driver.select(entry.connection, entry.table, [...cols], conds);
+    const rows = await env.driver.select(entry.connection, entry.table, [...cols], conds);
     opts.path?.push(
       `下推 ${entry.connection}.${entry.table}：取 ${[...cols].join("、")}${conds.length ? `，带条件 ${conds.length} 条` : ""}，命中 ${rows.length} 行（只读）`
     );
@@ -219,7 +219,11 @@ export function selectIndividuals(env: Env, clsName: string, opts: SelectOpts = 
 
   let list = [...byKey.values()];
   if (opts.filter) {
-    list = list.filter((ind) => evalFilterOnIndividual(cls, ind, opts.filter!, env, ctx));
+    const kept: Individual[] = [];
+    for (const ind of list) {
+      if (await evalFilterOnIndividual(cls, ind, opts.filter!, env, ctx)) kept.push(ind);
+    }
+    list = kept;
     opts.path?.push(`内存核对过滤与派生：${list.length} 个体留下`);
   }
   return list;
@@ -232,7 +236,7 @@ export interface QueryResult {
   path: string[];
 }
 
-export function runQuery(config: OntologyConfig, driver: SourceDriver, req: QueryRequest): QueryResult {
+export async function runQuery(config: OntologyConfig, driver: SourceDriver, req: QueryRequest): Promise<QueryResult> {
   const env = createEnv(config, driver);
   const path: string[] = [];
   const cls = mustCls(config, req.object);
@@ -243,7 +247,7 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
     ? [...req.aggregate.group_by, ...req.aggregate.metrics.flatMap((m) => Object.values(m)).filter((f) => f !== "*")]
     : req.properties;
 
-  const individuals = selectIndividuals(env, req.object, {
+  const individuals = await selectIndividuals(env, req.object, {
     identity: req.identity,
     filter: req.filter,
     requested,
@@ -257,7 +261,7 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
   for (const item of req.expand ?? []) {
     for (const ind of individuals) {
       const bag = expanded.get(ind.key) ?? {};
-      const [name, rows] = expandItem(env, cls, ind, item, ctx, path);
+      const [name, rows] = await expandItem(env, cls, ind, item, ctx, path);
       bag[name] = rows;
       expanded.set(ind.key, bag);
     }
@@ -266,15 +270,16 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
 
   let rows: Record<string, unknown>[];
   if (req.aggregate) {
-    rows = aggregate(cls, individuals, req.aggregate, env, ctx, path);
+    rows = await aggregate(cls, individuals, req.aggregate, env, ctx, path);
     path.push(`聚合：${req.aggregate.group_by.join("、")} 分组，${rows.length} 组`);
   } else {
-    rows = individuals.map((ind) => {
-      const row = project(cls, ind, req.properties, env, ctx);
+    rows = [];
+    for (const ind of individuals) {
+      const row = await project(cls, ind, req.properties, env, ctx);
       const bag = expanded.get(ind.key);
       if (bag) Object.assign(row, bag);
-      return row;
-    });
+      rows.push(row);
+    }
   }
 
   if (req.order) {
@@ -300,18 +305,18 @@ export function runQuery(config: OntologyConfig, driver: SourceDriver, req: Quer
 }
 
 /** 一个个体上的一项展开：返回 [关系名, 目标行数组]。转化关系成立则带回自身行，match 关系按配对值查目标类。 */
-function expandItem(
+async function expandItem(
   env: Env,
   cls: Cls,
   ind: Individual,
   item: ExpandNode,
   ctx: EvalContext,
   path: string[]
-): [string, Record<string, unknown>[]] {
+): Promise<[string, Record<string, unknown>[]]> {
   const { link, reversed } = resolveLink(env.config, cls.name, item.relation);
   if (link.transition) {
     if (item.expand?.length) throw new EngineReject(`转化关系不支持嵌套展开：${item.relation}`);
-    return [item.relation, transitionHolds(cls, ind, link, env, ctx) ? [project(cls, ind, item.properties, env, ctx)] : []];
+    return [item.relation, (await transitionHolds(cls, ind, link, env, ctx)) ? [await project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
   const conds: Filter = {};
@@ -324,46 +329,47 @@ function expandItem(
   }
   const merged: Filter = { ...conds, ...(item.filter ?? {}) };
   const targetCls = mustCls(env.config, targetClsName);
-  const sub = selectIndividuals(env, targetClsName, {
+  const sub = await selectIndividuals(env, targetClsName, {
     filter: merged,
     requested: item.properties,
     expands: item.expand,
     ctx,
     path,
   });
-  const rows = sub.map((t) => {
-    const row = project(targetCls, t, item.properties, env, ctx);
+  const rows: Record<string, unknown>[] = [];
+  for (const t of sub) {
+    const row = await project(targetCls, t, item.properties, env, ctx);
     for (const nested of item.expand ?? []) {
-      const [name, nestedRows] = expandItem(env, targetCls, t, nested, ctx, path);
+      const [name, nestedRows] = await expandItem(env, targetCls, t, nested, ctx, path);
       row[name] = nestedRows;
     }
-    return row;
-  });
+    rows.push(row);
+  }
   return [item.relation, rows];
 }
 
 /** 返回形态：点了哪些属性给哪些；没点给全部（源列属性 + 派生都算出来）。 */
-function project(cls: Cls, ind: Individual, requested: string[] | undefined, env: Env, ctx: EvalContext): Record<string, unknown> {
+async function project(cls: Cls, ind: Individual, requested: string[] | undefined, env: Env, ctx: EvalContext): Promise<Record<string, unknown>> {
   const props = requested ?? Object.keys(cls.def.properties);
   const row: Record<string, unknown> = {};
   for (const p of props) {
     const def = cls.def.properties[p];
     if (!def) throw new EngineReject(`properties 里的名字对不上配置：${cls.name}.${p}`);
-    row[p] = def.derived ? evalDerived(cls, ind, p, env, ctx) : propValue(cls, ind, p);
+    row[p] = def.derived ? await evalDerived(cls, ind, p, env, ctx) : propValue(cls, ind, p);
   }
   return row;
 }
 
-function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRequest["aggregate"]>, env: Env, ctx: EvalContext, path: string[]) {
+async function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRequest["aggregate"]>, env: Env, ctx: EvalContext, path: string[]) {
   const views = new Map<string, Record<string, unknown>>(); // 每个个体只算一遍（派生含 $link 查询）
-  const viewOf = (ind: Individual) => {
+  const viewOf = async (ind: Individual) => {
     let v = views.get(ind.key);
-    if (!v) { v = currentOf(cls, ind, env, ctx); views.set(ind.key, v); }
+    if (!v) { v = await currentOf(cls, ind, env, ctx); views.set(ind.key, v); }
     return v;
   };
   const groups = new Map<string, { key: Record<string, unknown>; members: Individual[] }>();
   for (const ind of individuals) {
-    const cur = viewOf(ind);
+    const cur = await viewOf(ind);
     const keyObj = Object.fromEntries(agg.group_by.map((g) => [g, cur[g]]));
     const k = JSON.stringify(keyObj);
     const g = groups.get(k) ?? { key: keyObj, members: [] };
@@ -371,11 +377,13 @@ function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRe
     groups.set(k, g);
   }
   let dropped = 0;
-  const rows = [...groups.values()].map(({ key, members }) => {
+  const rows: Record<string, unknown>[] = [];
+  for (const { key, members } of groups.values()) {
     const row: Record<string, unknown> = { ...key };
     for (const metric of agg.metrics) {
       const [op, field] = Object.entries(metric)[0];
-      const all = members.map((m) => viewOf(m)[field]);
+      const all: unknown[] = [];
+      for (const m of members) all.push((await viewOf(m))[field]);
       const vals = all.filter((v): v is number => typeof v === "number");
       if (op !== "count") dropped += all.length - vals.length;
       const name = field === "*" ? op : `${op}_${field}`;
@@ -386,8 +394,8 @@ function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRe
       else if (op === "max") row[name] = vals.length ? Math.max(...vals) : null;
       else throw new EngineReject(`未知聚合：${op}`);
     }
-    return row;
-  });
+    rows.push(row);
+  }
   if (dropped > 0) path.push(`聚合剔除非数值 ${dropped} 个`);
   return rows;
 }

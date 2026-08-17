@@ -17,5 +17,7 @@ export const draftOpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("remove_property"), object: z.string(), name: z.string() }),
   z.object({ op: z.literal("set_identity"), object: z.string(), name: z.string() }), // name 为空串 = 取消识别字段
   z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) }),
+  // 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象）
+  z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) }),
 ]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;

@@ -1,0 +1,90 @@
+// M2 测试：配置三视图、LLM 槽位离线回退、生成对象导入草稿。
+
+import { describe, expect, it } from "vitest";
+import { load } from "js-yaml";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { configSchema } from "../lib/schema/config";
+import { listClasses, readClass, search } from "../lib/engine/views";
+import { CannedSlot } from "../lib/engine/llmSlot";
+
+const config = configSchema.parse(load(readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8")));
+
+describe("配置三视图", () => {
+  it("列出类：只有名字和说明", () => {
+    const list = listClasses(config);
+    expect(list.length).toBe(9);
+    expect(list[0]).toHaveProperty("name");
+    expect(list[0]).not.toHaveProperty("properties");
+  });
+
+  it("读取一个类：属性附形式、关系含反向、动作含前置；不含 sources/pk/axioms", () => {
+    const v = readClass(config, "equipment");
+    const status = v.properties.find((p) => p.name === "status");
+    expect(status?.derived).toBe("when");
+    expect(status?.values).toContain("in_service");
+    const inWarranty = v.properties.find((p) => p.name === "in_warranty");
+    expect(inWarranty?.derived).toBe("filter");
+    expect(v.relations.map((r) => r.name)).toContain("belongs_to");
+    expect(v.relations.map((r) => r.name)).toContain("covered_by"); // 反向名也在
+    expect(v.actions.map((a) => a.name)).toContain("convert");
+    expect(v).not.toHaveProperty("sources");
+    const text = JSON.stringify(v);
+    expect(text).not.toContain("po_item"); // 源表名不出视图
+    expect(text).not.toContain("status_one"); // 公理不出视图
+  });
+
+  it("检索按名字与说明命中", () => {
+    expect(search(config, "设备").classes).toContain("equipment");
+    expect(search(config, "转化").relations).toContain("converted");
+    expect(search(config, "不存在的东西").classes).toEqual([]);
+  });
+});
+
+describe("LLM 槽位离线回退", () => {
+  const slot = new CannedSlot();
+
+  it("演示四问编成正确查询", async () => {
+    const q1 = await slot.nlToQuery("在役设备及其所属部门", config);
+    expect(q1.filter).toEqual({ status: "in_service" });
+    expect(q1.expand?.[0].relation).toBe("belongs_to");
+    const q2 = await slot.nlToQuery("还有多少在途设备", config);
+    expect(q2.filter).toEqual({ status: "in_transit" });
+    const q3 = await slot.nlToQuery("哪些设备过保了", config);
+    expect(q3.filter).toEqual({ in_warranty: false });
+    const q4 = await slot.nlToQuery("每个部门多少台在役设备", config);
+    expect(q4.aggregate?.group_by).toEqual(["dept"]);
+  });
+
+  it("逆向建模：表结构产草稿，识别字段猜编号列，主键不进属性", async () => {
+    const draft = await slot.draftObjects([
+      {
+        connection: "mes_sys",
+        table: {
+          name: "meter",
+          columns: [
+            { name: "id", type: "INTEGER", pk: true },
+            { name: "meter_no", type: "TEXT", pk: false },
+            { name: "reading", type: "INTEGER", pk: false },
+          ],
+        },
+      },
+    ]);
+    expect(draft.meter.identity).toBe("meter_no");
+    expect(draft.meter.properties).not.toHaveProperty("id"); // 主键不当属性
+    expect(draft.meter.properties.reading.type).toBe("number");
+    expect(draft.meter.sources?.mes_sys.table).toBe("meter");
+  });
+
+  it("候选对建议：跨源且字段重合才成对，同源不成对", async () => {
+    const pairs = await slot.suggestPairs([
+      { name: "a", source: "s1", fields: ["sn", "name"] },
+      { name: "b", source: "s2", fields: ["sn", "name", "status"] },
+      { name: "c", source: "s1", fields: ["sn", "name"] }, // 与 a 同源
+      { name: "d", source: "s2", fields: ["xyz"] },
+    ]);
+    // a-b 与 b-c：跨源且字段重合过半；a-c 同源不成对；d 字段对不上
+    expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "b-c"]);
+    expect(pairs[0].tendency).toBe("阶段"); // 含状态字段
+  });
+});

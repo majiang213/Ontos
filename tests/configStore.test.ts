@@ -28,7 +28,7 @@ async function freshStore() {
   return s;
 }
 
-describe("配置存储（工作副本与发布）", () => {
+describe("配置存储（工作副本与发布）", async () => {
   it("初始：草稿=已发布 v1，无改动", async () => {
     const s = await freshStore();
     const state = s.getDraft();
@@ -60,7 +60,7 @@ describe("配置存储（工作副本与发布）", () => {
     // 引擎读已发布：新类可查（无源 → 空结果，不报错）
     const { runQuery } = await import("../lib/engine/query");
     const { freshDriver } = await import("../lib/engine/load");
-    const res = runQuery(s.getPublished().config, freshDriver(), { object: "vendor" });
+    const res = await runQuery(s.getPublished().config, freshDriver(), { object: "vendor" });
     expect(res.rows).toEqual([]);
   });
 

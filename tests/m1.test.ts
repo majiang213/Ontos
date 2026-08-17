@@ -1,0 +1,99 @@
+// M1 测试：方言 SQL 生成、驱动注册表、SQLite 文件连接、脱敏采样。
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildInsert, buildStatement } from "../lib/engine/sqlDriver";
+import { maskValue } from "../lib/engine/driver";
+import { DriverRegistry } from "../lib/engine/registry";
+import { SqliteFixtureDriver } from "../lib/engine/fixture";
+
+describe("方言 SQL 生成", () => {
+  it("pg：占位符渲染成 $1..$n，标识符双引号", () => {
+    const { sql, params } = buildStatement("pg", "select", "device", {
+      columns: ["name", "dept_id"],
+      conditions: [
+        { column: "dept_id", op: "eq", value: "D07" },
+        { column: "status", op: "null" },
+      ],
+    });
+    expect(sql).toBe(`SELECT "name", "dept_id" FROM "device" WHERE "dept_id" = $1 AND "status" IS NULL`);
+    expect(params).toEqual(["D07"]);
+  });
+
+  it("mysql：反引号 + ? 占位；update 的 set 在前条件在后", () => {
+    const { sql, params } = buildStatement("mysql", "update", "device", {
+      set: { dept_id: "D07" },
+      conditions: [{ column: "serial_no", op: "eq", value: "SN-1" }],
+    });
+    expect(sql).toBe("UPDATE `device` SET `dept_id` = ? WHERE `serial_no` = ?");
+    expect(params).toEqual(["D07", "SN-1"]);
+  });
+
+  it("pg insert：$1..$n；gt 带 OR IS NULL（空按至今）", () => {
+    const { sql, params } = buildInsert("pg", "warranty_card", { sn: "SN-1", expiry: 123 });
+    expect(sql).toBe(`INSERT INTO "warranty_card" ("sn", "expiry") VALUES ($1, $2)`);
+    expect(params).toEqual(["SN-1", 123]);
+    const gte = buildStatement("pg", "select", "t", { conditions: [{ column: "valid_to", op: "gte", value: 100 }] });
+    expect(gte.sql).toContain(`OR "valid_to" IS NULL`);
+  });
+
+  it("contains 转义通配符", () => {
+    const { sql, params } = buildStatement("mysql", "select", "t", { conditions: [{ column: "name", op: "contains", value: "50%" }] });
+    expect(sql).toContain("ESCAPE");
+    expect(params[0]).toBe("%50\\%%");
+  });
+});
+
+describe("脱敏采样", () => {
+  it("敏感列只留头尾，普通列不动", () => {
+    expect(maskValue("id_card", "110101198001011234")).toBe("1101******34");
+    expect(maskValue("mobile", "13800001111")).toBe("1380******11");
+    expect(maskValue("name", "张三")).toBe("张三");
+    expect(maskValue("sn", null)).toBe(null);
+  });
+});
+
+describe("驱动注册表", () => {
+  it("按连接名路由；未注册拒绝；内省与采样走通", async () => {
+    const registry = new DriverRegistry();
+    const fixture = SqliteFixtureDriver.seeded();
+    for (const c of fixture.connections()) registry.register(c, fixture);
+    const rows = await registry.select("device_sys", "department", ["dept_id", "dept_name"], []);
+    expect(rows.length).toBe(8);
+    await expect(registry.select("ghost", "t", [], [])).rejects.toThrow("未注册");
+    const tables = await registry.introspect("device_sys");
+    expect(tables.map((t) => t.name)).toContain("device");
+    const sample = await registry.sample("device_sys", "department", 3);
+    expect(sample.length).toBe(3);
+  });
+});
+
+describe("SQLite 文件连接（连接表单的 sqlite 类型）", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "ontos-sqlite-"));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it("文件库注册后可内省、可采样、可查", async () => {
+    const file = join(tmp, "ext.db");
+    const db = new DatabaseSync(file);
+    db.exec(`CREATE TABLE meter (meter_no TEXT PRIMARY KEY, reading INTEGER)`);
+    db.prepare(`INSERT INTO meter VALUES ('M-01', 42)`).run();
+    db.close();
+
+    const fixture = new SqliteFixtureDriver();
+    fixture.registerFile("ext_sys", file);
+    const registry = new DriverRegistry();
+    registry.register("ext_sys", fixture);
+
+    const tables = await registry.introspect("ext_sys");
+    expect(tables.map((t) => t.name)).toEqual(["meter"]);
+    expect(tables[0].columns.find((c) => c.name === "meter_no")?.pk).toBe(true);
+    const rows = await registry.select("ext_sys", "meter", ["meter_no", "reading"], []);
+    expect(rows).toEqual([{ meter_no: "M-01", reading: 42 }]);
+  });
+});
