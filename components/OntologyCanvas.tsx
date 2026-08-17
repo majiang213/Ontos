@@ -1,4 +1,5 @@
 // 本体画布 —— 节点是对象类型，边是关系。只读展示已发布配置（编辑走发布流程，M4 之后开放）。
+// 节点卡用 Double-Bezel（外壳托盘 + 内核），ReactFlow 只换肤不改行为。
 "use client";
 
 import { useMemo } from "react";
@@ -24,46 +25,34 @@ export interface CanvasLink {
 
 function ObjectNode({ data }: { data: ObjNodeData }) {
   return (
-    <div
-      style={{
-        background: "var(--panel)",
-        border: "1px solid var(--border-strong)",
-        borderRadius: "var(--radius)",
-        boxShadow: "var(--shadow-sm)",
-        padding: "10px 12px",
-        width: 280,
-        fontSize: 13,
-      }}
-    >
+    <div className="node-shell">
       <Handle type="target" position={Position.Left} style={{ visibility: "hidden" }} />
       <Handle type="source" position={Position.Right} style={{ visibility: "hidden" }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <strong style={{ fontSize: 14 }}>{data.label}</strong>
-        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{data.kind === "thing" ? "事物" : "事件"}</span>
-      </div>
-      {data.description && <div style={{ color: "var(--ink-2)", marginBottom: 6 }}>{data.description}</div>}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-        {data.properties.map((p) => (
-          <div key={p.name} style={{ display: "flex", justifyContent: "space-between", gap: 8, lineHeight: 1.7 }}>
-            <span style={{ fontFamily: "var(--mono)" }}>{p.name}</span>
-            <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
-              {p.type}
-              {p.derived ? " · 派生" : ""}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
-        {data.sources.map((s) => (
-          <span key={s} style={{ fontSize: 11, background: "var(--accent-soft)", color: "var(--accent)", borderRadius: 6, padding: "1px 7px" }}>
-            {s}
-          </span>
-        ))}
-        {data.actions.map((a) => (
-          <span key={a} style={{ fontSize: 11, background: "var(--ok-soft)", color: "var(--ok)", borderRadius: 6, padding: "1px 7px" }}>
-            {a}
-          </span>
-        ))}
+      <div className="node-core">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span className="node-title">{data.label}</span>
+          <span className="node-kind">{data.kind === "thing" ? "事物" : "事件"}</span>
+        </div>
+        {data.description && <div className="node-desc">{data.description}</div>}
+        <div className="node-props">
+          {data.properties.map((p) => (
+            <div key={p.name} className="node-prop">
+              <code>{p.name}</code>
+              <span className="t">
+                {p.type}
+                {p.derived ? " · 派生" : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="node-tags">
+          {data.sources.map((s) => (
+            <span key={s} className="tag">{s}</span>
+          ))}
+          {data.actions.map((a) => (
+            <span key={a} className="tag tag-ok">{a}</span>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -83,12 +72,15 @@ export default function OntologyCanvas({
 }) {
   const nodes: Node<ObjNodeData>[] = useMemo(
     () =>
-      objects.map((o, i) => ({
-        id: o.name,
-        type: "obj",
-        position: { x: (i % 3) * 330, y: Math.floor(i / 3) * 300 },
-        data: { ...o, label: o.name },
-      })),
+      objects.map((o, i) => {
+        const row = Math.floor(i / 3);
+        return {
+          id: o.name,
+          type: "obj",
+          position: { x: (i % 3) * 340 + (row % 2) * 120, y: row * 320 }, // 奇数行右移，破刚性网格
+          data: { ...o, label: o.name },
+        };
+      }),
     [objects]
   );
   const edges: Edge[] = useMemo(
@@ -99,7 +91,6 @@ export default function OntologyCanvas({
         target: l.to,
         label: l.inverse ? `${l.name} / ${l.inverse}` : l.name,
         style: l.kind === "transition" ? { strokeDasharray: "6 4", stroke: "var(--warn)" } : undefined,
-        labelStyle: { fontSize: 11, fill: "var(--ink-2)" },
         markerEnd: { type: MarkerType.ArrowClosed },
       })),
     [links]
@@ -110,12 +101,13 @@ export default function OntologyCanvas({
       edges={edges}
       nodeTypes={nodeTypes}
       fitView
+      fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
       nodesConnectable={false}
       onNodeClick={(_, node) => onSelect(node.id)}
       proOptions={{ hideAttribution: true }}
     >
-      <Background gap={18} color="var(--canvas-dot)" />
+      <Background gap={20} color="rgba(32,29,24,0.06)" />
       <Controls showInteractive={false} />
     </ReactFlow>
   );

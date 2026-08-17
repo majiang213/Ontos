@@ -13,13 +13,6 @@ interface IntrospectResp {
   sources: { connection: string; tables: { name: string; columns: { name: string; type: string; pk: boolean }[] }[] }[];
 }
 
-const panel: React.CSSProperties = {
-  background: "var(--panel)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius)",
-  boxShadow: "var(--shadow-sm)",
-};
-
 export default function CanvasPage() {
   const [ont, setOnt] = useState<OntologyResp | null>(null);
   const [schema, setSchema] = useState<IntrospectResp | null>(null);
@@ -83,78 +76,80 @@ export default function CanvasPage() {
       <OntologyCanvas objects={objects} links={links} onSelect={setSelected} />
 
       {/* 左上：发布状态 */}
-      <div style={{ position: "absolute", top: 12, left: 12, ...panel, padding: "8px 12px", fontSize: 12, color: "var(--ink-2)", zIndex: 10 }}>
-        已发布 <strong style={{ color: "var(--ink)" }}>v{ont?.version ?? "…"}</strong>（只读快照；编辑与发布流程待 M4）
+      <div className="float-card float-tl">
+        <span className="eyebrow">已发布 v{ont?.version ?? "…"} · 只读快照</span>
       </div>
 
-      {/* 底部：表结构抽屉开关 */}
-      <button
-        onClick={() => setDrawerOpen((v) => !v)}
-        style={{
-          position: "absolute", bottom: 14, left: "50%", transform: "translateX(-50%)",
-          ...panel, padding: "8px 18px", fontSize: 13, cursor: "pointer", zIndex: 10, color: "var(--ink)",
-        }}
-      >
-        {drawerOpen ? "收起表结构" : "表结构"}
-      </button>
+      {/* 底部中：表结构抽屉开关 */}
+      <div className="float-card float-bc">
+        <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>
+          {drawerOpen ? "收起表结构" : "表结构"}
+        </button>
+      </div>
 
       {/* 右侧：对象详情卡 */}
       {sel && (
-        <div style={{ position: "absolute", top: 12, right: 12, width: 340, maxHeight: "calc(100% - 24px)", overflow: "auto", ...panel, padding: 16, zIndex: 11 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <strong style={{ fontSize: 15 }}>{selected}</strong>
-            <button onClick={() => setSelected(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ink-3)" }}>✕</button>
+        <div className="float-card float-tr" style={{ width: 340, maxHeight: "calc(100% - 110px)" }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 16, overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{selected}</span>
+                <button className="chip" onClick={() => setSelected(null)}>✕</button>
+              </div>
+              <div style={{ color: "var(--ink-2)", fontSize: 12, margin: "4px 0 10px" }}>{sel.description}</div>
+              <Section title="字段">
+                {Object.entries(sel.properties).map(([p, d]: [string, any]) => (
+                  <div key={p} style={{ fontSize: 12, lineHeight: 1.9 }}>
+                    <code>{p}</code> <span style={{ color: "var(--ink-3)" }}>{d.type}{d.derived ? " · 派生" : ""}</span>
+                    {d.description && <span style={{ color: "var(--ink-2)" }}>　{d.description}</span>}
+                  </div>
+                ))}
+              </Section>
+              <Section title="来源">
+                {Object.entries(sel.sources ?? {}).map(([srcName, s]: [string, any]) => (
+                  <div key={srcName} style={{ fontSize: 12, lineHeight: 1.9 }}>
+                    <strong>{srcName}</strong>　<code>{s.connection}.{s.table}</code>
+                    <div style={{ color: "var(--ink-3)" }}>
+                      {Object.entries(s.fields).map(([prop, col]) => `${prop} ← ${String(col)}`).join("；")}
+                    </div>
+                  </div>
+                ))}
+              </Section>
+              {Object.keys(sel.actions ?? {}).length > 0 && (
+                <Section title="动作">
+                  {Object.entries(sel.actions).map(([a, d]: [string, any]) => (
+                    <div key={a} style={{ fontSize: 12, lineHeight: 1.9 }}>
+                      <code>{a}</code>　<span style={{ color: "var(--ink-2)" }}>{d.description}</span>
+                    </div>
+                  ))}
+                </Section>
+              )}
+            </div>
           </div>
-          <div style={{ color: "var(--ink-2)", fontSize: 12, margin: "4px 0 10px" }}>{sel.description}</div>
-          <Section title="字段">
-            {Object.entries(sel.properties).map(([p, d]: [string, any]) => (
-              <div key={p} style={{ fontSize: 12, lineHeight: 1.8 }}>
-                <code>{p}</code> <span style={{ color: "var(--ink-3)" }}>{d.type}{d.derived ? " · 派生" : ""}</span>
-                {d.description && <span style={{ color: "var(--ink-2)" }}>　{d.description}</span>}
-              </div>
-            ))}
-          </Section>
-          <Section title="来源">
-            {Object.entries(sel.sources ?? {}).map(([srcName, s]: [string, any]) => (
-              <div key={srcName} style={{ fontSize: 12, lineHeight: 1.8 }}>
-                <strong>{srcName}</strong>　<code>{s.connection}.{s.table}</code>
-                <div style={{ color: "var(--ink-3)" }}>
-                  {Object.entries(s.fields).map(([prop, col]) => `${prop} ← ${String(col)}`).join("；")}
-                </div>
-              </div>
-            ))}
-          </Section>
-          {Object.keys(sel.actions ?? {}).length > 0 && (
-            <Section title="动作">
-              {Object.entries(sel.actions).map(([a, d]: [string, any]) => (
-                <div key={a} style={{ fontSize: 12, lineHeight: 1.8 }}>
-                  <code>{a}</code>　<span style={{ color: "var(--ink-2)" }}>{d.description}</span>
-                </div>
-              ))}
-            </Section>
-          )}
         </div>
       )}
 
       {/* 底部抽屉：表结构（只看列定义，不取业务行） */}
       {drawerOpen && (
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "42%", overflow: "auto", ...panel, borderRadius: 0, borderTop: "1px solid var(--border-strong)", padding: 16, zIndex: 9 }}>
+        <div className="drawer">
           {schema?.sources.map((s) => (
-            <div key={s.connection} style={{ marginBottom: 18 }}>
-              <strong style={{ fontSize: 13 }}>{s.connection}</strong>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+            <div key={s.connection} style={{ marginBottom: 20 }}>
+              <span className="eyebrow">{s.connection}</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10 }}>
                 {s.tables.map((t) => (
-                  <div key={t.name} style={{ ...panel, padding: 10, minWidth: 240 }}>
-                    <code style={{ fontSize: 13 }}>{t.name}</code>
-                    {t.columns.map((c) => (
-                      <div key={c.name} style={{ fontSize: 12, lineHeight: 1.8, display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <span>
-                          <code>{c.name}</code>
-                          <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
-                        </span>
-                        <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
-                      </div>
-                    ))}
+                  <div key={t.name} className="bezel" style={{ minWidth: 260 }}>
+                    <div className="bezel-core" style={{ padding: 12 }}>
+                      <code style={{ fontSize: 13 }}>{t.name}</code>
+                      {t.columns.map((c) => (
+                        <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
+                          <span>
+                            <code>{c.name}</code>
+                            <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
+                          </span>
+                          <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -169,7 +164,7 @@ export default function CanvasPage() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>{title}</div>
       {children}
     </div>
   );
