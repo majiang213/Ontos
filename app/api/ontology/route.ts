@@ -1,15 +1,28 @@
-// 已发布本体：GET /api/ontology
-// 画布按这份配置画图：节点是对象类型，字段是属性，边是关系。
+// 本体视图：GET /api/ontology
+// 画布读工作副本（已发布 + 未发布改动）；引擎读已发布快照（见 lib/engine/load.ts）。
+// states 标出每个对象的草稿态：new=未发布的新对象，modified=与已发布不同，same=一致。
 
 import { NextResponse } from "next/server";
-import { loadConfig } from "@/lib/engine/load";
+import { getDraft, getPublished, sameConfig } from "@/lib/engine/configStore";
 
 export async function GET() {
-  const config = loadConfig();
+  const state = getDraft();
+  const published = getPublished().config;
+  const states: Record<string, "new" | "modified" | "same"> = {};
+  for (const [name, t] of Object.entries(state.draft.object_types)) {
+    const pub = published.object_types[name];
+    states[name] = !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
+  }
+  // 已发布但草稿里删掉的对象：给画布一个「待删除」名单
+  const deleted = Object.keys(published.object_types).filter((name) => !(name in state.draft.object_types));
   return NextResponse.json({
-    version: 1, // M4 版本化之前，种子配置即 v1
-    object_types: config.object_types,
-    link_types: config.link_types,
-    outlets: config.outlets ?? {},
+    version: state.baseVersion,
+    dirty: state.dirty,
+    layout: state.layout,
+    states,
+    deleted,
+    object_types: state.draft.object_types,
+    link_types: state.draft.link_types,
+    outlets: state.draft.outlets ?? {},
   });
 }

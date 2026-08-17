@@ -1,5 +1,5 @@
-// 本体画布 —— 节点是对象类型，边是关系。只读展示已发布配置（编辑走发布流程，M4 之后开放）。
-// 节点卡用 Double-Bezel；位置由 dagre 分层布局给出（被引用的根在上）；「整理布局」随时重排。
+// 本体画布 —— 节点是对象类型，边是关系。
+// 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
@@ -28,8 +28,9 @@ export interface CanvasObject {
   description?: string;
   kind: "thing" | "event";
   properties: { name: string; type: string; derived: boolean; values?: (string | number)[] }[];
-  sources: string[]; // 源条目名（connection.table）
+  sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
   actions: string[];
+  state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
 }
 
 export interface CanvasLink {
@@ -41,14 +42,17 @@ export interface CanvasLink {
 }
 
 function ObjectNode({ data }: { data: ObjNodeData }) {
+  const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
   return (
-    <div className="node-shell">
+    <div className={cls}>
       <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
       <Handle type="source" position={Position.Bottom} style={{ visibility: "hidden" }} />
       <div className="node-core">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span className="node-title">{data.label}</span>
           <span className="node-kind">{data.kind === "thing" ? "事物" : "事件"}</span>
+          {data.state === "new" && <span className="tag tag-warn">草稿</span>}
+          {data.state === "modified" && <span className="tag tag-warn">待发布</span>}
         </div>
         {data.description && <div className="node-desc">{data.description}</div>}
         <div className="node-props">
@@ -64,7 +68,7 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
         </div>
         <div className="node-tags">
           {data.sources.map((s) => (
-            <span key={s} className="tag">{s}</span>
+            <span key={s.key} className="tag">{s.label}</span>
           ))}
           {data.actions.map((a) => (
             <span key={a} className="tag tag-ok">{a}</span>
@@ -79,7 +83,13 @@ type ObjNodeData = Record<string, unknown> & CanvasObject & { label: string };
 const nodeTypes = { obj: ObjectNode };
 const edgeTypes = { floating: FloatingEdge };
 
-export default function OntologyCanvas(props: { objects: CanvasObject[]; links: CanvasLink[]; onSelect: (name: string) => void }) {
+export default function OntologyCanvas(props: {
+  objects: CanvasObject[];
+  links: CanvasLink[];
+  layout?: Record<string, { x: number; y: number }>;
+  onSelect: (name: string) => void;
+  onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
+}) {
   return (
     <ReactFlowProvider>
       <Flow {...props} />
@@ -87,32 +97,63 @@ export default function OntologyCanvas(props: { objects: CanvasObject[]; links: 
   );
 }
 
-function Flow({ objects, links, onSelect }: { objects: CanvasObject[]; links: CanvasLink[]; onSelect: (name: string) => void }) {
+function Flow({
+  objects,
+  links,
+  layout,
+  onSelect,
+  onLayoutChange,
+}: {
+  objects: CanvasObject[];
+  links: CanvasLink[];
+  layout?: Record<string, { x: number; y: number }>;
+  onSelect: (name: string) => void;
+  onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
+}) {
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = layoutObjects(objects, links);
     return objects.map((o) => ({
       id: o.name,
       type: "obj",
-      position: pos.get(o.name) ?? { x: 0, y: 0 },
+      position: layout?.[o.name] ?? pos.get(o.name) ?? { x: 0, y: 0 }, // 已存摆位优先
       data: { ...o, label: o.name },
     }));
-  }, [objects, links]);
+  }, [objects, links, layout]);
 
   // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
   const [nodes, setNodes] = useNodesState(initialNodes);
-  useEffect(() => setNodes(initialNodes), [initialNodes, setNodes]);
+  // 配置/摆位刷新时保留当前摆位：正在拖的节点不被回包弹回原位
+  useEffect(() => {
+    setNodes((ns) =>
+      initialNodes.map((n) => {
+        const cur = ns.find((x) => x.id === n.id);
+        return cur ? { ...n, position: cur.position } : n;
+      })
+    );
+  }, [initialNodes, setNodes]);
   const onNodesChange = useCallback(
-    (changes: NodeChange<Node<ObjNodeData>>[]) => setNodes((ns) => applyNodeChanges(changes, ns)),
-    [setNodes]
+    (changes: NodeChange<Node<ObjNodeData>>[]) => {
+      setNodes((ns) => applyNodeChanges(changes, ns));
+      // 拖动结束（position 且 dragging=false）时记住摆位
+      const done = changes.filter(
+        (c): c is Extract<NodeChange<Node<ObjNodeData>>, { type: "position" }> =>
+          c.type === "position" && c.dragging === false && Boolean(c.position)
+      );
+      if (done.length && onLayoutChange) {
+        onLayoutChange(Object.fromEntries(done.map((c) => [c.id, c.position!])));
+      }
+    },
+    [setNodes, onLayoutChange]
   );
 
   const rf = useReactFlow();
-  /** 一键理顺：重跑分层布局并取景。导入一批新表、或拖乱了之后用。 */
+  /** 一键理顺：重跑分层布局并取景、记住新摆位。导入一批新表、或拖乱了之后用。 */
   const tidy = useCallback(() => {
     const pos = layoutObjects(objects, links);
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
+    onLayoutChange?.(Object.fromEntries(pos));
     requestAnimationFrame(() => rf.fitView({ padding: 0.2 }));
-  }, [objects, links, setNodes, rf]);
+  }, [objects, links, setNodes, rf, onLayoutChange]);
 
   const edges: Edge[] = useMemo(
     () =>

@@ -219,6 +219,20 @@ input:focus { border-color: var(--accent) !important; }
   transition: box-shadow var(--t-fast), transform var(--t-fast);
 }
 .node-shell:hover { box-shadow: 0 0 0 1px var(--hairline-strong), var(--shadow-lift); transform: translateY(-2px); }
+/* 草稿态：新对象虚线轮廓；有未发布改动的右上角一个 amber 点 */
+.node-shell.is-new { outline: 2px dashed var(--warn); outline-offset: 2px; }
+.node-shell.is-modified { position: relative; }
+.node-shell.is-modified::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 2px var(--bg);
+}
 .node-core {
   background: var(--panel);
   border-radius: var(--r-core);
