@@ -2,8 +2,20 @@
 // 节点卡用 Double-Bezel（外壳托盘 + 内核），ReactFlow 只换肤不改行为。
 "use client";
 
-import { useMemo } from "react";
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import { useCallback, useEffect, useMemo } from "react";
+import {
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  Position,
+  ReactFlow,
+  applyNodeChanges,
+  useNodesState,
+  type Edge,
+  type Node,
+  type NodeChange,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 export interface CanvasObject {
@@ -70,7 +82,7 @@ export default function OntologyCanvas({
   links: CanvasLink[];
   onSelect: (name: string) => void;
 }) {
-  const nodes: Node<ObjNodeData>[] = useMemo(
+  const initialNodes: Node<ObjNodeData>[] = useMemo(
     () =>
       objects.map((o, i) => {
         const row = Math.floor(i / 3);
@@ -82,6 +94,13 @@ export default function OntologyCanvas({
         };
       }),
     [objects]
+  );
+  // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
+  const [nodes, setNodes] = useNodesState(initialNodes);
+  useEffect(() => setNodes(initialNodes), [initialNodes, setNodes]);
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node<ObjNodeData>>[]) => setNodes((ns) => applyNodeChanges(changes, ns)),
+    [setNodes]
   );
   const edges: Edge[] = useMemo(
     () =>
@@ -104,6 +123,7 @@ export default function OntologyCanvas({
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
       nodesConnectable={false}
+      onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}
       proOptions={{ hideAttribution: true }}
     >
