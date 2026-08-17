@@ -1,4 +1,6 @@
 // 已发布配置的加载 —— 引擎只读这份文本（M4 版本化之前，先读种子文件）。
+// 单例挂 globalThis：Next dev 下各路由包各有模块实例，挂全局才能保证
+// 「验收之后再问，看到的是同一个源库」。
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,15 +9,15 @@ import { configSchema, type OntologyConfig } from "../schema/config";
 import type { SourceDriver } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 
-let cachedConfig: OntologyConfig | null = null;
+const g = globalThis as unknown as { __ontosConfig?: OntologyConfig; __ontosDriver?: SourceDriver };
 
 export function loadConfig(): OntologyConfig {
-  if (!cachedConfig) {
+  if (!g.__ontosConfig) {
     const text = readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8");
-    cachedConfig = configSchema.parse(load(text)); // 结构不合法直接抛，引擎不猜
-    validateSemantics(cachedConfig); // 语义不合法也抛：identity 缺映射、派生属性进 fields、关系端点不存在等
+    g.__ontosConfig = configSchema.parse(load(text)); // 结构不合法直接抛，引擎不猜
+    validateSemantics(g.__ontosConfig); // 语义不合法也抛：identity 缺映射、派生属性进 fields、关系端点不存在等
   }
-  return cachedConfig;
+  return g.__ontosConfig;
 }
 
 /** 附录 B 里 zod 管不着的语义约束，加载时一次校验。 */
@@ -69,12 +71,11 @@ export function validateSemantics(config: OntologyConfig): void {
   }
 }
 
-let cachedDriver: SourceDriver | null = null;
-
+/** 演示用驱动：SQLite fixture（没有 MySQL/PG 时的离线源库）。 */
 /** 演示用驱动：SQLite fixture（没有 MySQL/PG 时的离线源库）。 */
 export function demoDriver(): SourceDriver {
-  if (!cachedDriver) cachedDriver = SqliteFixtureDriver.seeded();
-  return cachedDriver;
+  if (!g.__ontosDriver) g.__ontosDriver = SqliteFixtureDriver.seeded();
+  return g.__ontosDriver;
 }
 
 /** 测试用：每次拿全新的。 */

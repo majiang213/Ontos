@@ -66,6 +66,24 @@ export class SqliteFixtureDriver implements SourceDriver {
     seedDemo(d);
     return d;
   }
+
+  /** M1 雏形：连接清单与表结构（内省）。 */
+  connections(): string[] {
+    return [...this.dbs.keys()];
+  }
+
+  introspect(connection: string): { name: string; columns: { name: string; type: string; pk: boolean }[] }[] {
+    const db = this.db(connection);
+    const tables = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+      .all() as { name: string }[];
+    return tables.map((t) => ({
+      name: t.name,
+      columns: (db.prepare(`PRAGMA table_info("${t.name}")`).all() as { name: string; type: string; pk: number }[]).map(
+        (c) => ({ name: c.name, type: c.type, pk: c.pk === 1 })
+      ),
+    }));
+  }
 }
 
 /* 演示剧本数据：
