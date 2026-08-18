@@ -250,7 +250,7 @@ export default function ChatPage() {
           {busy && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>…</div>}
         </div>
 
-        {/* 动作条 */}
+        {/* 动作条：三个按钮绑的是种子本体的演示剧本（convert/transfer/scrap + SN-40217）；通用形态是外部 Agent 经 MCP 发动作 */}
         <div className="action-bar">
           <input className="text-in" style={{ flex: "0 0 150px", padding: "8px 14px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="序列号" />
           <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
@@ -388,7 +388,7 @@ function ActionCard({ r }: { r: NonNullable<Msg["actionResult"]> }) {
     <div className="bezel">
       <div className="bezel-core" style={{ padding: 14 }}>
         <div className="answer-head" style={{ color: r.ok ? "var(--ok)" : "var(--danger)" }}>
-          {r.ok ? "完成" : `未完成：${r.error ?? "部分投影失败"}`}
+          {r.ok ? "完成" : `未完成：${r.error ?? "部分来源没写成"}`}
         </div>
         {r.projections.map((p, i) => (
           <div key={i} style={{ fontSize: 12, lineHeight: 1.9, color: p.ok ? "var(--ink-2)" : "var(--danger)" }}>

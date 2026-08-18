@@ -3,6 +3,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OntologyCanvas, { type CanvasLink, type CanvasObject } from "./OntologyCanvas";
+import PairCard from "./PairCard";
+import QuestionsCard from "./QuestionsCard";
+import { AddProperty, ConnectForm, CreateForm, LinkForm, Section } from "./forms";
+import type { PairAdvice } from "../lib/engine/llmSlot";
 
 interface OntologyResp {
   version: number;
@@ -20,8 +24,6 @@ interface IntrospectResp {
     tables: { name: string; columns: { name: string; type: string; pk: boolean }[]; sample?: Record<string, unknown>[] }[];
   }[];
 }
-
-const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
 
 export default function CanvasPage() {
   const [ont, setOnt] = useState<OntologyResp | null>(null);
@@ -62,6 +64,8 @@ export default function CanvasPage() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
+  /** 网络层失败（fetch reject）的统一提示。 */
+  const netErr = useCallback((e: unknown) => showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`), [showToast]);
 
   /** 编辑操作统一入口：发给草稿，刷新视图，错误进 toast。网络层失败也要说。 */
   const op = useCallback(
@@ -76,7 +80,7 @@ export default function CanvasPage() {
         await refresh();
         return true;
       } catch (e) {
-        showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+        netErr(e);
         return false;
       }
     },
@@ -100,7 +104,7 @@ export default function CanvasPage() {
       else showToast(`已发布 v${data.version}，问数与动作即刻生效`);
       await refresh();
     } catch (e) {
-      showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+      netErr(e);
     } finally {
       setPublishing(false);
     }
@@ -119,7 +123,7 @@ export default function CanvasPage() {
       setSelected(null);
       await refresh();
     } catch (e) {
-      showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+      netErr(e);
     } finally {
       setPublishing(false);
     }
@@ -277,7 +281,7 @@ export default function CanvasPage() {
                 // 用户可能已去开别的卡（openTl 会把 versions 置 null）：只在本卡还开着时填数
                 setVersions((cur) => (cur === null ? null : (data.versions ?? [])));
               } catch (e) {
-                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+                netErr(e);
               }
             }}
           >
@@ -292,7 +296,7 @@ export default function CanvasPage() {
                 await loadPairs();
                 setPanelOpen(true);
               } catch (e) {
-                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+                netErr(e);
               }
             }}
           >
@@ -346,7 +350,7 @@ export default function CanvasPage() {
                             await refresh();
                           } else showToast(data.error ?? "回滚失败");
                         } catch (e) {
-                          showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+                          netErr(e);
                         } finally {
                           setRollbacking(false);
                         }
@@ -567,7 +571,7 @@ export default function CanvasPage() {
                   }}
                 />
               </Section>
-              <Section title={`识别字段（同一性标准）`}>
+              <Section title={`识别字段（跨源认人靠它）`}>
                 <select
                   value={sel.identity ?? ""}
                   onChange={(e) => void op({ op: "set_identity", object: selected, name: e.target.value })}
@@ -597,7 +601,7 @@ export default function CanvasPage() {
                 <AddProperty onAdd={(name, type) => op({ op: "add_property", object: selected, name, type })} />
               </Section>
               <Section title="来源">
-                {Object.keys(sel.sources ?? {}).length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>无源（manual 桶；挂源映射待 M1/M2）</div>}
+                {Object.keys(sel.sources ?? {}).length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>还没有来源——这个对象是手工建的，没挂任何表</div>}
                 {Object.entries(sel.sources ?? {}).map(([srcName, s]: [string, any]) => (
                   <div key={srcName} style={{ fontSize: 12, lineHeight: 1.9 }}>
                     <strong>{srcName}</strong>　<code>{s.connection}.{s.table}</code>
@@ -679,419 +683,5 @@ export default function CanvasPage() {
         </div>
       )}
     </div>
-  );
-}
-
-interface PairAdvice {
-  class_a: string;
-  class_b: string;
-  tendency: string;
-  reason: string;
-}
-
-/** 裁决面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。失败留在面板里可重试。 */
-function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
-  const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
-  const [stage, setStage] = useState({ from: "", to: "" });
-  const [busy, setBusy] = useState(false);
-  const [rateBusy, setRateBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const decide = async (verdict: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/decisions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          class_a: pair.class_a,
-          class_b: pair.class_b,
-          verdict,
-          stage_names: verdict === "阶段" && stage.from && stage.to ? stage : undefined,
-          llm_advice: `${pair.tendency}：${pair.reason}`,
-          evidence: rate ?? undefined, // 证据快照：归一化规则、样本量、交集数、比率
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok) setError(data.error ?? "裁决被拒"); // 留在面板里，能重试
-      else onDone(`已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // 五种结论的白话说明：名字是定案术语，解释是给用户扫一眼的
-  const options: { v: string; hint: string }[] = [
-    { v: "同一", hint: "就是同一批东西——合并成一个对象，挂多个来源" },
-    { v: "部分重叠", hint: "有一部分重合——公共字段立一个公共对象，各自特有的字段留下" },
-    { v: "阶段", hint: "同一批东西的不同阶段——合并成一个对象，加状态和转化动作" },
-    { v: "仅名称相似", hint: "只是名字像，其实不相干——各自独立" },
-    { v: "跳过", hint: "这次不判，先放着" },
-  ];
-
-  return (
-    <div style={{ borderTop: "1px solid var(--hairline)", padding: "12px 0" }}>
-      <div style={{ fontSize: 13 }}>
-        <code>{pair.class_a}</code> × <code>{pair.class_b}</code>
-      </div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "6px 0 2px" }}>
-        AI 建议「{pair.tendency}」，依据：{pair.reason}。
-      </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>建议只是参考——起名像不像会骗人，定夺要看真实数据和你。</div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "4px 0" }}>
-        {rate ? (
-          <>
-            两边识别字段实际重合 <strong>{(rate.rate * 100).toFixed(0)}%</strong>（{pair.class_a} {rate.count_a} 条、{pair.class_b} {rate.count_b} 条，其中 {rate.count_hit} 条对得上号）
-            {rate.count_hit === 0 ? "——完全对不上，多半不相干" : rate.rate >= 0.5 ? "——多半是同一批" : ""}
-          </>
-        ) : (
-          <button
-            className="chip"
-            disabled={rateBusy}
-            onClick={async () => {
-              if (rateBusy) return; // 交集是内存集合运算，连点没意义
-              setRateBusy(true);
-              setError(null);
-              try {
-                const r = await fetch("/api/overlap", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ class_a: pair.class_a, class_b: pair.class_b }),
-                });
-                const data = await r.json();
-                if (r.ok) setRate(data);
-                else setError(data.error ?? "算不了");
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              } finally {
-                setRateBusy(false);
-              }
-            }}
-          >
-            {rateBusy ? "算着…" : "算一算实际重合度"}
-          </button>
-        )}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)" }}>实际重合度 = 两边识别字段的取值有多少对得上号（内存里算，不搬数据出库）。</div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "10px 0 4px" }}>是同一批现实对象吗？选一个结论：</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {options.map((o) => (
-          <div key={o.v} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
-            <button
-              className="chip"
-              style={{ minWidth: 76, textAlign: "center" }}
-              disabled={busy || (o.v === "阶段" && (!stage.from || !stage.to))}
-              onClick={() => decide(o.v)}
-            >
-              {o.v}
-            </button>
-            <span style={{ color: "var(--ink-3)" }}>{o.hint}</span>
-            {o.v === "阶段" && (
-              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                <input placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 110, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
-                <span style={{ color: "var(--ink-3)" }}>→</span>
-                <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 110, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-      {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
-    </div>
-  );
-}
-
-/** 验收问题集：增删 + 对着引擎跑通过/失败。问数验收基准，不参与裁决。 */
-function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
-  const [items, setItems] = useState<{ id: number; question: string; status: string }[]>([]);
-  const [text, setText] = useState("");
-  const [running, setRunning] = useState(false);
-  const [acting, setActing] = useState(false); // 增删的防连点
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/questions");
-      const data = await r.json();
-      setItems(data.questions ?? []);
-    } catch {
-      showToast("问题集读不出来");
-    }
-  }, [showToast]);
-  useEffect(() => {
-    void load();
-  }, [load]);
-  return (
-    <div className="float-card float-tl" style={{ top: 120, width: 360 }}>
-      <div className="bezel">
-        <div className="bezel-core" style={{ padding: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
-            <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
-          </div>
-          {items.map((q) => (
-            <div key={q.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
-              <span>{q.question}</span>
-              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span className={`tag ${q.status === "通过" ? "tag-ok" : q.status === "失败" ? "tag-warn" : ""}`}>{q.status}</span>
-                <button
-                  className="chip"
-                  aria-label="删除"
-                  disabled={acting}
-                  onClick={async () => {
-                    setActing(true);
-                    try {
-                      await fetch("/api/questions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
-                      await load();
-                    } finally {
-                      setActing(false);
-                    }
-                  }}
-                >
-                  ✕
-                </button>
-              </span>
-            </div>
-          ))}
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!text.trim() || acting) return;
-              setActing(true);
-              try {
-                const r = await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
-                if (r.ok) setText("");
-                else showToast("没加上");
-                await load();
-              } finally {
-                setActing(false);
-              }
-            }}
-            style={{ display: "flex", gap: 6, marginTop: 8 }}
-          >
-            <input className="text-in" style={{ flex: 1, fontSize: 12, padding: "6px 10px" }} placeholder="加一条业务问题" value={text} onChange={(e) => setText(e.target.value)} />
-            <button type="submit" className="btn" style={{ fontSize: 12 }} disabled={acting}>加</button>
-          </form>
-          <button
-            className="btn-cta"
-            style={{ fontSize: 12, padding: "6px 16px", marginTop: 10 }}
-            disabled={running}
-            onClick={async () => {
-              if (running) return; // 防连点：连跑多遍没意义
-              setRunning(true);
-              try {
-                const r = await fetch("/api/questions?run=1", { method: "POST" });
-                const data = await r.json();
-                const failed = (data.results ?? []).filter((x: { status: string }) => x.status === "失败");
-                showToast(failed.length ? `${failed.length} 条失败，回 M2/M3 修本体或映射` : `全部通过（v${data.version}）`);
-                await load();
-              } catch (e) {
-                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
-              } finally {
-                setRunning(false);
-              }
-            }}
-          >
-            {running ? "跑着…" : "全量跑一遍"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, description: string, kind: "thing" | "event") => void; onCancel: () => void }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [kind, setKind] = useState<"thing" | "event">("thing");
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (name.trim()) onSubmit(name.trim(), description.trim(), kind);
-      }}
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
-    >
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="对象名（小写，如 vendor）" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="一句话说明（可选）" value={description} onChange={(e) => setDescription(e.target.value)} />
-      <select value={kind} onChange={(e) => setKind(e.target.value as "thing" | "event")} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" }}>
-        <option value="thing">事物（可持续存在）</option>
-        <option value="event">事件（发生过即确定）</option>
-      </select>
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }}>加入画布</button>
-        <button type="button" className="btn" onClick={onCancel}>取消</button>
-      </div>
-    </form>
-  );
-}
-
-/** 连线表单：关系名/反向名/基数 + 配对字段（默认两边识别字段）。 */
-function LinkForm({ from, to, objects, onSubmit, onCancel }: { from: string; to: string; objects: Record<string, any>; onSubmit: (body: Record<string, unknown>) => void; onCancel: () => void }) {
-  const fromProps = Object.keys(objects[from]?.properties ?? {});
-  const toProps = Object.keys(objects[to]?.properties ?? {});
-  const idOf = (c: string) => objects[c]?.identity;
-  const [name, setName] = useState(`${from}_${to}`);
-  const [inverse, setInverse] = useState("");
-  const [card, setCard] = useState("");
-  const [description, setDescription] = useState("");
-  const [matchFrom, setMatchFrom] = useState(idOf(from) ?? fromProps[0] ?? "");
-  const [matchTo, setMatchTo] = useState(idOf(to) ?? toProps[0] ?? "");
-  const selStyle: React.CSSProperties = { fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" };
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!name.trim() || !matchFrom || !matchTo) return;
-        onSubmit({
-          op: "create_link",
-          name: name.trim(),
-          from,
-          to,
-          inverse: inverse.trim() || undefined,
-          card: card || undefined,
-          description: description.trim() || undefined,
-          match: { from: matchFrom, to: matchTo },
-        });
-      }}
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
-    >
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="关系名（小写，如 belongs_to）" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="反向名（可选，如 has_equipment）" value={inverse} onChange={(e) => setInverse(e.target.value)} />
-      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--ink-2)" }}>
-        <span>配对字段</span>
-        <select value={matchFrom} onChange={(e) => setMatchFrom(e.target.value)} style={selStyle}>
-          {fromProps.map((p) => (
-            <option key={p} value={p}>{from}.{p}</option>
-          ))}
-        </select>
-        <span style={{ color: "var(--ink-3)" }}>↔</span>
-        <select value={matchTo} onChange={(e) => setMatchTo(e.target.value)} style={selStyle}>
-          {toProps.map((p) => (
-            <option key={p} value={p}>{to}.{p}</option>
-          ))}
-        </select>
-      </div>
-      <select value={card} onChange={(e) => setCard(e.target.value)} style={selStyle}>
-        <option value="">基数（可选）</option>
-        <option value="1:1">1:1</option>
-        <option value="1:n">1:n（一对多）</option>
-        <option value="n:1">n:1（多对一）</option>
-        <option value="n:n">n:n（多对多）</option>
-      </select>
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="一句话说明（可选）" value={description} onChange={(e) => setDescription(e.target.value)} />
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }}>建好进草稿</button>
-        <button type="button" className="btn" onClick={onCancel}>取消</button>
-      </div>
-    </form>
-  );
-}
-
-function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => void; onCancel: () => void }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState<"sqlite" | "mysql" | "pg">("sqlite");
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("");
-  const [dbName, setDbName] = useState("");
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const inputStyle: React.CSSProperties = { fontSize: 13, padding: "8px 12px" };
-  return (
-    <form
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!name.trim() || busy) return;
-        setBusy(true);
-        setError(null);
-        try {
-          const r = await fetch("/api/connections", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: name.trim(),
-              type,
-              host: host || undefined,
-              port: port ? Number(port) : undefined,
-              db_name: dbName || undefined,
-              ro_user: user || undefined,
-              ro_pass: pass || undefined,
-              test: true, // 先测连通再保存
-            }),
-          });
-          const data = await r.json();
-          if (!r.ok) setError(data.error ?? "连不上");
-          else onDone(data.warning ?? `已连接 ${name}，读到 ${data.tables?.length ?? 0} 张表`);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err)); // 网络层失败也留卡内
-        } finally {
-          setBusy(false);
-        }
-      }}
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
-    >
-      <input className="text-in" style={inputStyle} placeholder="连接名（小写，如 purchase_sys）" value={name} onChange={(e) => setName(e.target.value)} />
-      <select value={type} onChange={(e) => setType(e.target.value as "sqlite" | "mysql" | "pg")} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" }}>
-        <option value="sqlite">SQLite 文件（演示）</option>
-        <option value="mysql">MySQL</option>
-        <option value="pg">PostgreSQL</option>
-      </select>
-      {type === "sqlite" ? (
-        <input className="text-in" style={inputStyle} placeholder="文件路径（如 /data/demo.db）" value={dbName} onChange={(e) => setDbName(e.target.value)} />
-      ) : (
-        <>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input className="text-in" style={{ ...inputStyle, flex: 1 }} placeholder="主机" value={host} onChange={(e) => setHost(e.target.value)} />
-            <input className="text-in" style={{ ...inputStyle, width: 90 }} placeholder="端口" value={port} onChange={(e) => setPort(e.target.value)} />
-          </div>
-          <input className="text-in" style={inputStyle} placeholder="库名" value={dbName} onChange={(e) => setDbName(e.target.value)} />
-          <div style={{ display: "flex", gap: 8 }}>
-            <input className="text-in" style={{ ...inputStyle, flex: 1 }} placeholder="只读账号" value={user} onChange={(e) => setUser(e.target.value)} />
-            <input className="text-in" style={{ ...inputStyle, flex: 1 }} placeholder="密码" type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
-          </div>
-        </>
-      )}
-      {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }} disabled={busy}>
-          {busy ? "测试中…" : "测试并保存"}
-        </button>
-        <button type="button" className="btn" onClick={onCancel}>取消</button>
-      </div>
-    </form>
-  );
-}
-
-function AddProperty({ onAdd }: { onAdd: (name: string, type: (typeof PROP_TYPES)[number]) => Promise<boolean> }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState<(typeof PROP_TYPES)[number]>("string");
-  return (
-    <form
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (name.trim() && (await onAdd(name.trim(), type))) setName("");
-      }}
-      style={{ display: "flex", gap: 6, marginTop: 6 }}
-    >
-      <input className="text-in" style={{ flex: 1, fontSize: 12, padding: "6px 10px" }} placeholder="新字段名" value={name} onChange={(e) => setName(e.target.value)} />
-      <select value={type} onChange={(e) => setType(e.target.value as (typeof PROP_TYPES)[number])} style={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" }}>
-        {PROP_TYPES.map((t) => (
-          <option key={t} value={t}>{t}</option>
-        ))}
-      </select>
-      <button type="submit" className="btn" style={{ fontSize: 12, padding: "6px 12px" }}>加字段</button>
-    </form>
   );
 }

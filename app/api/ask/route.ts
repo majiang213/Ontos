@@ -7,7 +7,7 @@ import { z, ZodError } from "zod";
 import { runQuery } from "@/lib/engine/query";
 import { EngineReject } from "@/lib/engine/individual";
 import { getSlot } from "@/lib/engine/llmSlot";
-import { demoDriver, loadConfig } from "@/lib/engine/load";
+import { getDriverRegistry } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { BadRequest, bodyJson, internalError, safeLog } from "@/app/api/_shared";
@@ -18,9 +18,9 @@ export async function POST(req: Request) {
   try {
     // zod 收：body 是 null/标量/缺字段都归 400
     question = z.object({ question: z.string().min(1) }).parse(await bodyJson(req)).question.trim();
-    const config = loadConfig();
+    const config = getPublished().config;
     const query = await getSlot().nlToQuery(question, config);
-    const { rows, path } = await runQuery(config, demoDriver(), query);
+    const { rows, path } = await runQuery(config, getDriverRegistry(), query);
     safeLog(() => metaStore().logQuery({ version: getPublished().version, question, model: getSlot().name, query_json: JSON.stringify(query), row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
     return NextResponse.json({ question, query, rows, path });
   } catch (e) {

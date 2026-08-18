@@ -1,7 +1,7 @@
 // 个体 —— 同一性标准对齐之后，一个体 = 各源各一行（或缺行）。
 // 组装、属性取值、派生求值都在这里；过滤的行级核对也在这里。
 
-import type { Filter, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
+import type { Filter, LinkType, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
 import type { SourceDriver } from "./driver";
 import { resolveLiteral, type EvalContext } from "./expr";
 import { FILTER_OPS } from "../schema/config";
@@ -27,6 +27,16 @@ export interface Env {
 
 /** 引擎拒绝：请求或配置里的名字对不上已发布配置。路由按 422 处理；其它异常是引擎故障，按 500。 */
 export class EngineReject extends Error {}
+
+/** 关系解析（唯一出处）：正向名在 from 侧，反向名（inverse）在 to 侧。找不到返回 undefined。 */
+export function findLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } | undefined {
+  const direct = config.link_types[name];
+  if (direct && direct.from === clsName) return { link: direct, reversed: false };
+  for (const link of Object.values(config.link_types)) {
+    if (link.inverse === name && link.to === clsName) return { link, reversed: true };
+  }
+  return undefined;
+}
 
 export function mustCls(config: OntologyConfig, name: string): Cls {
   const def = config.object_types[name];
@@ -160,9 +170,6 @@ export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unkn
     throw new EngineReject(e instanceof Error ? e.message : String(e));
   }
 }
-
-/** 字符串字面量里的日期与表达式在 expr.ts 的 resolveLiteral 里统一处理。 */
-export { resolveLiteral };
 
 /** 数据侧的值只做转换、不抛错：源列里写什么不归引擎管，形似而非法就按原字符串比。 */
 function dataLiteral(v: unknown): unknown {

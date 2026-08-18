@@ -36,7 +36,7 @@ export const RULES: NormRule[] = [
 ];
 
 export function pickRule(sample: string[]): NormRule {
-  return RULES.find((r) => r.match(sample)) ?? RULES[RULES.length - 1];
+  return RULES.find((r) => r.match(sample))!; // plain 规则 match 恒真，find 必中
 }
 
 export function normalizeWith(rule: NormRule, v: unknown): string {

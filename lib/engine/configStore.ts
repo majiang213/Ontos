@@ -7,6 +7,7 @@ import { dump, load } from "js-yaml";
 import { configSchema, objectTypeSchema, type OntologyConfig } from "../schema/config";
 import type { DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
+import { findLink } from "./individual";
 import { validateSemantics } from "./validate";
 
 // 路径按 cwd 现算，不在模块顶层冻结：测试会切换工作目录，顶层常量会把第一轮的临时目录记死。
@@ -91,10 +92,7 @@ export function applyOp(input: DraftOp): DraftState {
     }
     case "delete_object": {
       if (!d.object_types[input.name]) throw new DraftReject(`类不存在：${input.name}`);
-      delete d.object_types[input.name];
-      for (const [linkName, link] of Object.entries(d.link_types)) {
-        if (link.from === input.name || link.to === input.name) delete d.link_types[linkName]; // 挂着的关系一并撤
-      }
+      dropClass(d, input.name);
       break;
     }
     case "update_object": {
@@ -194,6 +192,14 @@ function mustType(d: OntologyConfig, name: string) {
   const t = d.object_types[name];
   if (!t) throw new DraftReject(`类不存在：${name}`);
   return t;
+}
+
+/** 撤一个类，连同挂着它的关系（delete_object 与裁决的 mergeInto 共用）。 */
+export function dropClass(d: OntologyConfig, name: string): void {
+  delete d.object_types[name];
+  for (const [linkName, link] of Object.entries(d.link_types)) {
+    if (link.from === name || link.to === name) delete d.link_types[linkName];
+  }
 }
 
 /** 删除属性前的引用扫描：源映射、关系配对、转化、公理、同类派生规则、动作（含跨类）。 */
@@ -341,14 +347,10 @@ function derivedFilterKeys(derived: unknown): string[] {
   return keys;
 }
 
-/** 关系名 → 目标类：正向取 to，反向名（inverse）取 from。 */
+/** 关系名 → 目标类：走引擎同一份解析（findLink），正向取 to，反向名取 from。 */
 function linkTarget(d: OntologyConfig, hostCls: string, linkName: string): string | null {
-  const direct = d.link_types[linkName];
-  if (direct && direct.from === hostCls) return direct.to;
-  for (const link of Object.values(d.link_types)) {
-    if (link.inverse === linkName && link.to === hostCls) return link.from;
-  }
-  return null;
+  const r = findLink(d, hostCls, linkName);
+  return r ? (r.reversed ? r.link.from : r.link.to) : null;
 }
 
 /** 动作里的引用：本类 pre 的键；任意效应指向本类时的属性键；$link 目标过滤落回本类的键。 */
@@ -415,13 +417,17 @@ export function publishDraft(): { version: number } {
   const state = getDraft();
   if (!state.dirty) return { version: state.baseVersion }; // 无改动不产空版本
   const config = configSchema.parse(structuredClone(state.draft)); // 结构校验
-  validateSemantics(config); // 语义校验
+  try {
+    validateSemantics(config); // 语义校验
+  } catch (e) {
+    throw new DraftReject(e instanceof Error ? e.message : String(e)); // 归一到类型，路由不用嗅探文案
+  }
   const version = latestVersionFile().version + 1; // 版本号以磁盘链为准，防残留覆盖
   mkdirSync(versionsDir(), { recursive: true });
   const target = join(versionsDir(), `v${version}.yaml`);
   writeFileSync(`${target}.tmp`, dump(config, { lineWidth: 120, noRefs: true }), "utf8"); // 先写临时文件再改名，防半截文件
   renameSync(`${target}.tmp`, target);
-  store.published = { config, version }; // 引擎下一次 loadPublished 即读新版
+  store.published = { config, version }; // 换掉已发布快照：引擎下一次 getPublished 即读新版
   state.baseVersion = version;
   state.dirty = false;
   fillDecisionVersions(version); // 裁决留痕的生效版本随发布回填

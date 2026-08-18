@@ -3,7 +3,7 @@
 // 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
 
 import type { Filter, OntologyConfig } from "../schema/config";
-import { mutateDraft } from "./configStore";
+import { dropClass, mutateDraft } from "./configStore";
 
 export type Verdict = "同一" | "部分重叠" | "阶段" | "仅名称相似" | "跳过";
 
@@ -54,14 +54,6 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
     for (const [name, ax] of Object.entries(B.axioms)) if (!A.axioms[name]) A.axioms[name] = ax;
   }
   dropClass(d, b);
-}
-
-/** 撤一个类，连同挂着它的关系。 */
-function dropClass(d: OntologyConfig, name: string): void {
-  delete d.object_types[name];
-  for (const [linkName, link] of Object.entries(d.link_types)) {
-    if (link.from === name || link.to === name) delete d.link_types[linkName];
-  }
 }
 
 export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b: string }, verdict: Verdict, stageNames?: { from: string; to: string }): void {

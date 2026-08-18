@@ -129,7 +129,7 @@ export class CannedSlot implements LlmSlot {
    三个槽位同构——generateObject({ model, schema, prompt })，schema 即 lib/schema 里的 Zod。
    getSlot() 按环境变量选实现。 */
 
-/** 槽位选择：有 key 用真模型，否则离线回退。 */
+/** 槽位选择：当前恒为离线回退；真模型就位后在这里按环境变量换实现。 */
 export function getSlot(): LlmSlot {
   return new CannedSlot(); // ONTOS_LLM_KEY 就位后在这里换真模型实现
 }

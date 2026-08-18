@@ -5,20 +5,17 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildInsert, buildStatement } from "../lib/engine/sqlDriver";
-import { maskValue } from "../lib/engine/driver";
+import { buildInsert, buildSelect, buildStatement, maskValue } from "../lib/engine/driver";
+import "../lib/engine/sqlDriver"; // 副作用导入：注册 PG 日期列的 type parser（1082/1114/1184）
 import { DriverRegistry } from "../lib/engine/registry";
 import { SqliteFixtureDriver } from "../lib/engine/fixture";
 
 describe("方言 SQL 生成", () => {
   it("pg：占位符渲染成 $1..$n，标识符双引号", () => {
-    const { sql, params } = buildStatement("pg", "select", "device", {
-      columns: ["name", "dept_id"],
-      conditions: [
-        { column: "dept_id", op: "eq", value: "D07" },
-        { column: "status", op: "null" },
-      ],
-    });
+    const { sql, params } = buildSelect("device", ["name", "dept_id"], [
+      { column: "dept_id", op: "eq", value: "D07" },
+      { column: "status", op: "null" },
+    ], "pg");
     expect(sql).toBe(`SELECT "name", "dept_id" FROM "device" WHERE "dept_id" = $1 AND "status" IS NULL`);
     expect(params).toEqual(["D07"]);
   });
@@ -37,19 +34,19 @@ describe("方言 SQL 生成", () => {
     expect(sql).toBe(`INSERT INTO "warranty_card" ("sn", "expiry") VALUES ($1, $2)`);
     expect(params).toEqual(["SN-1", 123]);
     // date 属性（nullLoose）：空=至今，gt/gte 时 NULL 也算满足
-    const gte = buildStatement("pg", "select", "t", { conditions: [{ column: "valid_to", op: "gte", value: 100, nullLoose: true }] });
+    const gte = buildSelect("t", [], [{ column: "valid_to", op: "gte", value: 100, nullLoose: true }], "pg");
     expect(gte.sql).toContain(`OR "valid_to" IS NULL`);
     // 非 date 属性：没有这条宽松，NULL 不比大小
-    const plain = buildStatement("pg", "select", "t", { conditions: [{ column: "qty", op: "gte", value: 100 }] });
+    const plain = buildSelect("t", [], [{ column: "qty", op: "gte", value: 100 }], "pg");
     expect(plain.sql).not.toContain("IS NULL");
   });
 
   it("contains 转义通配符；mysql 的 ESCAPE 字面量写两个反斜杠", () => {
-    const { sql, params } = buildStatement("mysql", "select", "t", { conditions: [{ column: "name", op: "contains", value: "50%" }] });
+    const { sql, params } = buildSelect("t", [], [{ column: "name", op: "contains", value: "50%" }], "mysql");
     expect(sql).toContain(`ESCAPE '\\\\'`); // SQL 文本里两个反斜杠，MySQL 解析成一个转义符
     expect(params[0]).toBe("%50\\%%");
-    const sqlite = buildStatement("pg", "select", "t", { conditions: [{ column: "name", op: "contains", value: "50%" }] });
-    expect(sqlite.sql).toContain(`ESCAPE '\\'`); // pg/sqlite 一个就够
+    const pgLike = buildSelect("t", [], [{ column: "name", op: "contains", value: "50%" }], "pg");
+    expect(pgLike.sql).toContain(`ESCAPE '\\'`); // pg/sqlite 一个就够
   });
 
   it("PG 日期列按串返回：TIMESTAMPTZ 转 ISO，DATE/TIMESTAMP 原样", async () => {

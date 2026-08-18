@@ -57,8 +57,8 @@ describe("错误分层：400 / 422 / 500", () => {
     expect((await post("query", "not json")).status).toBe(400);
     expect((await post("query", JSON.stringify({ object: "ghost" }))).status).toBe(422);
     // 注入一个必炸的驱动顶替 purchase_sys：引擎故障落 500，不是 422
-    const { demoDriver } = await import("../lib/engine/load");
-    demoDriver().register("purchase_sys", {
+    const { getDriverRegistry } = await import("../lib/engine/load");
+    getDriverRegistry().register("purchase_sys", {
       select: async () => { throw new Error("库炸了"); },
       insert: async () => {},
       update: async () => 0,

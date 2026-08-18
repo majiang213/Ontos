@@ -12,6 +12,7 @@ import {
   EngineReject,
   evalDerived,
   evalFilterOnIndividual,
+  findLink,
   keyColumn,
   mustCls,
   propValue,
@@ -33,12 +34,9 @@ interface ResolvedLink {
 }
 
 function resolveLink(config: OntologyConfig, clsName: string, name: string): ResolvedLink {
-  const direct = config.link_types[name];
-  if (direct && direct.from === clsName) return { link: direct, reversed: false };
-  for (const link of Object.values(config.link_types)) {
-    if (link.inverse === name && link.to === clsName) return { link, reversed: true };
-  }
-  throw new EngineReject(`关系名对不上配置：${clsName} 出发没有 ${name}`);
+  const found = findLink(config, clsName, name);
+  if (!found) throw new EngineReject(`关系名对不上配置：${clsName} 出发没有 ${name}`);
+  return found;
 }
 
 /** 转化关系的两截判定（§6.4）：出发规则里值为 true 的源现在有没有行；到达规则现在是否整条命中。 */

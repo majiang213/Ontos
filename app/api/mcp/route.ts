@@ -10,7 +10,7 @@ import { runAction } from "@/lib/engine/action";
 import { EngineReject } from "@/lib/engine/individual";
 import { getSlot } from "@/lib/engine/llmSlot";
 import { listClasses, readClass, search } from "@/lib/engine/views";
-import { demoDriver, loadConfig } from "@/lib/engine/load";
+import { getDriverRegistry, resolveTableInfos } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { requireWriteAuth, safeLog } from "@/app/api/_shared";
@@ -60,15 +60,15 @@ export async function POST(req: Request) {
       return rpcOk(id, { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "ontos", version: "0.1.0" } });
     }
     // JSON-RPC 通知不应有响应（Streamable HTTP：202 空体）
-    if (body.method?.startsWith("notifications/")) return new NextResponse(null, { status: 202 });
+    if (body.method.startsWith("notifications/")) return new NextResponse(null, { status: 202 });
     if (body.method === "tools/list") return rpcOk(id, { tools: TOOLS });
     if (body.method !== "tools/call") return rpcErr(id, -32601, `未知方法：${body.method}`);
 
     const name = body.params?.name as string | undefined;
     if (!name) return rpcErr(id, -32602, "tools/call 缺 params.name");
     const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
-    const config = loadConfig();
-    const driver = demoDriver();
+    const config = getPublished().config;
+    const driver = getDriverRegistry();
 
     if (name === "query") {
       const query = queryRequestSchema.parse(args.query);
@@ -85,47 +85,31 @@ export async function POST(req: Request) {
       const denied = requireWriteAuth(req);
       if (denied) return rpcErr(id, -32001, "未授权：写操作需要有效的令牌");
       const action = actionRequestSchema.parse(args);
-      const version = getPublished().version;
-      try {
-        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore().nextSeq(k, s) });
+      // 留痕的公共部分：成功/失败两支只补差异字段
+      const log = (outcome: { ok: boolean; error?: string; projections?: unknown }) =>
         safeLog(() => metaStore().logAction({
-          version,
+          version: getPublished().version,
           action: action.action,
           object_type: action.object,
           subject: String(action.identity),
           request_json: action.request ? JSON.stringify(action.request) : undefined,
-          projections: result.projections,
-          ok: result.ok,
-          error: result.error,
+          ...outcome,
           duration_ms: Date.now() - started,
         }));
+      try {
+        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore().nextSeq(k, s) });
+        log({ ok: result.ok, error: result.error, projections: result.projections });
         // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
         return rpcOk(id, toolResult(result, !result.ok));
       } catch (e) {
-        safeLog(() => metaStore().logAction({
-          version,
-          action: action.action,
-          object_type: action.object,
-          subject: String(action.identity),
-          ok: false,
-          error: e instanceof Error ? e.message : String(e),
-          duration_ms: Date.now() - started,
-        }));
+        log({ ok: false, error: e instanceof Error ? e.message : String(e) });
         throw e;
       }
     }
     if (name === "propose_ontology") {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
-      // 按连接分组：每个连接内省一次
-      const byConn = new Map<string, Awaited<ReturnType<typeof driver.introspect>>>();
-      for (const { connection } of tables) {
-        if (!byConn.has(connection)) byConn.set(connection, await driver.introspect(connection));
-      }
-      const infos = tables.map(({ connection, table }) => {
-        const info = byConn.get(connection)!.find((t) => t.name === table);
-        if (!info) throw new EngineReject(`表不存在：${connection}.${table}`);
-        return { connection, table: info };
-      });
+      // 按连接分组内省 + 逐表定位：引擎共享实现（generate 同款）
+      const infos = await resolveTableInfos(driver, tables, (m) => new EngineReject(m));
       const draft = await getSlot().draftObjects(infos);
       return rpcOk(id, toolResult({ object_types: draft }));
     }

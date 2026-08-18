@@ -2,12 +2,12 @@
 // 读驱动注册表里每个连接的表结构 + 3 行脱敏采样。源表是只读原料。
 
 import { NextResponse } from "next/server";
-import { demoDriver } from "@/lib/engine/load";
+import { getDriverRegistry } from "@/lib/engine/load";
 import { internalError } from "@/app/api/_shared";
 
 export async function GET() {
   try {
-    const registry = demoDriver();
+    const registry = getDriverRegistry();
     const sources = [];
     for (const connection of registry.connectionNames()) {
       try {

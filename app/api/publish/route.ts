@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { discardDraft, DraftReject, publishDraft } from "@/lib/engine/configStore";
 import { ZodError } from "zod";
-import { requireWriteAuth } from "@/app/api/_shared";
+import { internalError, requireWriteAuth } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
@@ -15,8 +15,7 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof ZodError) return NextResponse.json({ error: "配置结构不合法", issues: e.issues }, { status: 422 });
     if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    if (e instanceof Error && e.message.startsWith("配置不合法")) return NextResponse.json({ error: e.message }, { status: 422 });
-    return NextResponse.json({ error: "发布失败", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }
 
@@ -27,6 +26,6 @@ export async function DELETE(req: Request) {
     discardDraft();
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }

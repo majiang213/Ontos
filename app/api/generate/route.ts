@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { demoDriver } from "@/lib/engine/load";
+import { getDriverRegistry, resolveTableInfos } from "@/lib/engine/load";
 import { getSlot } from "@/lib/engine/llmSlot";
 import { applyOp, DraftReject } from "@/lib/engine/configStore";
 import { EngineReject } from "@/lib/engine/individual";
@@ -19,17 +19,9 @@ export async function POST(req: Request) {
   if (denied) return denied;
   try {
     const { tables } = bodySchema.parse(await bodyJson(req));
-    const registry = demoDriver();
-    // 按连接分组：每个连接内省一次，N 张表不再做 N 次全库内省
-    const byConn = new Map<string, Awaited<ReturnType<typeof registry.introspect>>>();
-    for (const { connection } of tables) {
-      if (!byConn.has(connection)) byConn.set(connection, await registry.introspect(connection));
-    }
-    const infos = tables.map(({ connection, table }) => {
-      const info = byConn.get(connection)!.find((t) => t.name === table);
-      if (!info) throw new DraftReject(`表不存在：${connection}.${table}`);
-      return { connection, table: info };
-    });
+    const registry = getDriverRegistry();
+    // 按连接分组内省 + 逐表定位：引擎共享实现（mcp 同款）
+    const infos = await resolveTableInfos(registry, tables, (m) => new DraftReject(m));
     const objects = await getSlot().draftObjects(infos);
     applyOp({ op: "import_objects", objects });
     return NextResponse.json({ ok: true, created: Object.keys(objects) });

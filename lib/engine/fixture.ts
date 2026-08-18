@@ -1,19 +1,11 @@
 // SQLite fixture 驱动 —— 每个连接一个内存库，用真实 SQL 执行下推与写回。
 // 两种用途：引擎 golden 测试；没有 MySQL/PG 时的离线演示。
-// 种子数据按演示剧本：采购 120 台、设备 100 台、序列号重合 40 台（交集率约三分之一）。
+// 种子数据按演示剧本：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）。
 
 import { DatabaseSync } from "node:sqlite";
-import {
-  buildSelect,
-  conditionSql,
-  maskValue,
-  quoteFor,
-  type Condition,
-  type SourceDriver,
-} from "./driver";
+import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
 import { EngineReject } from "./individual";
 
-const quote = quoteFor("sqlite"); // 与方言层同一套引号（含双写转义）
 // node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
 // node:sqlite 不认 boolean，绑定前归一成 1/0。
 const bind = (params: unknown[]) => params.map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v)) as never[];
@@ -48,32 +40,25 @@ export class SqliteFixtureDriver implements SourceDriver {
   }
 
   async insert(connection: string, table: string, row: Record<string, unknown>) {
-    const cols = Object.keys(row);
-    const sql = `INSERT INTO ${quote(table)} (${cols.map(quote).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
-    this.db(connection).prepare(sql).run(...bind(cols.map((c) => row[c])));
+    const { sql, params } = buildInsert("sqlite", table, row);
+    this.db(connection).prepare(sql).run(...bind(params));
   }
 
   async update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): Promise<number> {
-    const setCols = Object.keys(set);
-    const setSql = setCols.map((c) => `${quote(c)} = ?`).join(", ");
-    const parts = conditions.map((c) => conditionSql(c, quote));
-    const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
-    const params = [...setCols.map((c) => set[c]), ...parts.flatMap((p) => p.params)];
-    const res = this.db(connection).prepare(`UPDATE ${quote(table)} SET ${setSql}${where}`).run(...bind(params));
+    const { sql, params } = buildStatement("sqlite", "update", table, { set, conditions });
+    const res = this.db(connection).prepare(sql).run(...bind(params));
     return Number(res.changes);
   }
 
   async delete(connection: string, table: string, conditions: Condition[]): Promise<number> {
-    const parts = conditions.map((c) => conditionSql(c, quote));
-    const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
-    const res = this.db(connection)
-      .prepare(`DELETE FROM ${quote(table)}${where}`)
-      .run(...bind(parts.flatMap((p) => p.params)));
+    const { sql, params } = buildStatement("sqlite", "delete", table, { conditions });
+    const res = this.db(connection).prepare(sql).run(...bind(params));
     return Number(res.changes);
   }
 
   async sample(connection: string, table: string, limit = 3) {
-    const rows = this.db(connection).prepare(`SELECT * FROM ${quote(table)} LIMIT ?`).all(...bind([limit])) as Record<string, unknown>[];
+    const { sql, params } = buildSelect(table, [], [], "sqlite", limit);
+    const rows = this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
     return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, maskValue(k, v)])));
   }
 
@@ -94,7 +79,7 @@ export class SqliteFixtureDriver implements SourceDriver {
     return [...this.dbs.keys()];
   }
 
-  async introspect(connection: string): Promise<{ name: string; columns: { name: string; type: string; pk: boolean }[] }[]> {
+  async introspect(connection: string): Promise<TableInfo[]> {
     const db = this.db(connection);
     const tables = db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)

@@ -137,7 +137,7 @@ export async function runAction(
     try {
       const recs = await project(env, p, req, ctx);
       if (recs.length === 0) {
-        projections.push({ source: "-", table: "-", op, ok: false, error: "没有源承接这次变化（属性未映射或第 3 步无行）" });
+        projections.push({ source: "-", table: "-", op, ok: false, error: "没有来源能承接这次变化（字段没映射，或源库里没这行）" });
       } else {
         projections.push(...recs);
       }
@@ -322,7 +322,7 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
         }
       }
       if (handled === 0) {
-        out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 没有源承接这次变化（属性未映射或第 3 步无行）` });
+        out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 没有来源能承接这次变化（字段没映射，或源库里没这行）` });
       }
     }
     return out;

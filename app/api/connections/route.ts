@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { demoDriver, registerSaved } from "@/lib/engine/load";
+import { getDriverRegistry, registerSaved } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     } else if (!rec.host || !rec.db_name) {
       return NextResponse.json({ error: "mysql/pg 连接必须给 host 与 db_name" }, { status: 400 });
     }
-    const registry = demoDriver();
+    const registry = getDriverRegistry();
     const previous = metaStore().listConnections().find((c) => c.name === rec.name); // 重存场景的旧配置，失败要还回来
     // 内置演示源（fixture，不在元库）不许同名覆盖——覆盖了失败回滚时还回不来
     if (!previous && registry.has(rec.name)) {
@@ -87,7 +87,7 @@ export async function DELETE(req: Request) {
     const { name } = z.object({ name: z.string().min(1) }).parse(await bodyJson(req));
     // 演示 fixture 连接不在元库：删不了，删了会把演示源从注册表抹掉
     if (!metaStore().listConnections().some((c) => c.name === name)) {
-      return NextResponse.json({ error: `连接不存在：${name}（内置演示源不能删）` }, { status: 404 });
+      return NextResponse.json({ error: `连接不存在：${name}（内置演示源不能删）` }, { status: 422 }); // 三档分层：不存在归 422
     }
     // 已发布本体还引用着的连接不能删——删了问数/动作立刻全 422
     const inUse = Object.values(getPublished().config.object_types).some((t) =>
@@ -95,7 +95,7 @@ export async function DELETE(req: Request) {
     );
     if (inUse) return NextResponse.json({ error: `连接 ${name} 仍被已发布本体引用，先改本体再删` }, { status: 422 });
     metaStore().deleteConnection(name);
-    demoDriver().unregister(name);
+    getDriverRegistry().unregister(name);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });

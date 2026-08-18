@@ -3,7 +3,7 @@
 
 import mysql from "mysql2/promise";
 import pg from "pg";
-import { buildSelect, conditionSql, maskValue, quoteFor, renderPlaceholders, type Condition, type SourceDriver, type TableInfo } from "./driver";
+import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
 
 export interface SqlConnectionCfg {
   host?: string;
@@ -15,39 +15,7 @@ export interface SqlConnectionCfg {
   rw_pass?: string;
 }
 
-/** 统一 SQL 构造：占位符先写 ?，pg 渲染成 $1..$n。 */
-export function buildStatement(
-  dialect: "mysql" | "pg",
-  kind: "select" | "update" | "delete",
-  table: string,
-  opts: { columns?: string[]; set?: Record<string, unknown>; conditions?: Condition[]; limit?: number }
-): { sql: string; params: unknown[] } {
-  const quote = quoteFor(dialect);
-  const conds = (opts.conditions ?? []).map((c) => conditionSql(c, quote, dialect));
-  const where = conds.length ? ` WHERE ${conds.map((p) => p.sql).join(" AND ")}` : "";
-  let sql: string;
-  let params: unknown[];
-  if (kind === "select") {
-    const cols = opts.columns?.length ? opts.columns.map(quote).join(", ") : "*";
-    sql = `SELECT ${cols} FROM ${quote(table)}${where}${opts.limit ? " LIMIT ?" : ""}`;
-    params = [...conds.flatMap((p) => p.params), ...(opts.limit ? [opts.limit] : [])];
-  } else if (kind === "update") {
-    const setCols = Object.keys(opts.set ?? {});
-    sql = `UPDATE ${quote(table)} SET ${setCols.map((c) => `${quote(c)} = ?`).join(", ")}${where}`;
-    params = [...setCols.map((c) => opts.set![c]), ...conds.flatMap((p) => p.params)];
-  } else {
-    sql = `DELETE FROM ${quote(table)}${where}`;
-    params = conds.flatMap((p) => p.params);
-  }
-  return { sql: renderPlaceholders(sql, dialect), params };
-}
-
-export function buildInsert(dialect: "mysql" | "pg", table: string, row: Record<string, unknown>): { sql: string; params: unknown[] } {
-  const quote = quoteFor(dialect);
-  const cols = Object.keys(row);
-  const sql = `INSERT INTO ${quote(table)} (${cols.map(quote).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
-  return { sql: renderPlaceholders(sql, dialect), params: cols.map((c) => row[c]) };
-}
+// SQL 构造的唯一出处是 driver.ts（buildSelect/buildStatement/buildInsert，内部渲染占位符）。
 
 // PG 的日期列按串返回，别给 JS Date（引擎的值契约是 ISO 串/Unix 秒）：
 // DATE(1082)/TIMESTAMP(1114) 原样（resolveLiteral 按 UTC 补 Z）；TIMESTAMPTZ(1184) 带时区偏移，转 ISO。
@@ -113,7 +81,7 @@ export class MysqlDriver implements SourceDriver {
   }
 
   async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
-    const { sql, params } = buildStatement(this.dialect, "select", table, { columns, conditions, limit });
+    const { sql, params } = buildSelect(table, columns, conditions, this.dialect, limit);
     const [rows] = await this.pool(false).query({ sql, timeout: QUERY_TIMEOUT_MS }, params);
     return rows as Record<string, unknown>[];
   }
@@ -178,8 +146,8 @@ export class PgDriver implements SourceDriver {
   }
 
   async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
-    const { sql, params } = buildSelect(table, columns, conditions, this.dialect, limit);
-    const res = await this.pool(false).query(renderPlaceholders(sql, this.dialect), params);
+    const { sql, params } = buildSelect(table, columns, conditions, this.dialect, limit); // 占位符已内部渲染
+    const res = await this.pool(false).query(sql, params);
     return res.rows as Record<string, unknown>[];
   }
 
@@ -206,8 +174,8 @@ export class PgDriver implements SourceDriver {
   }
 
   async sample(connection: string, table: string, limit = 3) {
-    const quote = quoteFor(this.dialect);
-    const res = await this.pool(false).query(`SELECT * FROM ${quote(table)} LIMIT $1`, [limit]);
+    const { sql, params } = buildSelect(table, [], [], this.dialect, limit); // 与 mysql 同款：buildSelect + LIMIT
+    const res = await this.pool(false).query(sql, params);
     return (res.rows as Record<string, unknown>[]).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, maskValue(k, v)])));
   }
 }

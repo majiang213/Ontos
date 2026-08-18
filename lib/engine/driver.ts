@@ -115,11 +115,16 @@ export function conditionSql(cond: Condition, quote: (id: string) => string, dia
   }
 }
 
+/* ---------- SQL 构造（唯一出处） ----------
+   全部内部渲染占位符（pg → $1..$n，其余 ?）：调用方拿到手就能执行，不用记得再渲染。 */
+
+export type Dialect = "sqlite" | "mysql" | "pg";
+
 export function buildSelect(
   table: string,
   columns: string[],
   conds: Condition[],
-  dialect: "sqlite" | "mysql" | "pg",
+  dialect: Dialect,
   limit?: number
 ): { sql: string; params: unknown[] } {
   const quote = quoteFor(dialect);
@@ -127,5 +132,36 @@ export function buildSelect(
   const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
   const params = parts.flatMap((p) => p.params);
   const cols = columns.length ? columns.map(quote).join(", ") : "*";
-  return { sql: `SELECT ${cols} FROM ${quote(table)}${where}${limit ? " LIMIT ?" : ""}`, params: limit ? [...params, limit] : params };
+  const sql = `SELECT ${cols} FROM ${quote(table)}${where}${limit ? " LIMIT ?" : ""}`;
+  return { sql: renderPlaceholders(sql, dialect), params: limit ? [...params, limit] : params };
+}
+
+/** update/delete 的构造（select 走 buildSelect）。 */
+export function buildStatement(
+  dialect: Dialect,
+  kind: "update" | "delete",
+  table: string,
+  opts: { set?: Record<string, unknown>; conditions?: Condition[] }
+): { sql: string; params: unknown[] } {
+  const quote = quoteFor(dialect);
+  const conds = (opts.conditions ?? []).map((c) => conditionSql(c, quote, dialect));
+  const where = conds.length ? ` WHERE ${conds.map((p) => p.sql).join(" AND ")}` : "";
+  let sql: string;
+  let params: unknown[];
+  if (kind === "update") {
+    const setCols = Object.keys(opts.set ?? {});
+    sql = `UPDATE ${quote(table)} SET ${setCols.map((c) => `${quote(c)} = ?`).join(", ")}${where}`;
+    params = [...setCols.map((c) => opts.set![c]), ...conds.flatMap((p) => p.params)];
+  } else {
+    sql = `DELETE FROM ${quote(table)}${where}`;
+    params = conds.flatMap((p) => p.params);
+  }
+  return { sql: renderPlaceholders(sql, dialect), params };
+}
+
+export function buildInsert(dialect: Dialect, table: string, row: Record<string, unknown>): { sql: string; params: unknown[] } {
+  const quote = quoteFor(dialect);
+  const cols = Object.keys(row);
+  const sql = `INSERT INTO ${quote(table)} (${cols.map(quote).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
+  return { sql: renderPlaceholders(sql, dialect), params: cols.map((c) => row[c]) };
 }

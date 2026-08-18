@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { runQuery } from "@/lib/engine/query";
 import { getSlot } from "@/lib/engine/llmSlot";
-import { demoDriver, loadConfig } from "@/lib/engine/load";
+import { getDriverRegistry } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   if (url.searchParams.get("run")) {
     try {
-      const config = loadConfig();
+      const config = getPublished().config;
       const version = getPublished().version;
       const slot = getSlot();
       const results = [];
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
         let detail = "";
         try {
           const query = await slot.nlToQuery(q.question, config);
-          const { rows } = await runQuery(config, demoDriver(), query);
+          const { rows } = await runQuery(config, getDriverRegistry(), query);
           // expected 是数字时按行数比对，不符记失败
           if (q.expected && /^\d+$/.test(q.expected.trim()) && rows.length !== Number(q.expected.trim())) {
             status = "失败";

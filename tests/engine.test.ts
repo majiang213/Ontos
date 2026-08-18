@@ -297,7 +297,7 @@ describe("M8 动作的边界与补偿", () => {
       failTables = new Set<string>();
       async insert(connection: string, table: string, row: Record<string, unknown>) {
         if (this.failTables.has(table)) throw new Error(`注入故障：${table}`);
-        super.insert(connection, table, row);
+        return super.insert(connection, table, row);
       }
     }
     // 情形一：device 插入失败（状态没变），重发畅通
@@ -449,7 +449,7 @@ describe("表达式与发号", () => {
 describe("第三轮修复的回归", () => {
   it("源库脏数据不崩：脏日期串参与两属性相比按原值处理", async () => {
     const driver = freshDriver();
-    driver.insert("device_sys", "assignment", { asgn_no: "A-DIRTY", sn: "SN-X", dept_id: "D01", valid_from: "2024-13-99", valid_to: null });
+    await driver.insert("device_sys", "assignment", { asgn_no: "A-DIRTY", sn: "SN-X", dept_id: "D01", valid_from: "2024-13-99", valid_to: null });
     const { rows } = await runQuery(config, driver, { object: "assignment", filter: { valid_from: { lte: { property: "valid_to" } } } });
     expect(rows.length).toBe(2); // 不抛错；与「至今」比，任何值都不晚于至今
   });
@@ -623,7 +623,7 @@ describe("第五轮修复的回归", () => {
       fail = true;
       async insert(connection: string, table: string, row: Record<string, unknown>) {
         if (this.fail && table === "device") throw new Error("注入故障");
-        super.insert(connection, table, row);
+        return super.insert(connection, table, row);
       }
     }
     const d = new FaultDriver();

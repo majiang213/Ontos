@@ -4,7 +4,7 @@
 
 import type { OntologyConfig } from "../schema/config";
 import { existsSync, statSync } from "node:fs";
-import type { SourceDriver } from "./driver";
+import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
@@ -17,8 +17,8 @@ export function loadConfig(): OntologyConfig {
   return getPublished().config; // 已发布快照；工作副本的读写走 configStore
 }
 
-/** 演示用驱动注册表：fixture 四个连接 + 元数据库里保存的连接（mysql/pg/sqlite 文件）。 */
-export function demoDriver(): DriverRegistry {
+/** 驱动注册表（全部路由的唯一驱动入口）：fixture 四个内置连接 + 元数据库里保存的连接（mysql/pg/sqlite 文件）。 */
+export function getDriverRegistry(): DriverRegistry {
   if (!g.__ontosRegistry) {
     const registry = new DriverRegistry();
     const fixture = SqliteFixtureDriver.seeded();
@@ -45,6 +45,23 @@ export function registerSaved(registry: DriverRegistry, rec: { name: string; typ
   } else {
     registry.register(rec.name, makeSqlDriver({ type: rec.type, host: rec.host, port: rec.port, db_name: rec.db_name, ro_user: rec.ro_user, ro_pass: rec.ro_pass, rw_user: rec.rw_user, rw_pass: rec.rw_pass }));
   }
+}
+
+/** 按连接分组内省、逐表定位（每个连接只内省一次）。找不到表时抛 notFound 产出的错误（调用方定错误类型）。 */
+export async function resolveTableInfos(
+  registry: DriverRegistry,
+  tables: { connection: string; table: string }[],
+  notFound: (msg: string) => Error
+): Promise<{ connection: string; table: TableInfo }[]> {
+  const byConn = new Map<string, TableInfo[]>();
+  for (const { connection } of tables) {
+    if (!byConn.has(connection)) byConn.set(connection, await registry.introspect(connection));
+  }
+  return tables.map(({ connection, table }) => {
+    const info = byConn.get(connection)!.find((t) => t.name === table);
+    if (!info) throw notFound(`表不存在：${connection}.${table}`);
+    return { connection, table: info };
+  });
 }
 
 /** 测试用：每次拿全新的 fixture（不经注册表）。 */

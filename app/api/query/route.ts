@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { queryRequestSchema } from "@/lib/schema/request";
 import { runQuery } from "@/lib/engine/query";
 import { EngineReject } from "@/lib/engine/individual";
-import { demoDriver, loadConfig } from "@/lib/engine/load";
+import { getDriverRegistry } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { ZodError } from "zod";
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   try {
     const query = queryRequestSchema.parse(await bodyJson(req));
     queryJson = JSON.stringify(query);
-    const { rows, path } = await runQuery(loadConfig(), demoDriver(), query);
+    const { rows, path } = await runQuery(getPublished().config, getDriverRegistry(), query);
     safeLog(() => metaStore().logQuery({ version: getPublished().version, query_json: queryJson, row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
     return NextResponse.json({ rows, path });
   } catch (e) {

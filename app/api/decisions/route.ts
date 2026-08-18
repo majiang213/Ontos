@@ -32,7 +32,7 @@ export async function GET() {
   try {
     return NextResponse.json({ decisions: metaStore().listDecisions() });
   } catch (e) {
-    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }
 
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     const connsOf = (t: typeof clsA) => new Set(Object.values(t.sources ?? {}).map((s) => s.connection));
     const shared = [...connsOf(clsA)].filter((c) => connsOf(clsB).has(c));
     if (shared.length > 0 && body.verdict !== "仅名称相似" && body.verdict !== "跳过") {
-      return NextResponse.json({ error: `两个类共享来源 ${shared.join("、")}，不是跨源候选对` }, { status: 422 });
+      return NextResponse.json({ error: `这两个对象有共同来源（${shared.join("、")}），不算疑似重复` }, { status: 422 });
     }
     const sourceOf = (name: string) => Object.keys(d.object_types[name]?.sources ?? {})[0] ?? "";
     const source_a = sourceOf(body.class_a);
@@ -83,7 +83,6 @@ export async function POST(req: Request) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    if (e instanceof Error && e.message.startsWith("配置不合法")) return NextResponse.json({ error: e.message }, { status: 422 });
     return internalError(e);
   }
 }

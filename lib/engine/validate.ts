@@ -2,14 +2,13 @@
 // 违反即抛错：identity 缺映射、派生属性进 fields、关系端点不存在、inform 指向未声明的出站等。
 
 import type { OntologyConfig } from "../schema/config";
+import { findLink } from "./individual";
 
 export function validateSemantics(config: OntologyConfig): void {
-  // 关系名能否从该类解析（正向名在 from 侧，反向名在 to 侧）；目标类随之确定
+  // 关系解析走引擎同一份实现（findLink）：正向名在 from 侧，反向名在 to 侧；目标类随之确定
   const linkTo = (clsName: string, ln: string): string | undefined => {
-    const direct = config.link_types[ln];
-    if (direct && direct.from === clsName) return direct.to;
-    const inv = Object.values(config.link_types).find((l) => l.inverse === ln && l.to === clsName);
-    return inv?.from;
+    const r = findLink(config, clsName, ln);
+    return r ? (r.reversed ? r.link.from : r.link.to) : undefined;
   };
   const linkResolves = (clsName: string, ln: string) => linkTo(clsName, ln) !== undefined;
   /** 过滤树走查：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
