@@ -203,7 +203,7 @@ export default function CanvasPage() {
             setPanelOpen(true);
           }}
         >
-          候选对
+          疑似重复
         </button>
         <button className="btn" onClick={() => setQuestionsOpen((v) => !v)}>验收问题集</button>
       </div>
@@ -254,10 +254,11 @@ export default function CanvasPage() {
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "56vh" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>候选对裁决（{pairs.length} 对）</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 对）</span>
                 <button className="chip" onClick={() => setPanelOpen(false)}>✕</button>
               </div>
-              {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有跨源候选对。单源对象不进裁决，可以直接发布。</div>}
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，请你一对一对定夺。</div>
+              {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
               {pairs.map((p) => (
                 <PairCard
                   key={`${p.class_a}|${p.class_b}`}
@@ -552,16 +553,17 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
           </button>
         )}
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
-        <button className="chip" disabled={busy} onClick={() => decide("同一")}>同一</button>
-        <button className="chip" disabled={busy} onClick={() => decide("部分重叠")}>部分重叠</button>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6 }}>是同一批现实对象吗？选一个结论：</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, alignItems: "center" }}>
+        <button className="chip" title="合并成一个对象，挂多个来源" disabled={busy} onClick={() => decide("同一")}>同一</button>
+        <button className="chip" title="有一部分是同一批：公共字段立上位对象，各自特有字段留下" disabled={busy} onClick={() => decide("部分重叠")}>部分重叠</button>
         <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-          <button className="chip" disabled={busy || !stage.from || !stage.to} onClick={() => decide("阶段")}>阶段</button>
+          <button className="chip" title="同一批东西的不同阶段：合并成一个对象，加状态与转化" disabled={busy || !stage.from || !stage.to} onClick={() => decide("阶段")}>阶段</button>
           <input placeholder="前阶段" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 64, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)" }} />
           <input placeholder="后阶段" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 64, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)" }} />
         </span>
-        <button className="chip" disabled={busy} onClick={() => decide("仅名称相似")}>仅名称相似</button>
-        <button className="chip" disabled={busy} onClick={() => decide("跳过")}>跳过</button>
+        <button className="chip" title="名字像但不相干，各自独立" disabled={busy} onClick={() => decide("仅名称相似")}>仅名称相似</button>
+        <button className="chip" title="本次不判，先放着" disabled={busy} onClick={() => decide("跳过")}>跳过</button>
       </div>
       {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
     </div>
