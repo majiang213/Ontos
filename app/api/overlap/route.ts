@@ -8,13 +8,15 @@ import { demoDriver } from "@/lib/engine/load";
 import { EngineReject, mustCls } from "@/lib/engine/individual";
 import { computeOverlap } from "@/lib/engine/overlap";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson, internalError } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
 
 const bodySchema = z
   .object({ class_a: z.string(), class_b: z.string() })
   .refine((b) => b.class_a !== b.class_b, { message: "自己和自己不算疑似重复" });
 
 export async function POST(req: Request) {
+  const denied = requireWriteAuth(req); // 触发两列全量扫 + 写计数，口径与写端点对齐
+  if (denied) return denied;
   try {
     const { class_a, class_b } = bodySchema.parse(await bodyJson(req));
     const d = getDraft().draft;

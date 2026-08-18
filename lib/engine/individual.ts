@@ -145,11 +145,14 @@ export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unkn
       const hit = ctx.current?.[rec.property];
       if (hit === undefined) {
         if (ctx.currentDerived) {
-          // 派生按需现算；点错名（非派生/不存在）也归一成 EngineReject——值侧错名与键侧同口径（422）
+          // 派生按需现算。只归一「点错名」这一类（非派生/没有该属性 → 422）；
+          // EngineReject 原样透传，源库故障（$link 派生真查库）原样上抛走 500——不拿基础设施故障冒充业务拒答
           try {
             return await ctx.currentDerived(rec.property);
           } catch (e) {
-            throw new EngineReject(e instanceof Error ? e.message : String(e));
+            if (e instanceof EngineReject) throw e;
+            if (e instanceof Error && /不是派生|没有属性|取不到值/.test(e.message)) throw new EngineReject(e.message);
+            throw e;
           }
         }
         throw new EngineReject(`操作数取不到值：${rec.property}`); // 下推层接到这个错就退回内存核对
@@ -227,12 +230,14 @@ function compareOp(actual: unknown, op: string, expected: unknown, dateLike: boo
 
 const num = (v: unknown) => typeof v === "number";
 
-/** 过滤值形状校验：in 的值必须数组；其余运算符与等值位不许数组。查询与动作入口各跑一次，下推与内存共用同一把尺。 */
-export function assertFilterShapes(filter: Filter, trail = "过滤"): void {
+/** 过滤值形状校验：in 的值必须数组；其余运算符与等值位不许数组；$link 嵌套限三层（防深层扇出）。
+ *  查询与动作入口各跑一次，下推与内存共用同一把尺。 */
+export function assertFilterShapes(filter: Filter, trail = "过滤", depth = 0): void {
+  if (depth > 3) throw new EngineReject(`${trail}：$link 嵌套最多三层`);
   for (const [key, v] of Object.entries(filter)) {
     if (key === "$link") {
       for (const [ln, sub] of Object.entries(v as Record<string, unknown>)) {
-        if (sub !== true && sub !== false) assertFilterShapes(sub as Filter, `${trail} 的 $link.${ln}`);
+        if (sub !== true && sub !== false) assertFilterShapes(sub as Filter, `${trail} 的 $link.${ln}`, depth + 1);
       }
       continue;
     }

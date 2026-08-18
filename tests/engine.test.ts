@@ -575,6 +575,21 @@ describe("第五轮修复的回归", () => {
     await expect(q({ object: "equipment", filter: { name: { ne: { property: "dept" } } } })).rejects.toThrow(EngineReject);
   });
 
+  it("派生求值中的源库故障不被误报成 422（基础设施故障原样上抛）", async () => {
+    class Fault extends SqliteFixtureDriver {
+      override async select(c: string, t: string, cols: string[], conds: import("../lib/engine/driver").Condition[], limit?: number) {
+        if (c === "asset_sys") throw new Error("库宕了");
+        return super.select(c, t, cols, conds, limit);
+      }
+    }
+    const driver = new Fault();
+    seedDemo(driver);
+    // in_warranty 派生经 $link covers 查 asset_sys.warranty_card：源库故障必须原样上抛，不能包成 EngineReject
+    const err = await runQuery(config, driver, { object: "equipment", identity: "SN-40000", properties: ["in_warranty"] }).then(() => null, (e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(EngineReject);
+  });
+
   it("date 过滤下推按方言归一：mysql 绑 UTC 串，sqlite 绑秒（读侧与写回同规则）", async () => {
     const seen: unknown[] = [];
     class SpyMysql extends SqliteFixtureDriver {
