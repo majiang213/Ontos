@@ -715,7 +715,7 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
       });
       const data = await r.json();
       if (!r.ok) setError(data.error ?? "裁决被拒"); // 留在面板里，能重试
-      else onDone(`已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）`);
+      else onDone(`已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

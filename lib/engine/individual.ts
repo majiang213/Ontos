@@ -144,7 +144,14 @@ export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unkn
       }
       const hit = ctx.current?.[rec.property];
       if (hit === undefined) {
-        if (ctx.currentDerived) return ctx.currentDerived(rec.property);
+        if (ctx.currentDerived) {
+          // 派生按需现算；点错名（非派生/不存在）也归一成 EngineReject——值侧错名与键侧同口径（422）
+          try {
+            return await ctx.currentDerived(rec.property);
+          } catch (e) {
+            throw new EngineReject(e instanceof Error ? e.message : String(e));
+          }
+        }
         throw new EngineReject(`操作数取不到值：${rec.property}`); // 下推层接到这个错就退回内存核对
       }
       return dataLiteral(hit); // 源库数据：只转换，不抛错

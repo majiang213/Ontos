@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { configSchema } from "../lib/schema/config";
 import { queryRequestSchema } from "../lib/schema/request";
 import { runQuery } from "../lib/engine/query";
+import { EngineReject } from "../lib/engine/individual";
 import { runAction } from "../lib/engine/action";
 import { freshDriver } from "../lib/engine/load";
 import { SqliteFixtureDriver, seedDemo } from "../lib/engine/fixture";
@@ -565,6 +566,13 @@ describe("第五轮修复的回归", () => {
     await runAction(config, liteDriver, { action: "transfer_post", object: "person", identity: "P001", request: { title: "主管", dept: "D02" } });
     const rows2 = await liteDriver.select("hr_sys", "appointment", ["valid_from"], [{ column: "person_no", op: "eq", value: "P001" }]);
     expect(rows2.every((r) => typeof r.valid_from === "number")).toBe(true);
+  });
+
+  it("操作数 { property } 点错名/取不到值是 EngineReject（422），不是裸 500", async () => {
+    // ghost_prop 不存在：值侧错名与键侧同口径
+    await expect(q({ object: "equipment", filter: { name: { ne: { property: "ghost_prop" } } } })).rejects.toThrow(EngineReject);
+    // dept 对部分个体无值（在途设备没映射到部门）：同样 EngineReject 而非裸 Error
+    await expect(q({ object: "equipment", filter: { name: { ne: { property: "dept" } } } })).rejects.toThrow(EngineReject);
   });
 
   it("date 过滤下推按方言归一：mysql 绑 UTC 串，sqlite 绑秒（读侧与写回同规则）", async () => {
