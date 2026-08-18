@@ -37,6 +37,8 @@ export default function CanvasPage() {
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [linkDraft, setLinkDraft] = useState<{ from: string; to: string } | null>(null); // 拖线落地后等待取名的半成品
+  const [selectedLink, setSelectedLink] = useState<string | null>(null); // 点中的边
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -182,7 +184,21 @@ export default function CanvasPage() {
 
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-      <OntologyCanvas objects={objects} links={links} layout={ont?.layout} onSelect={setSelected} onLayoutChange={saveLayout} />
+      <OntologyCanvas
+        objects={objects}
+        links={links}
+        layout={ont?.layout}
+        onSelect={(name) => {
+          setSelected(name);
+          setSelectedLink(null);
+        }}
+        onSelectLink={(name) => {
+          setSelectedLink(name);
+          setSelected(null);
+        }}
+        onConnectRequest={(from, to) => setLinkDraft({ from, to })}
+        onLayoutChange={saveLayout}
+      />
 
       {/* 左上：发布状态 + 入口 */}
       <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -351,8 +367,78 @@ export default function CanvasPage() {
         </div>
       )}
 
+      {/* 右侧：连线表单卡（从节点拖线落地后弹出） */}
+      {linkDraft && (
+        <div className="float-card float-tr" style={{ width: 340 }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>新建关系</span>
+                <button className="chip" onClick={() => setLinkDraft(null)}>✕</button>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px" }}>
+                {linkDraft.from} → {linkDraft.to}。关系得说清靠哪两个字段对上，默认用两边的识别字段。
+              </div>
+              <LinkForm
+                key={`${linkDraft.from}|${linkDraft.to}`}
+                from={linkDraft.from}
+                to={linkDraft.to}
+                objects={ont?.object_types ?? {}}
+                onCancel={() => setLinkDraft(null)}
+                onSubmit={async (body) => {
+                  const ok = await op(body);
+                  if (ok) {
+                    setLinkDraft(null);
+                    showToast("关系已进草稿（发布后生效）");
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 右侧：关系详情卡（点边弹出） */}
+      {selectedLink && ont?.link_types?.[selectedLink] && !linkDraft && (
+        <div className="float-card float-tr" style={{ width: 320 }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{selectedLink}</span>
+                <button className="chip" onClick={() => setSelectedLink(null)}>✕</button>
+              </div>
+              {(() => {
+                const l = ont.link_types[selectedLink] as any;
+                return (
+                  <div style={{ fontSize: 12, lineHeight: 2.2, color: "var(--ink-2)", margin: "6px 0 10px" }}>
+                    <div>{l.from} → {l.to}{l.inverse ? `（反向名 ${l.inverse}）` : ""}</div>
+                    {l.card && <div>基数 {l.card}</div>}
+                    {l.match && <div>配对字段：{l.match.map((m: any) => `${m.from} → ${m.to}`).join("，")}</div>}
+                    {l.transition && <div>状态转化：{l.transition.property} 从「{l.transition.from}」到「{l.transition.to}」</div>}
+                    {l.description && <div style={{ color: "var(--ink-3)" }}>{l.description}</div>}
+                  </div>
+                );
+              })()}
+              <button
+                className="chip"
+                style={{ color: "var(--danger)" }}
+                onClick={async () => {
+                  const ok = await op({ op: "delete_link", name: selectedLink });
+                  if (ok) {
+                    setSelectedLink(null);
+                    showToast(`已删除关系 ${selectedLink}（进草稿，发布后生效）`);
+                  }
+                }}
+              >
+                删除关系
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 右侧：对象编辑卡 */}
-      {sel && !creating && (
+      {sel && !creating && !linkDraft && !selectedLink && (
         <div className="float-card float-tr" style={{ width: 340, maxHeight: "calc(100% - 110px)" }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16, overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
@@ -699,6 +785,68 @@ function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, descripti
       </select>
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }}>加入画布</button>
+        <button type="button" className="btn" onClick={onCancel}>取消</button>
+      </div>
+    </form>
+  );
+}
+
+/** 连线表单：关系名/反向名/基数 + 配对字段（默认两边识别字段）。 */
+function LinkForm({ from, to, objects, onSubmit, onCancel }: { from: string; to: string; objects: Record<string, any>; onSubmit: (body: Record<string, unknown>) => void; onCancel: () => void }) {
+  const fromProps = Object.keys(objects[from]?.properties ?? {});
+  const toProps = Object.keys(objects[to]?.properties ?? {});
+  const idOf = (c: string) => objects[c]?.identity;
+  const [name, setName] = useState(`${from}_${to}`);
+  const [inverse, setInverse] = useState("");
+  const [card, setCard] = useState("");
+  const [description, setDescription] = useState("");
+  const [matchFrom, setMatchFrom] = useState(idOf(from) ?? fromProps[0] ?? "");
+  const [matchTo, setMatchTo] = useState(idOf(to) ?? toProps[0] ?? "");
+  const selStyle: React.CSSProperties = { fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" };
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim() || !matchFrom || !matchTo) return;
+        onSubmit({
+          op: "create_link",
+          name: name.trim(),
+          from,
+          to,
+          inverse: inverse.trim() || undefined,
+          card: card || undefined,
+          description: description.trim() || undefined,
+          match: { from: matchFrom, to: matchTo },
+        });
+      }}
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="关系名（小写，如 belongs_to）" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="反向名（可选，如 has_equipment）" value={inverse} onChange={(e) => setInverse(e.target.value)} />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--ink-2)" }}>
+        <span>配对字段</span>
+        <select value={matchFrom} onChange={(e) => setMatchFrom(e.target.value)} style={selStyle}>
+          {fromProps.map((p) => (
+            <option key={p} value={p}>{from}.{p}</option>
+          ))}
+        </select>
+        <span style={{ color: "var(--ink-3)" }}>↔</span>
+        <select value={matchTo} onChange={(e) => setMatchTo(e.target.value)} style={selStyle}>
+          {toProps.map((p) => (
+            <option key={p} value={p}>{to}.{p}</option>
+          ))}
+        </select>
+      </div>
+      <select value={card} onChange={(e) => setCard(e.target.value)} style={selStyle}>
+        <option value="">基数（可选）</option>
+        <option value="1:1">1:1</option>
+        <option value="1:n">1:n（一对多）</option>
+        <option value="n:1">n:1（多对一）</option>
+        <option value="n:n">n:n（多对多）</option>
+      </select>
+      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="一句话说明（可选）" value={description} onChange={(e) => setDescription(e.target.value)} />
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }}>建好进草稿</button>
         <button type="button" className="btn" onClick={onCancel}>取消</button>
       </div>
     </form>

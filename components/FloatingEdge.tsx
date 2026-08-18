@@ -29,7 +29,7 @@ function rectOf(node: { internals: { positionAbsolute: { x: number; y: number } 
   };
 }
 
-export default function FloatingEdge({ id, source, target, label, style, markerEnd }: EdgeProps) {
+export default function FloatingEdge({ id, source, target, label, style, markerEnd, interactionWidth }: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   if (!sourceNode || !targetNode) return null;
@@ -42,7 +42,7 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
     const path = `M ${cx - loopR},${r.y} A ${loopR} ${loopR} 0 1 1 ${cx + loopR},${r.y}`;
     return (
       <>
-        <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+        <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} interactionWidth={interactionWidth} />
         {label && (
           <EdgeLabelRenderer>
             <div className="edge-label" style={{ transform: `translate(-50%,-100%) translate(${cx}px,${r.y - 2 * loopR - 4}px)` }}>
@@ -64,7 +64,7 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
 
   return (
     <>
-      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} interactionWidth={interactionWidth} />
       {label && (
         <EdgeLabelRenderer>
           <div className="edge-label" style={{ transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)` }}>

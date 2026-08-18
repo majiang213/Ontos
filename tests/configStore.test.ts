@@ -134,6 +134,24 @@ describe("配置存储（工作副本与发布）", async () => {
     expect(() => s.applyOp({ op: "remove_property", object: "equipment", name: "mark" })).toThrow("仍被引用");
   });
 
+  it("手动连线：建关系、删关系；重名与配对字段不存在被拒；被引用的关系删不掉", async () => {
+    const s = await freshStore();
+    s.applyOp({ op: "create_link", name: "located_in", from: "equipment", to: "department", match: { from: "dept", to: "dept_id" }, card: "n:1" });
+    expect(s.getDraft().draft.link_types.located_in.match).toEqual([{ from: "dept", to: "dept_id" }]);
+    expect(s.getDraft().dirty).toBe(true);
+    // 重名拒绝
+    expect(() => s.applyOp({ op: "create_link", name: "located_in", from: "equipment", to: "department", match: { from: "dept", to: "dept_id" } })).toThrow("已存在");
+    // 配对字段不存在拒绝
+    expect(() => s.applyOp({ op: "create_link", name: "bad_link", from: "equipment", to: "department", match: { from: "ghost", to: "dept_id" } })).toThrow("没有属性");
+    // 端点不存在拒绝
+    expect(() => s.applyOp({ op: "create_link", name: "bad2", from: "equipment", to: "ghost", match: { from: "dept", to: "x" } })).toThrow("类不存在");
+    // 被动作引用的转化关系删不掉
+    expect(() => s.applyOp({ op: "delete_link", name: "converted" })).toThrow("仍被引用");
+    // 普通关系能删
+    s.applyOp({ op: "delete_link", name: "located_in" });
+    expect(s.getDraft().draft.link_types.located_in).toBeUndefined();
+  });
+
   it("无改动发布是空操作：版本不变、不落文件", async () => {
     const s = await freshStore();
     const { version } = s.publishDraft();

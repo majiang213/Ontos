@@ -45,8 +45,9 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
   const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
   return (
     <div className={cls}>
-      <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
-      <Handle type="source" position={Position.Bottom} style={{ visibility: "hidden" }} />
+      {/* 上下各一对连接点：平时透明，悬停节点时浮现；从底部拖出、落到别家顶部即连线 */}
+      <Handle type="target" position={Position.Top} />
+      <Handle type="source" position={Position.Bottom} />
       <div className="node-core">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span className="node-title">{data.label}</span>
@@ -88,6 +89,8 @@ export default function OntologyCanvas(props: {
   links: CanvasLink[];
   layout?: Record<string, { x: number; y: number }>;
   onSelect: (name: string) => void;
+  onSelectLink?: (name: string) => void;
+  onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
 }) {
   return (
@@ -102,12 +105,16 @@ function Flow({
   links,
   layout,
   onSelect,
+  onSelectLink,
+  onConnectRequest,
   onLayoutChange,
 }: {
   objects: CanvasObject[];
   links: CanvasLink[];
   layout?: Record<string, { x: number; y: number }>;
   onSelect: (name: string) => void;
+  onSelectLink?: (name: string) => void;
+  onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
 }) {
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
@@ -165,6 +172,7 @@ function Flow({
         label: l.inverse ? `${l.name} / ${l.inverse}` : l.name,
         style: l.kind === "transition" ? { strokeDasharray: "6 4", stroke: "var(--warn)" } : undefined,
         markerEnd: { type: MarkerType.ArrowClosed },
+        interactionWidth: 20, // 线的点击热区放宽，细线也好点
       })),
     [links]
   );
@@ -178,9 +186,13 @@ function Flow({
       fitView
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
-      nodesConnectable={false}
+      nodesConnectable
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}
+      onEdgeClick={(_, edge) => onSelectLink?.(edge.id)}
+      onConnect={(c) => {
+        if (c.source && c.target && c.source !== c.target) onConnectRequest?.(c.source, c.target); // 自连不在表单里做
+      }}
       proOptions={{ hideAttribution: true }}
     >
       <Background gap={20} color="rgba(32,29,24,0.06)" />

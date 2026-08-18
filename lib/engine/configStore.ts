@@ -137,6 +137,31 @@ export function applyOp(input: DraftOp): DraftState {
       writeFileSync(layoutFile(), JSON.stringify(state.layout), "utf8"); // 摆位落小文件，重启不丢
       return state; // 摆位不算本体改动，不碰 dirty
     }
+    case "create_link": {
+      if (!/^[a-z][a-z0-9_]*$/.test(input.name)) throw new DraftReject("关系名必须是小写字母/数字/下划线，字母开头");
+      if (d.link_types[input.name]) throw new DraftReject(`关系已存在：${input.name}`);
+      mustType(d, input.from);
+      mustType(d, input.to);
+      if (!d.object_types[input.from].properties[input.match.from]) throw new DraftReject(`${input.from} 上没有属性 ${input.match.from}`);
+      if (!d.object_types[input.to].properties[input.match.to]) throw new DraftReject(`${input.to} 上没有属性 ${input.match.to}`);
+      if (input.inverse && !/^[a-z][a-z0-9_]*$/.test(input.inverse)) throw new DraftReject("反向名必须是小写字母/数字/下划线，字母开头");
+      d.link_types[input.name] = {
+        from: input.from,
+        to: input.to,
+        inverse: input.inverse || undefined,
+        card: input.card,
+        description: input.description,
+        match: [{ from: input.match.from, to: input.match.to }], // 手动关系只说配对字段；转化关系由裁决产生
+      };
+      break;
+    }
+    case "delete_link": {
+      if (!d.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
+      const refs = linkRefs(d, input.name);
+      if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}`);
+      delete d.link_types[input.name];
+      break;
+    }
     case "import_objects": {
       for (const [name, raw] of Object.entries(input.objects)) {
         if (d.object_types[name]) throw new DraftReject(`类已存在：${name}`);
@@ -182,6 +207,33 @@ function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[
   }
   refs.push(...actionRefs(d, clsName, prop));
   return refs;
+}
+
+/** 关系的引用扫描：动作 pre 的 $link、effect 的 link 项、派生规则里的 $link。删关系前挡一道。 */
+function linkRefs(d: OntologyConfig, linkName: string): string[] {
+  const refs = new Set<string>();
+  const walkFilter = (f: Record<string, unknown> | undefined, trail: string) => {
+    if (!f || typeof f !== "object") return;
+    const linkBlock = f.$link as Record<string, unknown> | undefined;
+    for (const [ln, sub] of Object.entries(linkBlock ?? {})) {
+      if (ln === linkName) refs.add(trail);
+      if (sub && typeof sub === "object") walkFilter(sub as Record<string, unknown>, trail);
+    }
+  };
+  for (const [clsName, cls] of Object.entries(d.object_types)) {
+    for (const [actName, act] of Object.entries(cls.actions ?? {})) {
+      walkFilter(act.pre as Record<string, unknown> | undefined, `动作 ${clsName}.${actName}`);
+      for (const item of act.effect ?? []) {
+        if ("link" in item && item.link === linkName) refs.add(`动作 ${clsName}.${actName}`);
+      }
+    }
+    for (const [p, def] of Object.entries(cls.properties)) {
+      if (!def.derived) continue;
+      const whens = Array.isArray(def.derived) ? def.derived.map((r) => (r as { when?: Record<string, unknown> }).when) : [def.derived as Record<string, unknown>];
+      for (const w of whens) walkFilter(w, `派生属性 ${clsName}.${p}`);
+    }
+  }
+  return [...refs];
 }
 
 /** 过滤的顶层属性键（$ 键不进）。 */
