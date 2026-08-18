@@ -19,7 +19,9 @@ export interface TableInfo {
 }
 
 export interface SourceDriver {
-  readonly dialect?: "sqlite" | "mysql" | "pg"; // 注册表是多方言混合，不带此属性
+  readonly dialect?: "sqlite" | "mysql" | "pg"; // 单驱动带方言；注册表是多方言混合，用 dialectOf 按连接查
+  /** 注册表按连接名查方言；单驱动可不实现（直接读 dialect 属性）。 */
+  dialectOf?(connection: string): "sqlite" | "mysql" | "pg" | undefined;
   // 下推只读查询：取哪些列、按什么条件筛，在库内完成。异步：真库走网络。limit 给时下推行数上限
   select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number): Promise<Record<string, unknown>[]>;
   // 写回三种：插、条件更新（返回受影响行数）、条件删除

@@ -167,6 +167,25 @@ describe("配置存储（工作副本与发布）", () => {
     expect(() => s.rollbackTo(99)).toThrow("版本不存在");
   });
 
+  it("导入整批原子：半途撞名不留下前几个类", async () => {
+    const s = await freshStore();
+    // 第二个类撞已存在的 equipment：整批应拒绝，draft 里不能留下 vendor_ok
+    expect(() =>
+      s.applyOp({
+        op: "import_objects",
+        objects: {
+          vendor_ok: { kind: "thing", properties: {} },
+          equipment: { kind: "thing", properties: {} }, // 撞名
+        },
+      })
+    ).toThrow("类已存在");
+    expect(s.getDraft().draft.object_types.vendor_ok).toBeUndefined(); // 没有部分应用
+    expect(s.getDraft().dirty).toBe(false);
+    // 非法类名同样整批拒
+    expect(() => s.applyOp({ op: "import_objects", objects: { Bad_Name: { kind: "thing", properties: {} } } })).toThrow("类名");
+    expect(s.getDraft().draft.object_types.Bad_Name).toBeUndefined();
+  });
+
   it("放弃草稿：未绑版本的裁决留痕标「已放弃」，不挂到下一次发布", async () => {
     const s = await freshStore();
     const meta = (await import("../lib/meta/store")).metaStore();

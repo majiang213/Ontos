@@ -19,7 +19,7 @@ const quote = quoteFor("sqlite"); // 与方言层同一套引号（含双写转�
 const bind = (params: unknown[]) => params.map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v)) as never[];
 
 export class SqliteFixtureDriver implements SourceDriver {
-  readonly dialect = "sqlite" as const;
+  readonly dialect: "sqlite" | "mysql" | "pg" = "sqlite"; // 测试可覆写模拟他种方言的写回行为
   private dbs = new Map<string, DatabaseSync>();
 
   /** 注册一个连接，返回它的内存库（建表、插种子用）。同名覆盖先关旧句柄。 */

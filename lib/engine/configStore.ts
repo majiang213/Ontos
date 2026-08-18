@@ -160,11 +160,14 @@ export function applyOp(input: DraftOp): DraftState {
       break;
     }
     case "import_objects": {
+      // 先全量预检再一次落草稿：循环里半途抛错不会留下前几个类（孤儿对象会随下次发布混出去）
+      const staged: [string, OntologyConfig["object_types"][string]][] = [];
       for (const [name, raw] of Object.entries(input.objects)) {
         if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new DraftReject(`类名必须是小写字母/数字/下划线，字母开头：${name}`);
         if (d.object_types[name]) throw new DraftReject(`类已存在：${name}`);
-        d.object_types[name] = objectTypeSchema.parse(raw); // 逐类过结构校验
+        staged.push([name, objectTypeSchema.parse(raw)]); // 逐类过结构校验
       }
+      for (const [name, obj] of staged) d.object_types[name] = obj;
       break;
     }
     default:
@@ -318,13 +321,12 @@ function filterTopKeys(f: Record<string, unknown>): string[] {
   return Object.keys(f).filter((k) => !k.startsWith("$"));
 }
 
-/** 派生定义里出现的属性键（when 过滤 + 布尔过滤，含 $link 嵌套的目标侧键归目标类）。 */
+/** 派生定义里出现的本类属性键（when 过滤 + 布尔过滤）。$link 嵌套里的键是目标类的，不收——跨类引用由 referencesOf 的 linkTarget 走查负责。 */
 function derivedFilterKeys(derived: unknown): string[] {
   const keys: string[] = [];
   const walk = (f: Record<string, unknown>) => {
-    for (const [k, v] of Object.entries(f)) {
-      if (k === "$link") for (const sub of Object.values(v as Record<string, unknown>)) if (sub && typeof sub === "object") walk(sub as Record<string, unknown>);
-      else if (!k.startsWith("$")) keys.push(k);
+    for (const k of Object.keys(f)) {
+      if (!k.startsWith("$")) keys.push(k);
     }
   };
   if (Array.isArray(derived)) {

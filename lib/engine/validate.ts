@@ -9,6 +9,22 @@ export function validateSemantics(config: OntologyConfig): void {
     const direct = config.link_types[ln];
     return Boolean((direct && direct.from === clsName) || Object.values(config.link_types).some((l) => l.inverse === ln && l.to === clsName));
   };
+  /** 过滤树走查：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
+  const checkFilterKeys = (clsName: string, f: Record<string, unknown>, trail: string): void => {
+    if (!config.object_types[clsName]) return; // 类不存在由效应目标检查报「不存在的类」，这里不抢话
+    for (const [k, v] of Object.entries(f)) {
+      if (k === "$link") {
+        for (const [ln, sub] of Object.entries(v as Record<string, unknown>)) {
+          if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${trail} 引用了不存在的关系 ${ln}`);
+          const target = config.link_types[ln]?.to ?? Object.values(config.link_types).find((l) => l.inverse === ln && l.to === clsName)?.from;
+          if (target && sub && typeof sub === "object") checkFilterKeys(target, sub as Record<string, unknown>, trail);
+        }
+        continue;
+      }
+      if (k.startsWith("$")) continue;
+      if (!config.object_types[clsName]?.properties[k]) throw new Error(`配置不合法：${trail} 过滤了 ${clsName} 上不存在的属性 ${k}`);
+    }
+  };
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     if (cls.identity && !cls.properties[cls.identity]) {
       throw new Error(`配置不合法：${clsName} 的 identity 指向不存在的属性 ${cls.identity}`);
@@ -53,13 +69,18 @@ export function validateSemantics(config: OntologyConfig): void {
         }
       }
     }
-    // 布尔过滤形态的派生：$link 关系名同样要能从该类解析
+    // 布尔过滤形态的派生：键是类属性、$link 关系名可解析
     for (const [prop, def] of Object.entries(cls.properties)) {
       const der = def.derived;
       if (!der || Array.isArray(der)) continue;
-      const linkBlock = (der as Record<string, unknown>).$link as Record<string, unknown> | undefined;
-      for (const ln of Object.keys(linkBlock ?? {})) {
-        if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${clsName}.${prop} 的派生引用了不存在的关系 ${ln}`);
+      checkFilterKeys(clsName, der as Record<string, unknown>, `${clsName}.${prop} 的派生`);
+    }
+    // 动作的前置与效应过滤同尺
+    for (const [actName, act] of Object.entries(cls.actions ?? {})) {
+      if (act.pre) checkFilterKeys(clsName, act.pre as Record<string, unknown>, `${clsName}.${actName} 的前置`);
+      for (const item of act.effect ?? []) {
+        const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
+        if (op && "filter" in op && op.filter) checkFilterKeys(op.object, op.filter as Record<string, unknown>, `${clsName}.${actName} 的效应过滤`);
       }
     }
   }

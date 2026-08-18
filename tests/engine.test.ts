@@ -547,6 +547,26 @@ describe("第五轮修复的回归", () => {
     expect(byExpr.rows).toEqual(byIso.rows);
   });
 
+  it("写回按方言归一日期：mysql 写 UTC 串，sqlite 写 Unix 秒", async () => {
+    class Mysqlish extends SqliteFixtureDriver {
+      override readonly dialect = "mysql" as const;
+    }
+    const mysqlDriver = new Mysqlish();
+    seedDemo(mysqlDriver);
+    const res = await runAction(config, mysqlDriver, { action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" } });
+    expect(res.ok).toBe(true);
+    // mysql 方言：date 属性写进库里的是 UTC 串
+    const rows = await mysqlDriver.select("hr_sys", "appointment", ["valid_from", "valid_to"], [{ column: "person_no", op: "eq", value: "P001" }]);
+    const newRow = rows.find((r) => typeof r.valid_from === "string");
+    expect(newRow).toBeDefined();
+    expect(String(newRow!.valid_from)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    // sqlite 方言：照旧写 Unix 秒数字
+    const liteDriver = freshDriver();
+    await runAction(config, liteDriver, { action: "transfer_post", object: "person", identity: "P001", request: { title: "主管", dept: "D02" } });
+    const rows2 = await liteDriver.select("hr_sys", "appointment", ["valid_from"], [{ column: "person_no", op: "eq", value: "P001" }]);
+    expect(rows2.every((r) => typeof r.valid_from === "number")).toBe(true);
+  });
+
   it("create 幂等：补偿重发不重复插（已有行的源跳过）", async () => {
     class FaultDriver extends SqliteFixtureDriver {
       fail = true;

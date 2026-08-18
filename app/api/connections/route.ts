@@ -26,10 +26,10 @@ const connectionSchema = z.object({
 
 export async function GET() {
   try {
-    // 密码与 options 不外发（存储明文是演示取舍，出网不是；options 可能装 SSL 私钥）
+    // 密码、options、db_name 不外发（db_name 落库前被 resolve 成服务器绝对路径，路径不出网）
     const connections = metaStore()
       .listConnections()
-      .map(({ ro_pass: _a, rw_pass: _b, options: _c, ...rest }) => rest);
+      .map(({ ro_pass: _a, rw_pass: _b, options: _c, db_name: _d, ...rest }) => rest);
     return NextResponse.json({ connections });
   } catch (e) {
     return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });

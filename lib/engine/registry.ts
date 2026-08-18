@@ -27,6 +27,10 @@ export class DriverRegistry implements SourceDriver {
     return [...this.drivers.keys()];
   }
 
+  dialectOf(connection: string): "sqlite" | "mysql" | "pg" | undefined {
+    return this.drivers.get(connection)?.dialect;
+  }
+
   private resolve(connection: string): SourceDriver {
     const d = this.drivers.get(connection);
     if (!d) throw new EngineReject(`未注册的连接：${connection}`);
