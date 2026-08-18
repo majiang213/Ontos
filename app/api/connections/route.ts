@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { demoDriver, registerSaved } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
 
 const connectionSchema = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_]*$/, "连接名必须是小写字母/数字/下划线"),
@@ -32,7 +32,7 @@ export async function GET() {
       .map(({ ro_pass: _a, rw_pass: _b, options: _c, db_name: _d, ...rest }) => rest);
     return NextResponse.json({ connections });
   } catch (e) {
-    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }
 
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "连接形状不合法", issues: e.issues }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }
 
@@ -100,6 +100,6 @@ export async function DELETE(req: Request) {
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }

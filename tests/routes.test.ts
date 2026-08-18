@@ -27,13 +27,30 @@ afterEach(async () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-async function post(path: string, body?: string) {
+async function post(path: string, body?: string, headers?: Record<string, string>) {
   const mod = await import(`../app/api/${path}/route`);
   const res = await mod.POST(
-    new Request(`http://x/api/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: body ?? "{}" }) as never
+    new Request(`http://x/api/${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: body ?? "{}" }) as never
   );
   return { status: res.status, data: await res.json() };
 }
+
+describe("写端点令牌闸（ONTOS_TOKEN）", () => {
+  it("设了令牌：写端点无令牌 401、有令牌放行；只读端点不拦；不设令牌全放开", async () => {
+    // 先验默认放开（演示默认）
+    expect((await post("publish", "{}")).status).toBe(200);
+    process.env.ONTOS_TOKEN = "t0ken";
+    try {
+      expect((await post("publish", "{}")).status).toBe(401); // 无令牌
+      expect((await post("publish", "{}", { authorization: "Bearer wrong" })).status).toBe(401); // 错令牌
+      expect((await post("publish", "{}", { authorization: "Bearer t0ken" })).status).toBe(200); // 对令牌
+      // 只读查询不设闸
+      expect((await post("query", JSON.stringify({ object: "equipment", filter: { status: "scrapped" } }))).status).toBe(200);
+    } finally {
+      delete process.env.ONTOS_TOKEN;
+    }
+  });
+});
 
 describe("错误分层：400 / 422 / 500", () => {
   it("query：坏 JSON 400；未知类 422；驱动故障 500", async () => {
