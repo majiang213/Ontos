@@ -47,6 +47,10 @@ export async function POST(req: Request) {
     const clsA = d.object_types[body.class_a];
     const clsB = d.object_types[body.class_b];
     if (!clsA || !clsB) return NextResponse.json({ error: "类不存在，先刷新画布" }, { status: 422 });
+    // 与候选对入口同口径：两边都得有源（无源的手工对象不进裁决）
+    if (Object.keys(clsA.sources ?? {}).length === 0 || Object.keys(clsB.sources ?? {}).length === 0) {
+      return NextResponse.json({ error: "无源对象不进裁决（先给它挂来源）" }, { status: 422 });
+    }
     // 裁决只对跨源候选有意义：同源两个类不在这条流程里（候选对入口本就只列跨源）
     const connsOf = (t: typeof clsA) => new Set(Object.values(t.sources ?? {}).map((s) => s.connection));
     const shared = [...connsOf(clsA)].filter((c) => connsOf(clsB).has(c));

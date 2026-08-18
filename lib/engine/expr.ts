@@ -81,8 +81,9 @@ export function resolveLiteral(v: unknown): unknown {
   if (Boolean(isDateExpr(s))) return evalDateExpr(s);
   if (EXPR_LIKE.test(s)) throw new Error(`非法表达式：${s}`);
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    // 兼容 MySQL dateStrings 的 "YYYY-MM-DD HH:mm:ss"：按 UTC 算（引擎的日期契约）
-    const iso = s.includes("T") ? s : s.includes(" ") ? `${s.replace(" ", "T")}Z` : s;
+    // 日期契约是 UTC：空格型（MySQL dateStrings）补 T…Z；T 型没写时区后缀的也按 UTC
+    const hasZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
+    const iso = s.includes("T") ? (hasZone ? s : `${s}Z`) : s.includes(" ") ? `${s.replace(" ", "T")}Z` : s;
     const ms = Date.parse(iso);
     if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${s}`);
     return Math.floor(ms / 1000);

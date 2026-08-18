@@ -472,6 +472,7 @@ export function rollbackTo(version: number): { version: number } {
   renameSync(`${target}.tmp`, target);
   store.published = { config, version: newVersion };
   store.draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: loadLayout() };
+  fillDecisionVersions(newVersion); // 回滚也是一次发布：未绑版本的裁决挂到它
   return { version: newVersion };
 }
 

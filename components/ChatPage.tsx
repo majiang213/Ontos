@@ -9,7 +9,7 @@ import { ArrowUpRight } from "@phosphor-icons/react";
 interface Msg {
   role: "user" | "agent";
   text?: string;
-  answer?: { query: Record<string, unknown>; rows: Record<string, unknown>[]; path: string[]; question?: string };
+  answer?: { query: Record<string, unknown>; rows: Record<string, unknown>[]; path: string[]; question?: string; total?: number }; // total：裁剪持久化前的真实总数
   actionResult?: { ok: boolean; error?: string; projections: { source: string; table: string; op: string; ok: boolean; error?: string; note?: string }[] };
 }
 
@@ -66,7 +66,7 @@ export default function ChatPage() {
       // 结果集不长久留存（数据边界）：答案卡只留前 20 行做回看，完整数据永远在源库现查
       const trimmed = sessions.map((s) => ({
         ...s,
-        msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, rows: m.answer.rows.slice(0, 20) } } : m)),
+        msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, total: m.answer.total ?? m.answer.rows.length, rows: m.answer.rows.slice(0, 20) } } : m)),
       }));
       localStorage.setItem(STORE_KEY, JSON.stringify(trimmed));
     } catch {
@@ -308,7 +308,7 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
   return (
     <div className="bezel">
       <div className="bezel-core" style={{ padding: 14 }}>
-        <div className="answer-head">共 {a.rows.length} 条</div>
+        <div className="answer-head">共 {a.total ?? a.rows.length} 条</div>
         {cols.length > 0 && (
           <table className="answer-table">
             <thead>

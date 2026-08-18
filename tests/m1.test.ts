@@ -44,10 +44,20 @@ describe("方言 SQL 生成", () => {
     expect(plain.sql).not.toContain("IS NULL");
   });
 
-  it("contains 转义通配符", () => {
+  it("contains 转义通配符；mysql 的 ESCAPE 字面量写两个反斜杠", () => {
     const { sql, params } = buildStatement("mysql", "select", "t", { conditions: [{ column: "name", op: "contains", value: "50%" }] });
-    expect(sql).toContain("ESCAPE");
+    expect(sql).toContain(`ESCAPE '\\\\'`); // SQL 文本里两个反斜杠，MySQL 解析成一个转义符
     expect(params[0]).toBe("%50\\%%");
+    const sqlite = buildStatement("pg", "select", "t", { conditions: [{ column: "name", op: "contains", value: "50%" }] });
+    expect(sqlite.sql).toContain(`ESCAPE '\\'`); // pg/sqlite 一个就够
+  });
+
+  it("PG 日期列按串返回：TIMESTAMPTZ 转 ISO，DATE/TIMESTAMP 原样", async () => {
+    const pg = (await import("pg")).default;
+    const ts = pg.types.getTypeParser(1184)("2026-08-18 10:00:00+00");
+    expect(ts).toBe("2026-08-18T10:00:00.000Z");
+    expect(pg.types.getTypeParser(1082)("2026-08-18")).toBe("2026-08-18");
+    expect(pg.types.getTypeParser(1114)("2026-08-18 10:00:00")).toBe("2026-08-18 10:00:00");
   });
 });
 

@@ -4,6 +4,11 @@
 import type { OntologyConfig } from "../schema/config";
 
 export function validateSemantics(config: OntologyConfig): void {
+  // 关系名能否从该类解析（正向名在 from 侧，反向名在 to 侧）
+  const linkResolves = (clsName: string, ln: string) => {
+    const direct = config.link_types[ln];
+    return Boolean((direct && direct.from === clsName) || Object.values(config.link_types).some((l) => l.inverse === ln && l.to === clsName));
+  };
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     if (cls.identity && !cls.properties[cls.identity]) {
       throw new Error(`配置不合法：${clsName} 的 identity 指向不存在的属性 ${cls.identity}`);
@@ -33,13 +38,28 @@ export function validateSemantics(config: OntologyConfig): void {
           const entry = cls.sources?.[src];
           if (!entry) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则指向不存在的源条目 ${src}`);
           if (cond && typeof cond === "object") {
-            for (const k of Object.keys(cond as Record<string, unknown>)) {
-              if (k === "$link") continue;
+            for (const [k, sub] of Object.entries(cond as Record<string, unknown>)) {
+              if (k === "$link") {
+                // $link 的关系名必须能从该类解析（正向名或反向名）
+                for (const ln of Object.keys(sub as Record<string, unknown>)) {
+                  if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则引用了不存在的关系 ${ln}`);
+                }
+                continue;
+              }
               if (k.startsWith("$")) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则里 ${src} 的过滤不支持 ${k}`);
               if (!entry.fields[k]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则在 ${src} 上过滤未映射的属性 ${k}`);
             }
           }
         }
+      }
+    }
+    // 布尔过滤形态的派生：$link 关系名同样要能从该类解析
+    for (const [prop, def] of Object.entries(cls.properties)) {
+      const der = def.derived;
+      if (!der || Array.isArray(der)) continue;
+      const linkBlock = (der as Record<string, unknown>).$link as Record<string, unknown> | undefined;
+      for (const ln of Object.keys(linkBlock ?? {})) {
+        if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${clsName}.${prop} 的派生引用了不存在的关系 ${ln}`);
       }
     }
   }

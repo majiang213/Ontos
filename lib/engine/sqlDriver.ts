@@ -49,6 +49,17 @@ export function buildInsert(dialect: "mysql" | "pg", table: string, row: Record<
   return { sql: renderPlaceholders(sql, dialect), params: cols.map((c) => row[c]) };
 }
 
+// PG 的日期列按串返回，别给 JS Date（引擎的值契约是 ISO 串/Unix 秒）：
+// DATE(1082)/TIMESTAMP(1114) 原样（resolveLiteral 按 UTC 补 Z）；TIMESTAMPTZ(1184) 带时区偏移，转 ISO。
+pg.types.setTypeParser(1082, (v: string) => v);
+pg.types.setTypeParser(1114, (v: string) => v);
+pg.types.setTypeParser(1184, (v: string) => {
+  // pg 给 "2026-08-18 10:00:00.123456+00"：补 T、裁微秒、时区偏移补齐分钟，再转 ISO
+  const norm = v.replace(" ", "T").replace(/\.\d+(?=[+-])/, "").replace(/([+-]\d{2})$/, "$1:00");
+  const ms = Date.parse(norm);
+  return Number.isNaN(ms) ? v : new Date(ms).toISOString();
+});
+
 const INTROSPECT_MYSQL = `SELECT TABLE_NAME AS name, COLUMN_NAME AS \`column\`, COLUMN_TYPE AS type, COLUMN_KEY AS keyflag
   FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`;
 const INTROSPECT_PG = `SELECT c.table_name AS name, c.column_name AS column, c.data_type AS type,

@@ -395,9 +395,11 @@ async function project(cls: Cls, ind: Individual, requested: string[] | undefine
 
 async function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<QueryRequest["aggregate"]>, env: Env, ctx: EvalContext, path: string[]) {
   const views = new Map<string, Record<string, unknown>>(); // 每个个体只算一遍（派生含 $link 查询）
+  // 只算分组键与指标字段用得到的派生：没引用的派生不算（省 N+1，也免被无关坏派生拖累）
+  const only = new Set([...agg.group_by, ...agg.metrics.flatMap((m) => Object.values(m)).filter((f) => f !== "*")]);
   const viewOf = async (ind: Individual) => {
     let v = views.get(ind.key);
-    if (!v) { v = await currentOf(cls, ind, env, ctx); views.set(ind.key, v); }
+    if (!v) { v = await currentOf(cls, ind, env, ctx, only); views.set(ind.key, v); }
     return v;
   };
   const groups = new Map<string, { key: Record<string, unknown>; members: Individual[] }>();

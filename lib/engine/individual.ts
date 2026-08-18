@@ -304,11 +304,13 @@ export function currentView(cls: Cls, ind: Individual): Record<string, unknown> 
   return out;
 }
 
-/** 个体的合并属性视图（含派生；聚合、动作效应取值用）。 */
-export async function currentOf(cls: Cls, ind: Individual, env: Env, ctx: EvalContext): Promise<Record<string, unknown>> {
+/** 个体的合并属性视图（含派生；聚合、动作效应取值用）。only 给了就只算用到的派生——$link 派生逐个体查源，全算是 N+1。 */
+export async function currentOf(cls: Cls, ind: Individual, env: Env, ctx: EvalContext, only?: Set<string>): Promise<Record<string, unknown>> {
   const out = currentView(cls, ind);
   for (const [prop, def] of Object.entries(cls.def.properties)) {
-    if (def.derived) out[prop] = await evalDerived(cls, ind, prop, env, ctx);
+    if (!def.derived) continue;
+    if (only && !only.has(prop)) continue;
+    out[prop] = await evalDerived(cls, ind, prop, env, ctx);
   }
   return out;
 }

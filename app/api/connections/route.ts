@@ -52,6 +52,10 @@ export async function POST(req: Request) {
     }
     const registry = demoDriver();
     const previous = metaStore().listConnections().find((c) => c.name === rec.name); // 重存场景的旧配置，失败要还回来
+    // 内置演示源（fixture，不在元库）不许同名覆盖——覆盖了失败回滚时还回不来
+    if (!previous && registry.has(rec.name)) {
+      return NextResponse.json({ error: `${rec.name} 是内置演示源，换个名字` }, { status: 422 });
+    }
     registerSaved(registry, rec); // 先注册（registry 会关掉同名的旧驱动），测试与内省都走注册表
     if (test) {
       try {

@@ -1,9 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
-const sans = Geist({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
-const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Ontos 安托斯 — 对话式本体工作台",
@@ -11,8 +7,9 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // 字体只用 globals.css 的令牌栈：不引 next/font（构建期要联网下载，且注入的同名变量会顶掉设计令牌）
   return (
-    <html lang="zh-CN" className={`${sans.variable} ${mono.variable}`}>
+    <html lang="zh-CN">
       <body>{children}</body>
     </html>
   );

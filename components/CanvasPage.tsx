@@ -139,6 +139,7 @@ export default function CanvasPage() {
       setConnecting(false);
       setQuestionsOpen(false);
       setPanelOpen(false);
+      setDrawerOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -273,7 +274,8 @@ export default function CanvasPage() {
               try {
                 const r = await fetch("/api/versions");
                 const data = await r.json();
-                setVersions(data.versions ?? []);
+                // 用户可能已去开别的卡（openTl 会把 versions 置 null）：只在本卡还开着时填数
+                setVersions((cur) => (cur === null ? null : (data.versions ?? [])));
               } catch (e) {
                 showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
               }
@@ -622,8 +624,8 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象） */}
-      {drawerOpen && (
+      {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象；最大化时藏起） */}
+      {!maximized && drawerOpen && (
         <div className="drawer">
           {selectedTables.size > 0 && (
             <div style={{ position: "sticky", top: 0, zIndex: 5, paddingBottom: 10, background: "var(--bg-deep)" }}>
