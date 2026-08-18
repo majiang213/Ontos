@@ -567,6 +567,34 @@ describe("第五轮修复的回归", () => {
     expect(rows2.every((r) => typeof r.valid_from === "number")).toBe(true);
   });
 
+  it("date 过滤下推按方言归一：mysql 绑 UTC 串，sqlite 绑秒（读侧与写回同规则）", async () => {
+    const seen: unknown[] = [];
+    class SpyMysql extends SqliteFixtureDriver {
+      override readonly dialect = "mysql" as const;
+      override async select(c: string, t: string, cols: string[], conds: import("../lib/engine/driver").Condition[], limit?: number) {
+        for (const c2 of conds) seen.push(c2.value);
+        return super.select(c, t, cols, conds, limit);
+      }
+    }
+    const mysqlDriver = new SpyMysql();
+    seedDemo(mysqlDriver);
+    // 只断言绑参形态（fixture 内层是 INTEGER 秒，mysql 方言的串绑参查不到行是当然的——这里验的是下推归一）
+    await runQuery(config, mysqlDriver, { object: "assignment", filter: { valid_from: { gte: "2025-01-01" } } });
+    expect(seen.some((v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v as string))).toBe(true);
+    // sqlite 对照：绑定的是 Unix 秒数字
+    const seen2: unknown[] = [];
+    class SpySqlite extends SqliteFixtureDriver {
+      override async select(c: string, t: string, cols: string[], conds: import("../lib/engine/driver").Condition[], limit?: number) {
+        for (const c2 of conds) seen2.push(c2.value);
+        return super.select(c, t, cols, conds, limit);
+      }
+    }
+    const liteDriver = new SpySqlite();
+    seedDemo(liteDriver);
+    await runQuery(config, liteDriver, { object: "assignment", filter: { valid_from: { gte: "2025-01-01" } } });
+    expect(seen2.some((v) => typeof v === "number")).toBe(true);
+  });
+
   it("create 幂等：补偿重发不重复插（已有行的源跳过）", async () => {
     class FaultDriver extends SqliteFixtureDriver {
       fail = true;

@@ -61,18 +61,24 @@ export async function POST(req: Request) {
     const source_a = sourceOf(body.class_a);
     const source_b = sourceOf(body.class_b);
     adjudicate({ class_a: body.class_a, class_b: body.class_b }, body.verdict, body.stage_names);
-    metaStore().recordDecision({
-      class_a: body.class_a,
-      class_b: body.class_b,
-      source_a,
-      source_b,
-      llm_advice: body.llm_advice,
-      rate: body.evidence?.rate,
-      evidence: body.evidence,
-      verdict: body.verdict,
-      decided_by: body.decided_by,
-    });
-    return NextResponse.json({ ok: true });
+    // 留痕失败如实告诉调用方（裁决已进草稿），不装成功也不把请求炸成 500
+    let recorded = true;
+    try {
+      metaStore().recordDecision({
+        class_a: body.class_a,
+        class_b: body.class_b,
+        source_a,
+        source_b,
+        llm_advice: body.llm_advice,
+        rate: body.evidence?.rate,
+        evidence: body.evidence,
+        verdict: body.verdict,
+        decided_by: body.decided_by,
+      });
+    } catch {
+      recorded = false;
+    }
+    return NextResponse.json({ ok: true, recorded });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });

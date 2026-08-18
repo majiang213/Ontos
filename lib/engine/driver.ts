@@ -11,6 +11,7 @@ export interface Condition {
   op: CondOp;
   value?: unknown; // in 时是数组；null / notnull 不带值
   nullLoose?: boolean; // 「空=至今」：只对 date 类型属性为 true（gt/gte 时 NULL 也算满足）
+  dateLike?: boolean; // 该条件作用在 date 属性上：值是 Unix 秒，下推活体库前按方言归一（toColumnValue）
 }
 
 export interface TableInfo {
@@ -49,6 +50,18 @@ export function renderPlaceholders(sql: string, dialect: "sqlite" | "mysql" | "p
   if (dialect !== "pg") return sql;
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);
+}
+
+/* ---------- 方言值归一 ---------- */
+
+/** 写库/下推的日期值按方言归一：引擎内部是 Unix 秒，活体 mysql/pg 的 DATETIME/TIMESTAMP 列要 UTC 串；sqlite 演示库是 INTEGER 列，用秒。 */
+export function toColumnValue(v: unknown, type: string | undefined, dialect: string | undefined): unknown {
+  if (type === "date" && typeof v === "number" && (dialect === "mysql" || dialect === "pg")) {
+    const d = new Date(v * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  }
+  return v;
 }
 
 /* ---------- 脱敏采样 ---------- */

@@ -4,7 +4,7 @@
 
 import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../schema/config";
 import type { ActionRequest } from "../schema/request";
-import type { SourceDriver } from "./driver";
+import { toColumnValue, type SourceDriver } from "./driver";
 import {
   assertFilterShapes,
   currentView,
@@ -18,7 +18,7 @@ import {
   type Env,
   type Individual,
 } from "./individual";
-import { formatUtc, generateValue, resolveValue, type EvalContext } from "./expr";
+import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "./expr";
 import { createEnv, selectIndividuals } from "./query";
 
 export interface ProjectionRecord {
@@ -251,14 +251,6 @@ function rejectIfDerived(cls: Cls, prop: string) {
 
 const err = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** 写库的日期值按方言归一：引擎内部是 Unix 秒，活体 mysql/pg 的 DATETIME/TIMESTAMP 列要 UTC 串；sqlite 演示库是 INTEGER 列，写秒。 */
-function toColumnValue(v: unknown, type: string | undefined, dialect: string | undefined): unknown {
-  if (type === "date" && typeof v === "number" && (dialect === "mysql" || dialect === "pg")) {
-    return formatUtc(v, "yyyy-MM-dd HH:mm:ss");
-  }
-  return v;
-}
-
 function dialectOfConn(driver: SourceDriver, connection: string): string | undefined {
   return driver.dialectOf?.(connection) ?? driver.dialect;
 }
@@ -307,9 +299,17 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
             // MySQL 同值不改记 0 行：按键重读核对，与写入的列值比对（方言归一后的值），已是目标值算幂等命中
             const reread = await driver.select(entry.connection, entry.table, [keyCol, ...changed.map((p) => entry.fields[p])], [{ column: keyCol, op: "eq", value: row[keyCol] }]);
             const cur = reread[0];
+            // 读回与写入的形态可能不同（如 MySQL DATE 列读出日期串、写入带时分秒）：过同一道字面量归一再比
+            const norm = (x: unknown) => {
+              try {
+                return resolveLiteral(x);
+              } catch {
+                return x;
+              }
+            };
             const already = cur != null && changed.every((prop) => {
               const col = entry.fields[prop];
-              return cur[col] === set[col] || (cur[col] ?? null) === (set[col] ?? null);
+              return norm(cur[col]) === norm(set[col]) || (cur[col] ?? null) === (set[col] ?? null);
             });
             out.push(
               already

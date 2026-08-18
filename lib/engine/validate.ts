@@ -4,11 +4,14 @@
 import type { OntologyConfig } from "../schema/config";
 
 export function validateSemantics(config: OntologyConfig): void {
-  // 关系名能否从该类解析（正向名在 from 侧，反向名在 to 侧）
-  const linkResolves = (clsName: string, ln: string) => {
+  // 关系名能否从该类解析（正向名在 from 侧，反向名在 to 侧）；目标类随之确定
+  const linkTo = (clsName: string, ln: string): string | undefined => {
     const direct = config.link_types[ln];
-    return Boolean((direct && direct.from === clsName) || Object.values(config.link_types).some((l) => l.inverse === ln && l.to === clsName));
+    if (direct && direct.from === clsName) return direct.to;
+    const inv = Object.values(config.link_types).find((l) => l.inverse === ln && l.to === clsName);
+    return inv?.from;
   };
+  const linkResolves = (clsName: string, ln: string) => linkTo(clsName, ln) !== undefined;
   /** 过滤树走查：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
   const checkFilterKeys = (clsName: string, f: Record<string, unknown>, trail: string): void => {
     if (!config.object_types[clsName]) return; // 类不存在由效应目标检查报「不存在的类」，这里不抢话
@@ -16,7 +19,7 @@ export function validateSemantics(config: OntologyConfig): void {
       if (k === "$link") {
         for (const [ln, sub] of Object.entries(v as Record<string, unknown>)) {
           if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${trail} 引用了不存在的关系 ${ln}`);
-          const target = config.link_types[ln]?.to ?? Object.values(config.link_types).find((l) => l.inverse === ln && l.to === clsName)?.from;
+          const target = linkTo(clsName, ln);
           if (target && sub && typeof sub === "object") checkFilterKeys(target, sub as Record<string, unknown>, trail);
         }
         continue;
@@ -56,9 +59,11 @@ export function validateSemantics(config: OntologyConfig): void {
           if (cond && typeof cond === "object") {
             for (const [k, sub] of Object.entries(cond as Record<string, unknown>)) {
               if (k === "$link") {
-                // $link 的关系名必须能从该类解析（正向名或反向名）
-                for (const ln of Object.keys(sub as Record<string, unknown>)) {
+                // $link 的关系名必须能从该类解析；嵌套过滤的键按目标类接着校
+                for (const [ln, nested] of Object.entries(sub as Record<string, unknown>)) {
                   if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则引用了不存在的关系 ${ln}`);
+                  const target = linkTo(clsName, ln);
+                  if (target && nested && typeof nested === "object") checkFilterKeys(target, nested as Record<string, unknown>, `${clsName}.${prop} 的派生规则`);
                 }
                 continue;
               }

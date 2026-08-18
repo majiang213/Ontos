@@ -4,7 +4,7 @@
 import type { Filter, LinkType, OntologyConfig } from "../schema/config";
 import { FILTER_OPS } from "../schema/config";
 import type { ExpandNode, QueryRequest } from "../schema/request";
-import type { Condition, SourceDriver } from "./driver";
+import { toColumnValue, type Condition, type SourceDriver } from "./driver";
 import type { EvalContext } from "./expr";
 import {
   assertFilterShapes,
@@ -169,7 +169,7 @@ async function toConditions(column: string, cv: unknown, ctx: EvalContext, dateL
       if (!isOpObject) {
         // 裸的 { property, from } 视为等值；取不到值就留内存核对
         const v = await resolveOperand(cv, ctx);
-        return v === undefined ? null : [{ column, op: "eq", value: v }];
+        return v === undefined ? null : [{ column, op: "eq", value: v, dateLike: dateLike || undefined }];
       }
       const conds: Condition[] = [];
       for (const [op, operand] of Object.entries(rec)) {
@@ -180,14 +180,14 @@ async function toConditions(column: string, cv: unknown, ctx: EvalContext, dateL
           else if (op === "ne") conds.push({ column, op: "notnull" });
           else return null; // 与 null 比大小：下推会改变语义（空按至今），留内存核对
         } else {
-          conds.push({ column, op: op as Condition["op"], value: v, nullLoose: dateLike || undefined });
+          conds.push({ column, op: op as Condition["op"], value: v, nullLoose: dateLike || undefined, dateLike: dateLike || undefined });
         }
       }
       return conds;
     }
     if (cv === null) return [{ column, op: "null" }];
     const v = await resolveOperand(cv, ctx);
-    return v === undefined ? null : [{ column, op: "eq", value: v }];
+    return v === undefined ? null : [{ column, op: "eq", value: v, dateLike: dateLike || undefined }];
   } catch {
     return null; // 操作数取不到值（如依赖 current），留内存核对
   }
@@ -215,7 +215,14 @@ export async function selectIndividuals(env: Env, clsName: string, opts: SelectO
     else for (const p of need) { const c = entry.fields[p]; if (c) cols.add(c); }
     const conds: Condition[] = [...(pushed.get(srcName) ?? [])];
     if (opts.identity !== undefined) conds.push({ column: keyCol, op: "eq", value: opts.identity });
-    const rows = await env.driver.select(entry.connection, entry.table, [...cols], conds, pushLimit);
+    // date 条件的值是 Unix 秒：下推活体库前按连接方言归一（读侧与写回同一规则）
+    const dialect = env.driver.dialectOf?.(entry.connection) ?? env.driver.dialect;
+    const bound = conds.map((c) => {
+      if (!c.dateLike || c.value === undefined) return c;
+      const v = Array.isArray(c.value) ? c.value.map((x) => toColumnValue(x, "date", dialect)) : toColumnValue(c.value, "date", dialect);
+      return { ...c, value: v };
+    });
+    const rows = await env.driver.select(entry.connection, entry.table, [...cols], bound, pushLimit);
     opts.path?.push(
       `下推 ${entry.connection}.${entry.table}：取 ${[...cols].join("、")}${conds.length ? `，带条件 ${conds.length} 条` : ""}${pushLimit ? `，limit ${pushLimit} 下推` : ""}，命中 ${rows.length} 行（只读）`
     );
