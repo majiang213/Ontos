@@ -36,6 +36,7 @@ export default function CanvasPage() {
   const [versions, setVersions] = useState<{ version: number; createdAt: string }[] | null>(null);
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -95,24 +96,32 @@ export default function CanvasPage() {
 
   /** 多选表 → 生成对象 → 直接上画布并收起抽屉。 */
   const generateFromTables = async () => {
-    const tables = [...selectedTables].map((key) => {
-      const [connection, table] = key.split(".");
-      return { connection, table };
-    });
-    const r = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tables }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      showToast(data.error ?? "生成失败");
-      return;
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const tables = [...selectedTables].map((key) => {
+        const [connection, table] = key.split(".");
+        return { connection, table };
+      });
+      const r = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tables }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        showToast(data.error ?? "生成失败");
+        return;
+      }
+      showToast(`已生成对象：${data.created.join("、")}（草稿，发布后生效）`);
+      setSelectedTables(new Set());
+      setDrawerOpen(false);
+      await refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(false);
     }
-    showToast(`已生成对象：${data.created.join("、")}（草稿，发布后生效）`);
-    setSelectedTables(new Set());
-    setDrawerOpen(false);
-    await refresh();
   };
 
   const objects: CanvasObject[] = useMemo(
@@ -482,14 +491,16 @@ interface PairAdvice {
   reason: string;
 }
 
-/** 裁决面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。 */
+/** 裁决面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。失败留在面板里可重试。 */
 function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
-  const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number } | null>(null);
+  const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
   const [stage, setStage] = useState({ from: "", to: "" });
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const decide = async (verdict: string) => {
     setBusy(true);
+    setError(null);
     try {
       const r = await fetch("/api/decisions", {
         method: "POST",
@@ -500,12 +511,14 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
           verdict,
           stage_names: verdict === "阶段" && stage.from && stage.to ? stage : undefined,
           llm_advice: `${pair.tendency}：${pair.reason}`,
-          rate: rate?.rate,
+          evidence: rate ?? undefined, // 证据快照：归一化规则、样本量、交集数、比率
         }),
       });
       const data = await r.json();
-      if (!r.ok) onDone(data.error ?? "裁决被拒");
+      if (!r.ok) setError(data.error ?? "裁决被拒"); // 留在面板里，能重试
       else onDone(`已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -550,6 +563,7 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
         <button className="chip" disabled={busy} onClick={() => decide("仅名称相似")}>仅名称相似</button>
         <button className="chip" disabled={busy} onClick={() => decide("跳过")}>跳过</button>
       </div>
+      {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

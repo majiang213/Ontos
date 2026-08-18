@@ -28,6 +28,8 @@ export interface SourceDriver {
   // M1：内省表结构（不取业务行）与脱敏采样（3 行）
   introspect?(connection: string): Promise<TableInfo[]>;
   sample?(connection: string, table: string, limit?: number): Promise<Record<string, unknown>[]>;
+  // 资源释放：连接删除/重注册时调用
+  close?(): Promise<void>;
 }
 
 /* ---------- 方言 ---------- */

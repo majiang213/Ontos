@@ -2,6 +2,7 @@
 // 列出类 / 读取一个类 / 检索。description 供阅读；填进 JSON 的是 name。
 
 import type { OntologyConfig } from "../schema/config";
+import { EngineReject } from "./individual";
 
 export interface ClassListItem {
   name: string;
@@ -33,7 +34,7 @@ export interface ClassView {
 /** 视图二：读取一个类。 */
 export function readClass(config: OntologyConfig, name: string): ClassView {
   const t = config.object_types[name];
-  if (!t) throw new Error(`配置中没有类：${name}`);
+  if (!t) throw new EngineReject(`配置中没有类：${name}`);
   const relations: ClassView["relations"] = [];
   for (const [linkName, l] of Object.entries(config.link_types)) {
     if (l.from === name) relations.push({ name: linkName, description: l.description, to: l.to });

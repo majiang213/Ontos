@@ -10,10 +10,16 @@ import { applyVerdict } from "../lib/engine/adjudicate";
 import { freshDriver } from "../lib/engine/load";
 import { freshMetaStore } from "../lib/meta/store";
 import { configSchema, type OntologyConfig } from "../lib/schema/config";
+import { validateSemantics } from "../lib/engine/validate";
 import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 
 const seedConfig = () => configSchema.parse(load(readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8")));
+
+/** 裁决产物必须能过发布闸（结构 + 语义），否则草稿发布不出去。 */
+function assertPublishable(d: OntologyConfig) {
+  validateSemantics(configSchema.parse(structuredClone(d)));
+}
 
 describe("归一化", () => {
   it("序列号：去横杠统一大写；手机号：去 +86 与分隔符；身份证 X 大写", () => {
@@ -99,6 +105,20 @@ describe("裁决写草稿", () => {
     expect(Object.keys(d.object_types.po_a.sources!)).toEqual(["sa", "sb"]);
     expect(d.object_types.po_a.sources!.sb.fields.sn).toBe("serial_no"); // 同名属性对上 B 的列
     expect(d.object_types.po_a.properties.extra_b).toBeDefined(); // 特有列加成属性
+    assertPublishable(d);
+  });
+
+  it("同一：识别字段不同名时，B 源条目的 fields 键改写为 A 的识别属性", () => {
+    const d = twoClasses();
+    d.object_types.po_b.identity = "serial_no";
+    d.object_types.po_b.properties = { serial_no: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } };
+    d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", name: "name" };
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "同一");
+    const A = d.object_types.po_a;
+    expect(A.properties.serial_no).toBeUndefined(); // B 的识别属性不另立
+    expect(A.sources!.sb.fields.sn).toBe("serial_no"); // 列映射改写为 A 的识别属性
+    expect(A.sources!.sb.fields.serial_no).toBeUndefined();
+    assertPublishable(d);
   });
 
   it("阶段：收成一类 + 派生 status + transition 关系 + 转化动作", () => {
@@ -111,17 +131,41 @@ describe("裁决写草稿", () => {
     const link = d.link_types["po_a_to_在役"];
     expect(link.transition).toEqual({ property: "status", from: "在途", to: "在役" });
     expect(A.actions!.convert_to_在役.effect).toEqual([{ link: "po_a_to_在役" }]);
+    assertPublishable(d);
   });
 
-  it("部分重叠：公共属性立上位对象并移走，两边源只带公共列", () => {
+  it("阶段：B 有特有属性与映射列时也成立（属性并入、字段不悬空）", () => {
+    const d = twoClasses();
+    d.object_types.po_b.properties.extra_b2 = { type: "string" };
+    d.object_types.po_b.sources!.sb.fields.extra_b2 = "name"; // B 特有列也映射着
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "阶段", { from: "在途", to: "在役" });
+    expect(d.object_types.po_a.properties.extra_b2).toBeDefined();
+    assertPublishable(d);
+  });
+
+  it("部分重叠：公共属性立上位对象并移走，识别字段复制不移动", () => {
     const d = twoClasses();
     applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "部分重叠");
     const parent = d.object_types.shared_po_a_po_b;
     expect(parent).toBeDefined();
     expect(Object.keys(parent.properties).sort()).toEqual(["name", "sn"]);
-    expect(d.object_types.po_a.properties.sn).toBeUndefined(); // 移上去了
+    expect(d.object_types.po_a.properties.sn).toBeDefined(); // 识别字段留在原类
+    expect(d.object_types.po_a.properties.name).toBeUndefined(); // 公共属性移上去
     expect(d.object_types.po_a.properties.extra_a).toBeDefined(); // 特有留下
     expect(parent.sources!.sa.fields).toEqual({ sn: "sn", name: "item_name" });
+    assertPublishable(d);
+  });
+
+  it("部分重叠：识别字段不同名时，各侧源条目显式带 key", () => {
+    const d = twoClasses();
+    d.object_types.po_b.identity = "serial_no";
+    d.object_types.po_b.properties = { serial_no: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } };
+    d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", name: "name" };
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "部分重叠");
+    const parent = d.object_types.shared_po_a_po_b;
+    expect(parent.sources!.sa.key).toBe("sn");
+    expect(parent.sources!.sb.key).toBe("serial_no");
+    assertPublishable(d);
   });
 
   it("仅名称相似：配置不动", () => {

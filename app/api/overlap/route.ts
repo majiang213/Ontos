@@ -5,15 +5,16 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDraft } from "@/lib/engine/configStore";
 import { demoDriver } from "@/lib/engine/load";
-import { mustCls } from "@/lib/engine/individual";
+import { EngineReject, mustCls } from "@/lib/engine/individual";
 import { computeOverlap } from "@/lib/engine/overlap";
 import { metaStore } from "@/lib/meta/store";
+import { BadRequest, bodyJson } from "@/app/api/_shared";
 
 const bodySchema = z.object({ class_a: z.string(), class_b: z.string() });
 
 export async function POST(req: Request) {
   try {
-    const { class_a, class_b } = bodySchema.parse(await req.json());
+    const { class_a, class_b } = bodySchema.parse(await bodyJson(req));
     const d = getDraft().draft;
     const a = mustCls(d, class_a);
     const b = mustCls(d, class_b);
@@ -24,6 +25,8 @@ export async function POST(req: Request) {
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 422 });
+    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }

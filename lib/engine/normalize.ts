@@ -16,7 +16,7 @@ export const RULES: NormRule[] = [
   {
     name: "phone", // 手机号：去 +86、空格、连字符
     match: (s) => s.filter((v) => /^(\+?86)?1[3-9]\d{9}$/.test(v.replace(/[-\s]/g, ""))).length >= s.length * 0.6,
-    normalize: (v) => v.replace(/^\+86/, "").replace(/[-\s]/g, ""),
+    normalize: (v) => v.replace(/^\+?86/, "").replace(/[-\s]/g, ""),
   },
   {
     name: "id_card", // 身份证：去空格，X 大写

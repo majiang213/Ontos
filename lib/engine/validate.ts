@@ -14,7 +14,10 @@ export function validateSemantics(config: OntologyConfig): void {
     const derivedProps = new Set(Object.entries(cls.properties).filter(([, d]) => d.derived).map(([p]) => p));
     for (const [srcName, entry] of Object.entries(cls.sources ?? {})) {
       const keyProp = entry.key ?? cls.identity;
-      if (keyProp && !entry.fields[keyProp]) {
+      if (!keyProp) {
+        throw new Error(`配置不合法：${clsName}.${srcName} 没有认行依据（类无 identity，条目也无 key）`);
+      }
+      if (!entry.fields[keyProp]) {
         throw new Error(`配置不合法：${clsName}.${srcName} 的 fields 缺对齐属性 ${keyProp}`);
       }
       for (const prop of Object.keys(entry.fields)) {

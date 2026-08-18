@@ -7,6 +7,7 @@ import { dump, load } from "js-yaml";
 import { configSchema, type OntologyConfig } from "../schema/config";
 import { objectTypeSchema } from "../schema/config";
 import type { DraftOpInput as DraftOp } from "../schema/ops";
+import { metaStore } from "../meta/store";
 import { validateSemantics } from "./validate";
 
 // 路径按 cwd 现算，不在模块顶层冻结：测试会切换工作目录，顶层常量会把第一轮的临时目录记死。
@@ -80,6 +81,7 @@ export class DraftReject extends Error {} // 操作不合法：名字重了、�
 
 export function applyOp(input: DraftOp): DraftState {
   const state = getDraft();
+  const backup = structuredClone(state.draft);
   const d = state.draft;
   switch (input.op) {
     case "create_object": {
@@ -144,6 +146,13 @@ export function applyOp(input: DraftOp): DraftState {
     }
     default:
       throw new DraftReject(`未知操作：${JSON.stringify(input)}`);
+  }
+  // 每步操作后立即语义校验，不合法整体回退——坏草稿（如 fields 指向不存在属性的导入）不能攒到发布一刻才炸
+  try {
+    validateSemantics(configSchema.parse(structuredClone(state.draft)));
+  } catch (e) {
+    state.draft = backup;
+    throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
   // 每次操作后按结构重算：改出去又改回来，dirty 要能收回来
   state.dirty = !sameConfig(state.draft, getPublished().config);
@@ -244,10 +253,27 @@ function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] 
   return [...refs];
 }
 
-/** 直接改草稿（裁决应用等成组改动走这里），改完按结构重算 dirty。 */
+/** 直接改草稿（裁决应用等成组改动走这里）：改完立即校验，不合法就回退并抛 DraftReject——不让坏草稿攒到发布一刻才炸。 */
 export function mutateDraft(fn: (draft: OntologyConfig) => void): DraftState {
   const state = getDraft();
-  fn(state.draft);
+  const backup = structuredClone(state.draft);
+  try {
+    fn(state.draft);
+    const parsed = configSchema.parse(structuredClone(state.draft));
+    validateSemantics(parsed);
+  } catch (e) {
+    state.draft = backup; // 回退
+    throw new DraftReject(e instanceof Error ? e.message : String(e));
+  }
+  // 被撤的类顺手清摆位（裁决的 dropClass 不走 delete_object），canvas-layout.json 不留死键
+  let layoutChanged = false;
+  for (const name of Object.keys(state.layout)) {
+    if (!state.draft.object_types[name]) {
+      delete state.layout[name];
+      layoutChanged = true;
+    }
+  }
+  if (layoutChanged && existsSync(layoutFile())) writeFileSync(layoutFile(), JSON.stringify(state.layout), "utf8");
   state.dirty = !sameConfig(state.draft, getPublished().config);
   return state;
 }
@@ -267,6 +293,7 @@ export function publishDraft(): { version: number } {
   store.published = { config, version }; // 引擎下一次 loadPublished 即读新版
   state.baseVersion = version;
   state.dirty = false;
+  fillDecisionVersions(version); // 裁决留痕的生效版本随发布回填
   return { version };
 }
 
@@ -277,7 +304,7 @@ export function discardDraft(): void {
 /* ---------- 版本历史与回滚 ---------- */
 
 export function listVersions(): { version: number; file: string; createdAt: string }[] {
-  const out = [{ version: 1, file: seedFile(), createdAt: "（首版，种子配置）" }];
+  const out = [{ version: 1, file: seedFile(), createdAt: existsSync(seedFile()) ? statSync(seedFile()).mtime.toISOString() : "" }];
   if (existsSync(versionsDir())) {
     const versions = readdirSync(versionsDir())
       .map((f) => /^v(\d+)\.yaml$/.exec(f)?.[1])
@@ -292,8 +319,9 @@ export function listVersions(): { version: number; file: string; createdAt: stri
   return out;
 }
 
-/** 回滚 = Git revert 语义：把旧版本内容作为新版本发布，历史链不断。 */
+/** 回滚 = Git revert 语义：把旧版本内容作为新版本发布，历史链不断。草稿有未发布改动时拒绝，先发布或放弃。 */
 export function rollbackTo(version: number): { version: number } {
+  if (getDraft().dirty) throw new DraftReject("有未发布的改动，先发布或放弃再回滚");
   const entry = listVersions().find((v) => v.version === version);
   if (!entry) throw new DraftReject(`版本不存在：v${version}`);
   const config = configSchema.parse(load(readFileSync(entry.file, "utf8")));
@@ -312,6 +340,15 @@ export function rollbackTo(version: number): { version: number } {
 export function resetStore(): void {
   store.published = undefined;
   store.draft = undefined;
+}
+
+/** 发布成功后回填：把还没绑版本的裁决留痕挂上这个版本。回填失败不影响发布。 */
+function fillDecisionVersions(version: number): void {
+  try {
+    metaStore().backfillDecisionVersions(version);
+  } catch {
+    // 留痕是附属，不挡发布
+  }
 }
 
 /** 键序无关的结构比较：zod parse 会按 schema 重排键，直接 JSON.stringify 会误判 modified。 */

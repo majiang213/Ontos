@@ -7,6 +7,8 @@ import { z } from "zod";
 import { demoDriver } from "@/lib/engine/load";
 import { getSlot } from "@/lib/engine/llmSlot";
 import { applyOp, DraftReject } from "@/lib/engine/configStore";
+import { EngineReject } from "@/lib/engine/individual";
+import { BadRequest, bodyJson } from "@/app/api/_shared";
 
 const bodySchema = z.object({
   tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty(),
@@ -14,7 +16,7 @@ const bodySchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const { tables } = bodySchema.parse(await req.json());
+    const { tables } = bodySchema.parse(await bodyJson(req));
     const registry = demoDriver();
     // 逐张内省（不取业务行），交槽位产草稿
     const infos = await Promise.all(
@@ -30,7 +32,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, created: Object.keys(objects) });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
-    if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
+    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof DraftReject || e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 });
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }

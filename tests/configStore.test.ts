@@ -17,7 +17,9 @@ beforeEach(() => {
   process.chdir(tmp); // configStore 按 process.cwd() 找配置
 });
 
-afterEach(() => {
+afterEach(async () => {
+  (await import("../lib/engine/configStore")).resetStore();
+  (await import("../lib/meta/store")).resetMetaStore(); // 发布回填建的元库单例绑死本轮临时目录，删目录前关掉
   process.chdir(repoRoot);
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -118,9 +120,11 @@ describe("配置存储（工作副本与发布）", async () => {
 
   it("识别字段可取消（空串）；改出去又改回来 dirty 能收回", async () => {
     const s = await freshStore();
-    s.applyOp({ op: "set_identity", object: "equipment", name: "" });
+    // 有源类取消识别字段就没有认行依据——校验闸拒绝（无源对象才可无 identity）
+    expect(() => s.applyOp({ op: "set_identity", object: "equipment", name: "" })).toThrow("认行依据");
+    expect(s.getDraft().dirty).toBe(false); // 被拒的操作不留痕
+    s.applyOp({ op: "set_identity", object: "equipment", name: "name" });
     expect(s.getDraft().dirty).toBe(true);
-    expect(s.getDraft().draft.object_types.equipment.identity).toBeUndefined();
     s.applyOp({ op: "set_identity", object: "equipment", name: "serial_no" }); // 改回去
     expect(s.getDraft().dirty).toBe(false);
   });

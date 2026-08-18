@@ -41,9 +41,9 @@ export function sourcesOf(cls: Cls): [string, NonNullable<ObjectType["sources"]>
 /** 该源用来对齐、认行的列：源条目的 key，省略则用类的 identity。 */
 export function keyColumn(cls: Cls, entry: { fields: Record<string, string>; key?: string }): string {
   const keyProp = entry.key ?? cls.def.identity;
-  if (!keyProp) throw new Error("类没有 identity，源条目也没有 key");
+  if (!keyProp) throw new EngineReject("类没有 identity，源条目也没有 key");
   const col = entry.fields[keyProp];
-  if (!col) throw new Error(`源条目的 fields 里没有对齐属性 ${keyProp}`);
+  if (!col) throw new EngineReject(`源条目的 fields 里没有对齐属性 ${keyProp}`);
   return col;
 }
 

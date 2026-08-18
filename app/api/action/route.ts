@@ -10,13 +10,14 @@ import { demoDriver, loadConfig } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { ZodError } from "zod";
+import { BadRequest, bodyJson, safeLog } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
   const started = Date.now();
   try {
-    const action = actionRequestSchema.parse(await req.json());
+    const action = actionRequestSchema.parse(await bodyJson(req));
     const result = await runAction(loadConfig(), demoDriver(), action);
-    metaStore().logAction({
+    safeLog(() => metaStore().logAction({
       version: getPublished().version,
       action: action.action,
       object_type: action.object,
@@ -26,11 +27,12 @@ export async function POST(req: Request) {
       ok: result.ok,
       error: result.error,
       duration_ms: Date.now() - started,
-    });
+    }));
     // 领域内的失败（前置、公理、投影失败）装在结果里返回 422；抛出来的才是引擎故障
     return NextResponse.json(result, { status: result.ok ? 200 : 422 });
   } catch (e) {
     if (e instanceof ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
+    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 });
     return NextResponse.json({ error: "引擎内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

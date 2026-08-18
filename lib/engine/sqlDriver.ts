@@ -63,7 +63,7 @@ function groupColumns(rows: Record<string, unknown>[]): TableInfo[] {
   for (const r of rows) {
     const name = String(r.name);
     const t = map.get(name) ?? { name, columns: [] };
-    t.columns.push({ name: String(r.column), type: String(r.type), pk: r.keyflag === "PRI" || r.keyflag === "MUL" || r.keyflag === "UNI" ? r.keyflag === "PRI" : r.keyflag === "PRI" });
+    t.columns.push({ name: String(r.column), type: String(r.type), pk: r.keyflag === "PRI" });
     map.set(name, t);
   }
   return [...map.values()];
@@ -92,8 +92,13 @@ export class MysqlDriver implements SourceDriver {
     return p;
   }
 
+  async close(): Promise<void> {
+    for (const p of this.pools.values()) await p.end();
+    this.pools.clear();
+  }
+
   async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
-    const { sql, params } = buildSelect(table, columns, conditions, quoteFor(this.dialect));
+    const { sql, params } = buildStatement(this.dialect, "select", table, { columns, conditions });
     const [rows] = await this.pool(false).query(sql, params);
     return rows as Record<string, unknown>[];
   }
@@ -145,9 +150,15 @@ export class PgDriver implements SourceDriver {
         password: writable ? (this.cfg.rw_pass ?? this.cfg.ro_pass) : this.cfg.ro_pass,
         max: 4,
       });
+      p.on("error", () => {}); // 空闲连接掉线不炸进程（pg 官方要求）
       this.pools.set(key, p);
     }
     return p;
+  }
+
+  async close(): Promise<void> {
+    for (const p of this.pools.values()) await p.end();
+    this.pools.clear();
   }
 
   async select(connection: string, table: string, columns: string[], conditions: Condition[]) {

@@ -10,6 +10,7 @@ import {
   type Condition,
   type SourceDriver,
 } from "./driver";
+import { EngineReject } from "./individual";
 
 const quote = (id: string) => `"${id}"`;
 // node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言
@@ -33,7 +34,7 @@ export class SqliteFixtureDriver implements SourceDriver {
 
   private db(connection: string): DatabaseSync {
     const db = this.dbs.get(connection);
-    if (!db) throw new Error(`未注册的连接：${connection}`);
+    if (!db) throw new EngineReject(`未注册的连接：${connection}`);
     return db;
   }
 
@@ -70,6 +71,12 @@ export class SqliteFixtureDriver implements SourceDriver {
   async sample(connection: string, table: string, limit = 3) {
     const rows = this.db(connection).prepare(`SELECT * FROM ${quote(table)} LIMIT ?`).all(...bind([limit])) as Record<string, unknown>[];
     return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, maskValue(k, v)])));
+  }
+
+  /** 释放全部库句柄（删连接、测试收尾用）。 */
+  async close(): Promise<void> {
+    for (const db of this.dbs.values()) db.close();
+    this.dbs.clear();
   }
 
   static seeded(): SqliteFixtureDriver {

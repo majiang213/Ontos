@@ -215,10 +215,18 @@ export class MetaStore {
   }
 
   listDecisions(): (DecisionRec & { id: number; created_at: string })[] {
-    return this.db.prepare(`SELECT * FROM adj_decision ORDER BY id DESC`).all() as never[];
+    const rows = this.db.prepare(`SELECT * FROM adj_decision ORDER BY id DESC`).all() as Record<string, unknown>[];
+    return rows.map((r) => ({ ...r, evidence: r.evidence ? JSON.parse(r.evidence as string) : undefined })) as never[];
   }
 
+  /** 发布时回填：把还没绑版本的裁决挂上这个版本。 */
+  backfillDecisionVersions(version: number): void {
+    this.db.prepare(`UPDATE adj_decision SET version = ? WHERE version IS NULL`).run(version);
+  }
+
+  /** 交集按对更新（同一对重复计算只留最新计数）。 */
   recordOverlap(o: OverlapRec): void {
+    this.db.prepare(`DELETE FROM adj_overlap WHERE class_a = ? AND class_b = ?`).run(o.class_a, o.class_b);
     this.db
       .prepare(`INSERT INTO adj_overlap (class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate);
@@ -285,4 +293,10 @@ export function metaStore(): MetaStore {
 /** 测试用：独立临时库。 */
 export function freshMetaStore(path: string): MetaStore {
   return new MetaStore(path);
+}
+
+/** 测试用：关掉并清掉单例。单例的文件句柄绑死创建时的 cwd，换目录前必须清。 */
+export function resetMetaStore(): void {
+  g.__ontosMeta?.close();
+  g.__ontosMeta = undefined;
 }

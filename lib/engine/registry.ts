@@ -1,7 +1,8 @@
 // 驱动注册表 —— 连接名 → 驱动。fixture 连接与 mysql/pg 连接共存，引擎按连接名路由。
 // 问数与动作只认连接名；注册表是 SourceDriver 的一种（多方言混合，不带 dialect 属性）。
 
-import type { SourceDriver, TableInfo } from "./driver";
+import type { Condition, SourceDriver, TableInfo } from "./driver";
+import { EngineReject } from "./individual";
 
 export class DriverRegistry implements SourceDriver {
   private drivers = new Map<string, SourceDriver>();
@@ -11,7 +12,9 @@ export class DriverRegistry implements SourceDriver {
   }
 
   unregister(connection: string): void {
+    const d = this.drivers.get(connection);
     this.drivers.delete(connection);
+    void d?.close?.(); // 连接池/文件句柄随注销释放
   }
 
   has(connection: string): boolean {
@@ -24,20 +27,20 @@ export class DriverRegistry implements SourceDriver {
 
   private resolve(connection: string): SourceDriver {
     const d = this.drivers.get(connection);
-    if (!d) throw new Error(`未注册的连接：${connection}`);
+    if (!d) throw new EngineReject(`未注册的连接：${connection}`);
     return d;
   }
 
-  async select(connection: string, table: string, columns: string[], conditions: Parameters<SourceDriver["select"]>[3]) {
+  async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
     return this.resolve(connection).select(connection, table, columns, conditions);
   }
   async insert(connection: string, table: string, row: Record<string, unknown>) {
     return this.resolve(connection).insert(connection, table, row);
   }
-  async update(connection: string, table: string, set: Record<string, unknown>, conditions: Parameters<SourceDriver["update"]>[3]) {
+  async update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]) {
     return this.resolve(connection).update(connection, table, set, conditions);
   }
-  async delete(connection: string, table: string, conditions: Parameters<SourceDriver["delete"]>[2]) {
+  async delete(connection: string, table: string, conditions: Condition[]) {
     return this.resolve(connection).delete(connection, table, conditions);
   }
   async introspect(connection: string): Promise<TableInfo[]> {

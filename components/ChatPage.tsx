@@ -213,13 +213,19 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
           onSubmit={async (e) => {
             e.preventDefault();
             if (!saveName.trim()) return;
-            await fetch("/api/saved-queries", {
+            const r = await fetch("/api/saved-queries", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ name: saveName.trim(), question: a.question ?? "", query: a.query }),
             });
-            setSaved(true);
-            onSaved();
+            if (r.ok) {
+              setSaved(true);
+              onSaved();
+            } else {
+              const data = await r.json();
+              setSaveName("");
+              alert(data.error ?? "保存失败");
+            }
           }}
           style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }}
         >

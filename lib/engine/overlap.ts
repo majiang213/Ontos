@@ -17,34 +17,23 @@ export interface OverlapResult {
   rate: number;
 }
 
-/** 同一规则归一化后算交集。 */
+/** 同一规则归一化后算交集。每源只读一次：前 20 条挑规则，全量进集合；值集合算完即弃。 */
 export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls, meta?: MetaStore): Promise<OverlapResult> {
-  const samples: string[] = [];
-  for (const cls of [clsA, clsB]) {
+  const readRaw = async (cls: Cls): Promise<string[][]> => {
+    const out: string[][] = [];
     for (const [, entry] of sourcesOf(cls)) {
       const col = keyColumn(cls, entry);
       const rows = await driver.select(entry.connection, entry.table, [col], []);
-      for (const r of rows.slice(0, 20)) {
-        const v = r[col];
-        if (v != null) samples.push(String(v));
-      }
+      out.push(rows.map((r) => r[col]).filter((v) => v != null).map(String));
     }
-  }
-  const rule = pickRule(samples);
-  const readSet = async (cls: Cls) => {
-    const values = new Set<string>();
-    for (const [, entry] of sourcesOf(cls)) {
-      const col = keyColumn(cls, entry);
-      const rows = await driver.select(entry.connection, entry.table, [col], []);
-      for (const r of rows) {
-        const v = r[col];
-        if (v != null) values.add(normalizeWith(rule, v));
-      }
-    }
-    return values;
+    return out;
   };
-  const a = await readSet(clsA);
-  const b = await readSet(clsB);
+  const rawA = await readRaw(clsA);
+  const rawB = await readRaw(clsB);
+  const rule = pickRule([...rawA.flat().slice(0, 20), ...rawB.flat().slice(0, 20)]);
+  const toSet = (raw: string[][]) => new Set(raw.flat().map((v) => normalizeWith(rule, v)));
+  const a = toSet(rawA);
+  const b = toSet(rawB);
   let hit = 0;
   for (const v of a) if (b.has(v)) hit++;
   const result: OverlapResult = {

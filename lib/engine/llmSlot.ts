@@ -19,7 +19,7 @@ export interface LlmSlot {
 export interface PairAdvice {
   class_a: string;
   class_b: string;
-  tendency: "同一" | "阶段" | "仅名称相似";
+  tendency: "同一" | "部分重叠" | "阶段" | "仅名称相似";
   reason: string;
 }
 
@@ -63,13 +63,16 @@ export class CannedSlot implements LlmSlot {
       let identity: string | undefined;
       for (const col of table.columns) {
         if (col.pk) continue; // 表主键只定位行，不进属性
-        const type = col.type.includes("INT") ? "number" : col.type.includes("DATE") || col.type.includes("TIME") ? "date" : "string";
+        const t = col.type.toUpperCase(); // mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判
+        const type = t.includes("INT") ? "number" : t.includes("DATE") || t.includes("TIME") ? "date" : "string";
         properties[col.name] = { type };
         fields[col.name] = col.name;
         if (!identity && /_no$|_id$/.test(col.name)) identity = col.name; // 识别字段猜编号列；答不出就留白问人
       }
       const pkCol = table.columns.find((c) => c.pk);
-      out[table.name] = {
+      // 跨连接同名表是裁决主场景：撞名带连接前缀，不静默覆盖
+      const clsName = out[table.name] ? `${connection}_${table.name}` : table.name;
+      out[clsName] = {
         kind: "thing",
         identity,
         properties,
@@ -88,12 +91,18 @@ export class CannedSlot implements LlmSlot {
         if (a.source === b.source) continue; // 同源不成对
         const shared = a.fields.filter((f) => b.fields.includes(f));
         const ratio = shared.length / Math.max(a.fields.length, b.fields.length, 1);
-        if (ratio < 0.4) continue; // 字段对不上，不进候选
+        const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
+        if (ratio < 0.4 && !nameLike) continue; // 字段对不上、名字也不像，不进候选
+        if (ratio < 0.4 && nameLike) {
+          pairs.push({ class_a: a.name, class_b: b.name, tendency: "仅名称相似", reason: `名字相近（${a.name} / ${b.name}），字段对不上` });
+          continue;
+        }
         const hasStage = [...a.fields, ...b.fields].some((f) => /status|state|阶段|状态/.test(f));
+        const tendency = ratio > 0.8 ? "同一" : hasStage ? "阶段" : "部分重叠";
         pairs.push({
           class_a: a.name,
           class_b: b.name,
-          tendency: hasStage ? "阶段" : ratio > 0.8 ? "同一" : "阶段",
+          tendency,
           reason: `字段重合 ${shared.length}/${Math.max(a.fields.length, b.fields.length)}（${shared.join("、")}）${hasStage ? "；含状态字段" : ""}`,
         });
       }
@@ -102,26 +111,12 @@ export class CannedSlot implements LlmSlot {
   }
 }
 
-/* ---------- 真模型实现（key 就位后启用） ---------- */
-
-export class AiSdkSlot implements LlmSlot {
-  constructor(private model: never) {
-    // generateObject({ model, schema, prompt }) —— 三个槽位同构，schema 即 lib/schema 里的 Zod
-    void this.model;
-    throw new Error("模型槽位待配置 API key 后启用；离线回退用 CannedSlot");
-  }
-  nlToQuery(): Promise<QueryRequest> {
-    throw new Error("模型槽位未配置");
-  }
-  draftObjects(): Promise<Record<string, ObjectType>> {
-    throw new Error("模型槽位未配置");
-  }
-  suggestPairs(): Promise<PairAdvice[]> {
-    throw new Error("模型槽位未配置");
-  }
-}
+/* ---------- 真模型实现 ----------
+   key 就位后在这里接 generateObject（Vercel AI SDK）：
+   三个槽位同构——generateObject({ model, schema, prompt })，schema 即 lib/schema 里的 Zod。
+   getSlot() 按环境变量选实现。 */
 
 /** 槽位选择：有 key 用真模型，否则离线回退。 */
 export function getSlot(): LlmSlot {
-  return new CannedSlot(); // ONTOS_LLM_KEY 就位后在这里换 AiSdkSlot
+  return new CannedSlot(); // ONTOS_LLM_KEY 就位后在这里换真模型实现
 }

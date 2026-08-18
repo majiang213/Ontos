@@ -44,3 +44,10 @@ export function registerSaved(registry: DriverRegistry, rec: { name: string; typ
 export function freshDriver(): SourceDriver {
   return SqliteFixtureDriver.seeded();
 }
+
+/** 测试用：关掉并清掉注册表单例。fixture 内存库全进程共享，换测试目录前必须清。 */
+export function resetRegistry(): void {
+  const r = g.__ontosRegistry;
+  if (r) for (const name of r.connectionNames()) r.unregister(name);
+  g.__ontosRegistry = undefined;
+}
