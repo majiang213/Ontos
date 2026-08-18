@@ -3,20 +3,25 @@
 
 import { NextResponse } from "next/server";
 import { demoDriver } from "@/lib/engine/load";
+import { internalError } from "@/app/api/_shared";
 
 export async function GET() {
-  const registry = demoDriver();
-  const sources = [];
-  for (const connection of registry.connectionNames()) {
-    try {
-      const tables = await registry.introspect(connection);
-      const withSample = await Promise.all(
-        tables.map(async (t) => ({ ...t, sample: await registry.sample(connection, t.name, 3).catch(() => []) }))
-      );
-      sources.push({ connection, tables: withSample });
-    } catch (e) {
-      sources.push({ connection, tables: [], error: e instanceof Error ? e.message : String(e) });
+  try {
+    const registry = demoDriver();
+    const sources = [];
+    for (const connection of registry.connectionNames()) {
+      try {
+        const tables = await registry.introspect(connection);
+        const withSample = await Promise.all(
+          tables.map(async (t) => ({ ...t, sample: await registry.sample(connection, t.name, 3).catch(() => []) }))
+        );
+        sources.push({ connection, tables: withSample });
+      } catch {
+        sources.push({ connection, tables: [], error: "连接失败或读取表结构失败" }); // 驱动报错可能含主机/路径，不原样出网
+      }
     }
+    return NextResponse.json({ sources });
+  } catch (e) {
+    return internalError(e);
   }
-  return NextResponse.json({ sources });
 }

@@ -20,17 +20,17 @@ export function buildStatement(
   dialect: "mysql" | "pg",
   kind: "select" | "update" | "delete",
   table: string,
-  opts: { columns?: string[]; set?: Record<string, unknown>; conditions?: Condition[] }
+  opts: { columns?: string[]; set?: Record<string, unknown>; conditions?: Condition[]; limit?: number }
 ): { sql: string; params: unknown[] } {
   const quote = quoteFor(dialect);
-  const conds = (opts.conditions ?? []).map((c) => conditionSql(c, quote));
+  const conds = (opts.conditions ?? []).map((c) => conditionSql(c, quote, dialect));
   const where = conds.length ? ` WHERE ${conds.map((p) => p.sql).join(" AND ")}` : "";
   let sql: string;
   let params: unknown[];
   if (kind === "select") {
     const cols = opts.columns?.length ? opts.columns.map(quote).join(", ") : "*";
-    sql = `SELECT ${cols} FROM ${quote(table)}${where}`;
-    params = conds.flatMap((p) => p.params);
+    sql = `SELECT ${cols} FROM ${quote(table)}${where}${opts.limit ? " LIMIT ?" : ""}`;
+    params = [...conds.flatMap((p) => p.params), ...(opts.limit ? [opts.limit] : [])];
   } else if (kind === "update") {
     const setCols = Object.keys(opts.set ?? {});
     sql = `UPDATE ${quote(table)} SET ${setCols.map((c) => `${quote(c)} = ?`).join(", ")}${where}`;
@@ -54,8 +54,8 @@ const INTROSPECT_MYSQL = `SELECT TABLE_NAME AS name, COLUMN_NAME AS \`column\`, 
 const INTROSPECT_PG = `SELECT c.table_name AS name, c.column_name AS column, c.data_type AS type,
     CASE WHEN kcu.column_name IS NULL THEN '' ELSE 'PRI' END AS keyflag
   FROM information_schema.columns c
-  LEFT JOIN information_schema.table_constraints tc ON tc.table_name = c.table_name AND tc.constraint_type = 'PRIMARY KEY'
-  LEFT JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_name = c.table_name AND kcu.column_name = c.column_name
+  LEFT JOIN information_schema.table_constraints tc ON tc.table_name = c.table_name AND tc.table_schema = c.table_schema AND tc.constraint_type = 'PRIMARY KEY'
+  LEFT JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = c.table_name AND kcu.column_name = c.column_name
   WHERE c.table_schema = $1 ORDER BY c.table_name, c.ordinal_position`;
 
 function groupColumns(rows: Record<string, unknown>[]): TableInfo[] {
@@ -68,6 +68,9 @@ function groupColumns(rows: Record<string, unknown>[]): TableInfo[] {
   }
   return [...map.values()];
 }
+
+/** 查询治理：单条 SQL 的库内超时（毫秒）。演示与活体共用一道闸。 */
+const QUERY_TIMEOUT_MS = 10_000;
 
 export class MysqlDriver implements SourceDriver {
   readonly dialect = "mysql" as const;
@@ -97,9 +100,9 @@ export class MysqlDriver implements SourceDriver {
     this.pools.clear();
   }
 
-  async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
-    const { sql, params } = buildStatement(this.dialect, "select", table, { columns, conditions });
-    const [rows] = await this.pool(false).query(sql, params);
+  async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
+    const { sql, params } = buildStatement(this.dialect, "select", table, { columns, conditions, limit });
+    const [rows] = await this.pool(false).query({ sql, timeout: QUERY_TIMEOUT_MS }, params);
     return rows as Record<string, unknown>[];
   }
 
@@ -126,8 +129,8 @@ export class MysqlDriver implements SourceDriver {
   }
 
   async sample(connection: string, table: string, limit = 3) {
-    const { sql, params } = buildSelect(table, [], [], quoteFor(this.dialect));
-    const [rows] = await this.pool(false).query(`${sql} LIMIT ?`, [...params, limit]);
+    const { sql, params } = buildSelect(table, [], [], this.dialect, limit);
+    const [rows] = await this.pool(false).query({ sql, timeout: QUERY_TIMEOUT_MS }, params);
     return (rows as Record<string, unknown>[]).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, maskValue(k, v)])));
   }
 }
@@ -149,6 +152,7 @@ export class PgDriver implements SourceDriver {
         user: writable ? (this.cfg.rw_user ?? this.cfg.ro_user) : this.cfg.ro_user,
         password: writable ? (this.cfg.rw_pass ?? this.cfg.ro_pass) : this.cfg.ro_pass,
         max: 4,
+        statement_timeout: QUERY_TIMEOUT_MS, // 库内超时，慢查询由库掐断
       });
       p.on("error", () => {}); // 空闲连接掉线不炸进程（pg 官方要求）
       this.pools.set(key, p);
@@ -161,9 +165,8 @@ export class PgDriver implements SourceDriver {
     this.pools.clear();
   }
 
-  async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
-    const quote = quoteFor(this.dialect);
-    const { sql, params } = buildSelect(table, columns, conditions, quote);
+  async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
+    const { sql, params } = buildSelect(table, columns, conditions, this.dialect, limit);
     const res = await this.pool(false).query(renderPlaceholders(sql, this.dialect), params);
     return res.rows as Record<string, unknown>[];
   }

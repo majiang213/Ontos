@@ -44,16 +44,28 @@ describe("配置三视图", () => {
 describe("LLM 槽位离线回退", () => {
   const slot = new CannedSlot();
 
-  it("演示四问编成正确查询", async () => {
-    const q1 = await slot.nlToQuery("在役设备及其所属部门", config);
-    expect(q1.filter).toEqual({ status: "in_service" });
-    expect(q1.expand?.[0].relation).toBe("belongs_to");
-    const q2 = await slot.nlToQuery("还有多少在途设备", config);
-    expect(q2.filter).toEqual({ status: "in_transit" });
-    const q3 = await slot.nlToQuery("哪些设备过保了", config);
-    expect(q3.filter).toEqual({ in_warranty: false });
-    const q4 = await slot.nlToQuery("每个部门多少台在役设备", config);
-    expect(q4.aggregate?.group_by).toEqual(["dept"]);
+  it("演示四问编成正确查询（整体比对，不许片段正确）", async () => {
+    expect(await slot.nlToQuery("在役设备及其所属部门", config)).toEqual({
+      object: "equipment",
+      properties: ["name"],
+      filter: { status: "in_service" },
+      expand: [{ relation: "belongs_to", properties: ["name"] }],
+    });
+    expect(await slot.nlToQuery("还有多少在途设备", config)).toEqual({
+      object: "equipment",
+      properties: ["name", "serial_no"],
+      filter: { status: "in_transit" },
+    });
+    expect(await slot.nlToQuery("哪些设备过保了", config)).toEqual({
+      object: "equipment",
+      properties: ["name", "serial_no"],
+      filter: { in_warranty: false },
+    });
+    expect(await slot.nlToQuery("每个部门多少台在役设备", config)).toEqual({
+      object: "equipment",
+      filter: { status: "in_service" },
+      aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] },
+    });
   });
 
   it("逆向建模：表结构产草稿，识别字段猜编号列，主键不进属性", async () => {

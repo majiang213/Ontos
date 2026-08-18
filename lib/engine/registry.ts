@@ -8,13 +8,15 @@ export class DriverRegistry implements SourceDriver {
   private drivers = new Map<string, SourceDriver>();
 
   register(connection: string, driver: SourceDriver): void {
+    const old = this.drivers.get(connection);
+    if (old && old !== driver) void old.close?.().catch(() => {}); // 同名覆盖先放掉旧连接池，不然池子泄漏
     this.drivers.set(connection, driver);
   }
 
   unregister(connection: string): void {
     const d = this.drivers.get(connection);
     this.drivers.delete(connection);
-    void d?.close?.(); // 连接池/文件句柄随注销释放
+    void d?.close?.().catch(() => {}); // 连接池/文件句柄随注销释放；close 失败不炸进程
   }
 
   has(connection: string): boolean {
@@ -31,8 +33,8 @@ export class DriverRegistry implements SourceDriver {
     return d;
   }
 
-  async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
-    return this.resolve(connection).select(connection, table, columns, conditions);
+  async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
+    return this.resolve(connection).select(connection, table, columns, conditions, limit);
   }
   async insert(connection: string, table: string, row: Record<string, unknown>) {
     return this.resolve(connection).insert(connection, table, row);

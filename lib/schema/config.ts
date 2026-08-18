@@ -42,7 +42,7 @@ export type PropertyDef = z.infer<typeof propertySchema>;
 export const sourceEntrySchema = z.object({
   connection: z.string(),
   table: z.string(),
-  pk: z.string(),
+  pk: z.string(), // 源表主键：仅供台账与展示（表结构抽屉标出）；引擎认行全走 identity/key，不读它
   fields: z.record(z.string(), z.string()), // 源列属性 → 列名；派生属性不得出现
   key: z.string().optional(), // 该源用于对齐、认行的属性名；省略则用类的 identity
 });
@@ -67,7 +67,7 @@ export const effectItemSchema = z.union([
       object: z.string(),
       identity: valueSourceSchema.optional(),
       filter: filterSchema.optional(),
-      properties: z.record(z.string(), valueSourceSchema),
+      properties: z.record(z.string(), valueSourceSchema).refine((r) => Object.keys(r).length > 0, { message: "update.properties 不能为空（空 SET 不是合法 SQL）" }),
     }),
   }),
   z.object({

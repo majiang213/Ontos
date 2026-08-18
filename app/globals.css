@@ -75,7 +75,6 @@ body::after {
 
 button { font-family: inherit; }
 input { font-family: inherit; outline: none; }
-input:focus { border-color: var(--accent) !important; }
 
 /* ---------- 入场动效（只动 transform / opacity） ---------- */
 @keyframes rise-in {
@@ -289,7 +288,7 @@ input:focus { border-color: var(--accent) !important; }
 }
 .float-tl { top: 76px; left: 16px; }
 .float-tr { top: 76px; right: 16px; }
-.float-bc { bottom: 18px; left: 50%; translate: -50% 0; } /* translate 属性居中，与 transform 入场动画解耦 */
+.float-bc { bottom: 18px; left: 50%; translate: -50% 0; max-width: calc(100vw - 24px); } /* translate 属性居中，与 transform 入场动画解耦；窄屏不溢出 */
 
 /* 画布节点入场：backwards 填充，动画结束归还 xyflow 的定位 transform */
 .react-flow__node { animation: rise-in 560ms var(--ease-out) backwards; }

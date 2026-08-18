@@ -18,7 +18,7 @@ const config = configSchema.parse(load(readFileSync(join(process.cwd(), "lib/con
 
 const q = (req: QueryRequest) => runQuery(config, freshDriver(), req);
 
-describe("M7 查询", async () => {
+describe("M7 查询", () => {
   it("在役设备：派生 status 按 when 规则判定", async () => {
     const { rows } = await q({ object: "equipment", properties: ["name", "status"], filter: { status: "in_service" } });
     expect(rows.length).toBe(97); // 40 台重合 - 3 台报废 + 60 台设备独有
@@ -47,7 +47,7 @@ describe("M7 查询", async () => {
       filter: { status: "in_service" },
       expand: [{ relation: "belongs_to", properties: ["name"] }],
     });
-    expect(rows[0].belongs_to).toEqual([{ name: expect.any(String) }]);
+    expect(rows.some((r) => Array.isArray(r.belongs_to) && r.belongs_to.length > 0)).toBe(true); // 不赌无 order 的行序
 
     const back = await q({ object: "department", identity: "D01", expand: [{ relation: "has_equipment", properties: ["serial_no"] }] });
     expect(back.rows[0].name).toBe("研发部"); // 没点 properties 也要返回全部属性
@@ -89,7 +89,7 @@ describe("M7 查询", async () => {
   });
 });
 
-describe("M8 动作", async () => {
+describe("M8 动作", () => {
   it("验收一台在途设备：设备源、资产源各插一行，立一张保修卡；再读已在役、在保、转化成立", async () => {
     const driver = freshDriver();
     const res = await runAction(config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
@@ -192,7 +192,7 @@ describe("M8 动作", async () => {
   });
 });
 
-describe("过滤与展开的边界", async () => {
+describe("过滤与展开的边界", () => {
   it("$link 挂 match 关系：true 留有关联的，false 留没有的", async () => {
     const linked = await q({ object: "equipment", properties: ["serial_no"], filter: { $link: { belongs_to: true } } });
     expect(linked.rows.length).toBe(100); // 设备源 100 行都有部门
@@ -242,23 +242,30 @@ describe("过滤与展开的边界", async () => {
     expect(() => queryRequestSchema.parse({ object: "equipment", limit: 1001 })).toThrow();
   });
 
-  it("聚合四则与未知聚合拒绝", async () => {
-    const { rows } = await q({
+  it("聚合四则：组内多行才能验出真算（avg/sum/min/max/count 各断具体值）", async () => {
+    const driver = freshDriver();
+    // 同一 serial_no 插两行不同 started_at，组内多行；ended_at 留空验 count 字段语义
+    await driver.insert("device_sys", "repair", { repair_no: "R-X1", serial_no: "SN-GRP", started_at: 100, ended_at: null });
+    await driver.insert("device_sys", "repair", { repair_no: "R-X2", serial_no: "SN-GRP", started_at: 300, ended_at: null });
+    const { rows } = await runQuery(config, driver, {
       object: "repair",
-      aggregate: { group_by: ["serial_no"], metrics: [{ avg: "started_at" }, { min: "started_at" }, { max: "started_at" }, { sum: "started_at" }] },
+      filter: { serial_no: "SN-GRP" },
+      aggregate: { group_by: ["serial_no"], metrics: [{ avg: "started_at" }, { min: "started_at" }, { max: "started_at" }, { sum: "started_at" }, { count: "*" }, { count: "ended_at" }] },
     });
-    expect(rows.length).toBe(2);
-    for (const r of rows) expect(r.avg_started_at === r.min_started_at && r.min_started_at === r.max_started_at).toBe(true);
+    expect(rows).toEqual([{ serial_no: "SN-GRP", avg_started_at: 200, min_started_at: 100, max_started_at: 300, sum_started_at: 400, count: 2, count_ended_at: 0 }]);
     await expect(q({ object: "repair", aggregate: { group_by: ["serial_no"], metrics: [{ median: "started_at" }] } })).rejects.toThrow();
   });
 
   it("取数路径记录下推与内存核对", async () => {
     const { path } = await q({ object: "equipment", identity: "SN-40085", properties: ["name"] });
     expect(path.some((l) => l.includes("下推 device_sys.device"))).toBe(true);
+    // 派生过滤留内存核对：path 里必须看到这一笔
+    const mem = await q({ object: "equipment", filter: { status: "in_service" }, properties: ["serial_no"] });
+    expect(mem.path.some((l) => l.includes("内存核对"))).toBe(true);
   });
 });
 
-describe("M8 动作的边界与补偿", async () => {
+describe("M8 动作的边界与补偿", () => {
   it("转化关系的展开：验收后 converted 带回自身行", async () => {
     const driver = freshDriver();
     await runAction(config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
@@ -380,7 +387,7 @@ describe("M8 动作的边界与补偿", async () => {
   });
 });
 
-describe("源条目级对齐键 key", async () => {
+describe("源条目级对齐键 key", () => {
   it("某源没有 identity 列时按该源的 key 对齐", async () => {
     const driver = new SqliteFixtureDriver();
     const sa = driver.register("sa");
@@ -409,11 +416,13 @@ describe("源条目级对齐键 key", async () => {
   });
 });
 
-describe("表达式与发号", async () => {
+describe("表达式与发号", () => {
   it("uuid v7 是合法 UUID 形态", async () => {
     const v = generateValue("c", "p", { type: "string", generate: [{ uuid: "v7" }] }, {});
     expect(v).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  });  it("sequence 的 start 生效（走真实发号路径）", async () => {
+  });
+
+  it("sequence 的 start 生效（走真实发号路径）", async () => {
     const c2 = structuredClone(config);
     c2.object_types.appointment.properties.appt_no.generate = [
       { from: "identity" },
@@ -436,7 +445,7 @@ describe("表达式与发号", async () => {
   });
 });
 
-describe("第三轮修复的回归", async () => {
+describe("第三轮修复的回归", () => {
   it("源库脏数据不崩：脏日期串参与两属性相比按原值处理", async () => {
     const driver = freshDriver();
     driver.insert("device_sys", "assignment", { asgn_no: "A-DIRTY", sn: "SN-X", dept_id: "D01", valid_from: "2024-13-99", valid_to: null });
@@ -526,10 +535,16 @@ describe("第三轮修复的回归", async () => {
   });
 });
 
-describe("第五轮修复的回归", async () => {
+describe("第五轮修复的回归", () => {
   it("等值位的日期字面量也解析：ISO 串与表达式都能命中", async () => {
     expect((await q({ object: "assignment", filter: { valid_from: "2025-01-01" } })).rows.length).toBe(1);
-    expect((await q({ object: "assignment", filter: { valid_from: "now/d" } })).rows.length).toBe(0); // 不是今天 0 点
+    // now/d 不赌日历：与「测试内现算的今天 0 点（UTC）」结果必须一致
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    const iso = todayUtc.toISOString().slice(0, 10);
+    const byExpr = await q({ object: "assignment", filter: { valid_from: "now/d" } });
+    const byIso = await q({ object: "assignment", filter: { valid_from: iso } });
+    expect(byExpr.rows).toEqual(byIso.rows);
   });
 
   it("create 幂等：补偿重发不重复插（已有行的源跳过）", async () => {

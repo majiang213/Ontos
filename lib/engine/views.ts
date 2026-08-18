@@ -26,7 +26,7 @@ export interface ClassView {
     values?: (string | number)[]; // 枚举附 values
     derived?: "when" | "filter"; // 派生附形式
   }[];
-  relations: { name: string; description?: string; to: string }[]; // 从该类出发的（含反向名）
+  relations: { name: string; description?: string; to: string; kind: "match" | "transition" }[]; // 从该类出发的（含反向名）；kind 区分普通配对与转化
   actions: { name: string; description?: string; pre?: unknown }[];
   // 不返回：sources、pk、axioms
 }
@@ -37,8 +37,9 @@ export function readClass(config: OntologyConfig, name: string): ClassView {
   if (!t) throw new EngineReject(`配置中没有类：${name}`);
   const relations: ClassView["relations"] = [];
   for (const [linkName, l] of Object.entries(config.link_types)) {
-    if (l.from === name) relations.push({ name: linkName, description: l.description, to: l.to });
-    if (l.to === name && l.inverse) relations.push({ name: l.inverse, description: `${l.description ?? linkName}（反向）`, to: l.from });
+    const kind = l.transition ? ("transition" as const) : ("match" as const);
+    if (l.from === name) relations.push({ name: linkName, description: l.description, to: l.to, kind });
+    if (l.to === name && l.inverse) relations.push({ name: l.inverse, description: `${l.description ?? linkName}（反向）`, to: l.from, kind });
   }
   return {
     name,

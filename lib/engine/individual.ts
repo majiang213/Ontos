@@ -72,6 +72,7 @@ export function propValueFrom(cls: Cls, ind: Individual, src: string, prop: stri
 
 /** when 里一个键是否成立：true=有行；false=无行；过滤=有行且已映射属性满足。 */
 async function whenKeyHolds(cls: Cls, ind: Individual, src: string, cond: boolean | Filter, env: Env, ctx: EvalContext): Promise<boolean> {
+  if (!(src in ind.rows)) throw new EngineReject(`when 规则指向不存在的源条目：${cls.name} 没有 ${src}`); // 拼错源名不能静默吞
   const row = ind.rows[src];
   if (cond === true) return row != null;
   if (cond === false) return row == null;
@@ -84,8 +85,8 @@ async function whenKeyHolds(cls: Cls, ind: Individual, src: string, cond: boolea
       }
       continue;
     }
-    if (prop.startsWith("$")) throw new Error(`when 下的过滤不支持 ${prop}`);
-    if (!(await conditionHolds(propValueFrom(cls, ind, src, prop), cv, { ...ctx, current: sourceView(cls, ind, src) }))) return false;
+    if (prop.startsWith("$")) throw new EngineReject(`when 下的过滤不支持 ${prop}`);
+    if (!(await conditionHolds(propValueFrom(cls, ind, src, prop), cv, { ...ctx, current: sourceView(cls, ind, src) }, cls.def.properties[prop]?.type === "date"))) return false;
   }
   return true;
 }
@@ -124,7 +125,13 @@ export async function evalDerived(cls: Cls, ind: Individual, prop: string, env: 
 
 /** 操作数求值（异步：派生属性可能要查源）：字面量、ISO 日期串、日期表达式、{ property, from }、{ from: identity }。 */
 export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unknown> {
-  if (Array.isArray(v)) return v.map((x) => resolveLiteral(x)); // in 的值是数组，元素级解析（ISO 串落成秒）
+  if (Array.isArray(v)) {
+    try {
+      return v.map((x) => resolveLiteral(x)); // in 的值是数组，元素级解析（ISO 串落成秒）
+    } catch (e) {
+      throw new EngineReject(e instanceof Error ? e.message : String(e)); // 与标量分支同口径：非法表达式 422 不是 500
+    }
+  }
   if (v !== null && typeof v === "object") {
     const rec = v as Record<string, unknown>;
     if (typeof rec.property === "string") {
@@ -164,36 +171,36 @@ function dataLiteral(v: unknown): unknown {
   }
 }
 
-/** 单个条件是否成立。actual 为 undefined（个体或该值不存在）时一律不成立；
- *  null（列在、值为空）按「空=至今」处理：actual 为空时 gt/gte 成立；expected 为空时 lt/lte 成立。 */
-export async function conditionHolds(actual: unknown, condVal: unknown, ctx: EvalContext): Promise<boolean> {
+/** 单个条件是否成立。actual 为 undefined（个体或该值不存在）时一律不成立。
+ *  dateLike=true（仅 date 类型属性）时 null 按「空=至今」处理：actual 为空时 gt/gte 成立；expected 为空时 lt/lte 成立。 */
+export async function conditionHolds(actual: unknown, condVal: unknown, ctx: EvalContext, dateLike = false): Promise<boolean> {
   const a = dataLiteral(actual); // ISO 日期串落成秒；脏数据不抛错
   if (condVal !== null && typeof condVal === "object" && !Array.isArray(condVal)) {
     const rec = condVal as Record<string, unknown>;
     const keys = Object.keys(rec);
     if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
       for (const op of keys) {
-        if (!compareOp(a, op, await resolveOperand(rec[op], ctx))) return false;
+        if (!compareOp(a, op, await resolveOperand(rec[op], ctx), dateLike)) return false;
       }
       return true;
     }
     // 裸的 { property, from } 视为等值
-    return compareOp(a, "eq", await resolveOperand(condVal, ctx));
+    return compareOp(a, "eq", await resolveOperand(condVal, ctx), dateLike);
   }
   // 等值位的字面量同样过解析：日期表达式、ISO 串落成秒，非法表达式拒绝
-  return compareOp(a, "eq", await resolveOperand(condVal, ctx));
+  return compareOp(a, "eq", await resolveOperand(condVal, ctx), dateLike);
 }
 
-function compareOp(actual: unknown, op: string, expected: unknown): boolean {
+function compareOp(actual: unknown, op: string, expected: unknown, dateLike: boolean): boolean {
   if (actual === undefined) return false; // 没有这个体或这个值：任何字段条件都不成立
   if (actual === null) {
     if (op === "eq") return expected === null;
     if (op === "ne") return expected !== null;
-    if (op === "gt" || op === "gte") return true; // 空=至今，至今晚于任何日期
+    if (dateLike && (op === "gt" || op === "gte")) return true; // 空=至今，至今晚于任何日期
     return false;
   }
   if (expected === null) {
-    if (op === "lt" || op === "lte") return true; // 与至今比：任何值都不晚于至今
+    if (dateLike && (op === "lt" || op === "lte")) return true; // 与至今比：任何日期值都不晚于至今
     if (op === "gt" || op === "gte") return false;
     if (op === "ne") return true;
     return false; // eq / in / contains
@@ -249,7 +256,7 @@ export async function evalFilterOnIndividual(cls: Cls, ind: Individual, filter: 
     const def = cls.def.properties[key];
     if (!def) throw new EngineReject(`过滤里的名字对不上配置：${cls.name}.${key}`);
     const actual = def.derived ? await evalDerived(cls, ind, key, env, ctx) : propValue(cls, ind, key);
-    if (!(await conditionHolds(actual, v, evalCtx))) return false;
+    if (!(await conditionHolds(actual, v, evalCtx, def.type === "date"))) return false;
   }
   return true;
 }

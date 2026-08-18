@@ -6,36 +6,53 @@ import { z } from "zod";
 import { adjudicate, type Verdict } from "@/lib/engine/adjudicate";
 import { DraftReject, getDraft } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
 
-const bodySchema = z.object({
-  class_a: z.string(),
-  class_b: z.string(),
-  verdict: z.enum(["同一", "部分重叠", "阶段", "仅名称相似", "跳过"]),
-  stage_names: z.object({ from: z.string(), to: z.string() }).optional(),
-  llm_advice: z.string().optional(),
-  evidence: z
-    .object({
-      norm_rule: z.string().optional(),
-      count_a: z.number().optional(),
-      count_b: z.number().optional(),
-      count_hit: z.number().optional(),
-      rate: z.number().optional(),
-    })
-    .optional(),
-  decided_by: z.string().default("画布操作者"),
-});
+const bodySchema = z
+  .object({
+    class_a: z.string(),
+    class_b: z.string(),
+    verdict: z.enum(["同一", "部分重叠", "阶段", "仅名称相似", "跳过"]),
+    stage_names: z.object({ from: z.string(), to: z.string() }).optional(),
+    llm_advice: z.string().optional(),
+    evidence: z
+      .object({
+        norm_rule: z.string().optional(),
+        count_a: z.number().optional(),
+        count_b: z.number().optional(),
+        count_hit: z.number().optional(),
+        rate: z.number().optional(),
+      })
+      .optional(),
+    decided_by: z.string().default("画布操作者"),
+  })
+  .refine((b) => b.class_a !== b.class_b, { message: "class_a 与 class_b 不能是同一个类" });
 
 export async function GET() {
-  return NextResponse.json({ decisions: metaStore().listDecisions() });
+  try {
+    return NextResponse.json({ decisions: metaStore().listDecisions() });
+  } catch (e) {
+    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
+  const denied = requireWriteAuth(req);
+  if (denied) return denied;
   try {
     const body = bodySchema.parse(await bodyJson(req));
     // 先裁决后留痕：裁决被校验闸回退时不留幻影记录（候选对也不能因此被永久排除）。
     // 源名要在裁决前读——「同一/阶段」会把 B 类撤掉。
     const d = getDraft().draft;
+    const clsA = d.object_types[body.class_a];
+    const clsB = d.object_types[body.class_b];
+    if (!clsA || !clsB) return NextResponse.json({ error: "类不存在，先刷新画布" }, { status: 422 });
+    // 裁决只对跨源候选有意义：同源两个类不在这条流程里（候选对入口本就只列跨源）
+    const connsOf = (t: typeof clsA) => new Set(Object.values(t.sources ?? {}).map((s) => s.connection));
+    const shared = [...connsOf(clsA)].filter((c) => connsOf(clsB).has(c));
+    if (shared.length > 0 && body.verdict !== "仅名称相似" && body.verdict !== "跳过") {
+      return NextResponse.json({ error: `两个类共享来源 ${shared.join("、")}，不是跨源候选对` }, { status: 422 });
+    }
     const sourceOf = (name: string) => Object.keys(d.object_types[name]?.sources ?? {})[0] ?? "";
     const source_a = sourceOf(body.class_a);
     const source_b = sourceOf(body.class_b);
@@ -57,6 +74,6 @@ export async function POST(req: Request) {
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
     if (e instanceof Error && e.message.startsWith("配置不合法")) return NextResponse.json({ error: e.message }, { status: 422 });
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }

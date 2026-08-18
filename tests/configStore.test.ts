@@ -30,7 +30,7 @@ async function freshStore() {
   return s;
 }
 
-describe("配置存储（工作副本与发布）", async () => {
+describe("配置存储（工作副本与发布）", () => {
   it("初始：草稿=已发布 v1，无改动", async () => {
     const s = await freshStore();
     const state = s.getDraft();
@@ -157,6 +157,27 @@ describe("配置存储（工作副本与发布）", async () => {
     const { version } = s.publishDraft();
     expect(version).toBe(1);
     expect(existsSync(join(tmp, "lib/config/versions/v2.yaml"))).toBe(false);
+  });
+
+  it("回滚守卫：草稿脏时拒绝；版本不存在拒绝", async () => {
+    const s = await freshStore();
+    s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }); // 弄脏草稿
+    expect(() => s.rollbackTo(1)).toThrow("先发布或放弃");
+    s.discardDraft(); // 干净了再验版本守卫
+    expect(() => s.rollbackTo(99)).toThrow("版本不存在");
+  });
+
+  it("放弃草稿：未绑版本的裁决留痕标「已放弃」，不挂到下一次发布", async () => {
+    const s = await freshStore();
+    const meta = (await import("../lib/meta/store")).metaStore();
+    s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
+    meta.recordDecision({ class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: "跳过", decided_by: "测试" });
+    s.discardDraft();
+    expect(meta.listDecisions()[0].version).toBe(-1); // 已放弃
+    // 下一次发布不回填它
+    s.applyOp({ op: "create_object", name: "vendor2", kind: "thing" });
+    s.publishDraft();
+    expect(meta.listDecisions()[0].version).toBe(-1);
   });
 
   it("跨类动作引用守卫：删 repair.is_open 被拒（equipment.finish_repair 在用）", async () => {

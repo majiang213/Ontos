@@ -113,7 +113,7 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
     if (from === "object") return ctx.object;
     if (from === "current") return ctx.current?.[propName];
     if (from === "generated") {
-      if (!gen) throw new Error(`属性 ${propName} 没有 generate，不能 from: generated`);
+      if (!gen) throw new Error(`该路径不支持 from: generated（属性 ${propName}：发号只在 create 投影里可用）`);
       return gen();
     }
     throw new Error(`无法识别的取值来源：${JSON.stringify(v)}`);

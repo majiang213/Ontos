@@ -4,15 +4,21 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { listVersions, rollbackTo, DraftReject } from "@/lib/engine/configStore";
-import { BadRequest, bodyJson } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
 
 export async function GET() {
-  return NextResponse.json({
-    versions: listVersions().map((v) => ({ version: v.version, createdAt: v.createdAt })),
-  });
+  try {
+    return NextResponse.json({
+      versions: listVersions().map((v) => ({ version: v.version, createdAt: v.createdAt })),
+    });
+  } catch (e) {
+    return internalError(e);
+  }
 }
 
 export async function POST(req: Request) {
+  const denied = requireWriteAuth(req);
+  if (denied) return denied;
   try {
     const { version } = z.object({ version: z.number().int().positive() }).parse(await bodyJson(req));
     const result = rollbackTo(version);
@@ -21,8 +27,6 @@ export async function POST(req: Request) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    // 旧版本文件内容不合法（rollbackTo 加载时校验失败）也是请求层问题
-    if (e instanceof Error && e.message.startsWith("配置不合法")) return NextResponse.json({ error: e.message }, { status: 422 });
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }

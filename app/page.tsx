@@ -22,7 +22,13 @@ export default function Home() {
           </button>
         ))}
       </nav>
-      {page === "build" ? <CanvasPage /> : <ChatPage />}
+      {/* 两页常驻挂载、用显隐切换：切页不丢画布状态与对话消息 */}
+      <div style={{ display: page === "build" ? "contents" : "none" }}>
+        <CanvasPage />
+      </div>
+      <div style={{ display: page === "chat" ? "contents" : "none" }}>
+        <ChatPage />
+      </div>
     </div>
   );
 }

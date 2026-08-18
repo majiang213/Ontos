@@ -13,22 +13,25 @@ import {
 import { EngineReject } from "./individual";
 
 const quote = (id: string) => `"${id}"`;
-// node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言
-const bind = (params: unknown[]) => params as never[];
+// node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
+// node:sqlite 不认 boolean，绑定前归一成 1/0。
+const bind = (params: unknown[]) => params.map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v)) as never[];
 
 export class SqliteFixtureDriver implements SourceDriver {
   readonly dialect = "sqlite" as const;
   private dbs = new Map<string, DatabaseSync>();
 
-  /** 注册一个连接，返回它的内存库（建表、插种子用）。 */
+  /** 注册一个连接，返回它的内存库（建表、插种子用）。同名覆盖先关旧句柄。 */
   register(connection: string): DatabaseSync {
+    this.dbs.get(connection)?.close();
     const db = new DatabaseSync(":memory:");
     this.dbs.set(connection, db);
     return db;
   }
 
-  /** 注册一个 SQLite 文件库作为连接（连接表单里的 sqlite 类型走这里）。 */
+  /** 注册一个 SQLite 文件库作为连接（连接表单里的 sqlite 类型走这里）。同名覆盖先关旧句柄。 */
   registerFile(connection: string, path: string): void {
+    this.dbs.get(connection)?.close();
     this.dbs.set(connection, new DatabaseSync(path));
   }
 
@@ -38,8 +41,8 @@ export class SqliteFixtureDriver implements SourceDriver {
     return db;
   }
 
-  async select(connection: string, table: string, columns: string[], conditions: Condition[]) {
-    const { sql, params } = buildSelect(table, columns, conditions, quote);
+  async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
+    const { sql, params } = buildSelect(table, columns, conditions, "sqlite", limit);
     return this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
   }
 

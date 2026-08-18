@@ -25,6 +25,15 @@ export function validateSemantics(config: OntologyConfig): void {
         if (!cls.properties[prop]) throw new Error(`配置不合法：${clsName}.${srcName} 的 fields 指向不存在的属性 ${prop}`);
       }
     }
+    // when 派生的每条规则：键必须是该类的源条目名（拼错源名会被静默吞，必须在发布闸拦住）
+    for (const [prop, def] of Object.entries(cls.properties)) {
+      if (!Array.isArray(def.derived)) continue;
+      for (const rule of def.derived) {
+        for (const src of Object.keys(rule.when)) {
+          if (!cls.sources?.[src]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则指向不存在的源条目 ${src}`);
+        }
+      }
+    }
   }
   for (const [linkName, link] of Object.entries(config.link_types)) {
     for (const end of [link.from, link.to]) {
@@ -44,6 +53,11 @@ export function validateSemantics(config: OntologyConfig): void {
       const def = config.object_types[link.from].properties[link.transition.property];
       if (!def?.derived || !Array.isArray(def.derived)) {
         throw new Error(`配置不合法：关系 ${linkName} 的 transition.property 不是 when 派生（${link.from}.${link.transition.property}）`);
+      }
+      // 转化的两个端点值必须都在派生规则的产出里，否则运行期永远判不出来
+      const values = new Set(def.derived.map((r) => r.value));
+      if (!values.has(link.transition.from) || !values.has(link.transition.to)) {
+        throw new Error(`配置不合法：关系 ${linkName} 的 transition 阶段值不在派生规则里（${String(link.transition.from)} / ${String(link.transition.to)}）`);
       }
     }
   }

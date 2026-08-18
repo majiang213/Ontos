@@ -20,14 +20,29 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
     if (!A.properties[prop]) A.properties[prop] = def;
   }
   A.sources = A.sources ?? {};
+  const renamed = new Map<string, string>(); // B 的源条目旧名 → 并进 A 后的新名
   for (const [srcName, entry] of Object.entries(B.sources ?? {})) {
     const newName = A.sources[srcName] ? `${srcName}_${b}` : srcName;
+    if (newName !== srcName) renamed.set(srcName, newName);
     const fields = { ...entry.fields };
     if (remapId && fields[remapId]) {
       fields[A.identity!] = fields[remapId];
       delete fields[remapId];
     }
-    A.sources[newName] = { ...entry, fields };
+    // 源条目的 key 若正是 B 的识别属性，随 remap 一并改到 A 的识别属性
+    const key = entry.key === remapId ? A.identity : entry.key;
+    A.sources[newName] = { ...entry, fields, key };
+  }
+  // B 带来的派生属性：when 规则的源键随源条目改名改写，不然规则静默死掉
+  if (renamed.size > 0) {
+    for (const [prop, def] of Object.entries(B.properties)) {
+      if (prop === remapId || A.properties[prop] !== def) continue; // 只处理真正并进来的
+      if (Array.isArray(def.derived)) {
+        for (const rule of def.derived) {
+          rule.when = Object.fromEntries(Object.entries(rule.when).map(([k, v]) => [renamed.get(k) ?? k, v])) as never;
+        }
+      }
+    }
   }
   // B 的动作与公理带过来（同名跳过）
   if (B.actions) {
@@ -70,8 +85,10 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       const srcA = Object.keys(A.sources ?? {})[0];
       const srcB = newKeys[0] ?? srcA; // B 并进来的第一个源条目
       if (!srcA || !srcB || srcA === srcB) throw new Error("阶段裁决需要两个不同的源条目");
-      // 派生属性不进 fields：status 若是源列属性，先摘干净
-      for (const entry of Object.values(A.sources ?? {})) delete entry.fields.status;
+      // 撞名不静默覆盖：合并后已有 status 属性 / 同名关系 / 同名动作时让人先改名
+      if (A.properties.status) throw new Error(`阶段裁决需要立派生属性 status，但 ${a} 上已有同名属性——先把它改名或删掉`);
+      if (d.link_types[`${a}_to_${to}`]) throw new Error(`关系名 ${a}_to_${to} 已存在——换个阶段名再裁`);
+      if (A.actions?.[`convert_to_${to}`]) throw new Error(`动作名 convert_to_${to} 已存在——换个阶段名再裁`);
       A.properties.status = {
         type: "enum",
         values: [from, to],

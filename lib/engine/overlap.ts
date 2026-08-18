@@ -6,6 +6,10 @@ import type { Cls } from "./individual";
 import { keyColumn, sourcesOf } from "./individual";
 import { pickRule, normalizeWith } from "./normalize";
 import type { MetaStore } from "../meta/store";
+import { EngineReject } from "./individual";
+
+/** 识别列全量扫的行数上限：交集是内存集合运算，超大表先收窄再算。 */
+const MAX_SCAN = 50_000;
 
 export interface OverlapResult {
   class_a: string;
@@ -23,8 +27,9 @@ export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls,
     const out: string[][] = [];
     for (const [, entry] of sourcesOf(cls)) {
       const col = keyColumn(cls, entry);
-      const rows = await driver.select(entry.connection, entry.table, [col], []);
-      out.push(rows.map((r) => r[col]).filter((v) => v != null).map(String));
+      const rows = await driver.select(entry.connection, entry.table, [col], [], MAX_SCAN + 1); // 多取一行探测超限
+      if (rows.length > MAX_SCAN) throw new EngineReject(`${cls.name} 的识别列超过 ${MAX_SCAN} 行，交集算不了（先收窄范围）`);
+      out.push(rows.map((r) => r[col]).filter((v) => v != null && String(v).trim() !== "").map(String)); // 空串不算标识，防幻影交集
     }
     return out;
   };
@@ -45,6 +50,10 @@ export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls,
     count_hit: hit,
     rate: Math.max(a.size, b.size) === 0 ? 0 : hit / Math.max(a.size, b.size),
   };
-  meta?.recordOverlap(result); // 只落计数与比率；值集合随函数返回即弃
+  try {
+    meta?.recordOverlap(result); // 只落计数与比率；值集合随函数返回即弃
+  } catch {
+    // 留痕失败不挡返回——交集已经算出来了
+  }
   return result;
 }

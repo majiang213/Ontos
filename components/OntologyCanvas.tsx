@@ -2,7 +2,7 @@
 // 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Background,
   Controls,
@@ -88,10 +88,12 @@ export default function OntologyCanvas(props: {
   objects: CanvasObject[];
   links: CanvasLink[];
   layout?: Record<string, { x: number; y: number }>;
+  selectedLink?: string | null;
   onSelect: (name: string) => void;
   onSelectLink?: (name: string) => void;
   onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
+  onToggleMaximize?: () => void;
 }) {
   return (
     <ReactFlowProvider>
@@ -104,18 +106,22 @@ function Flow({
   objects,
   links,
   layout,
+  selectedLink,
   onSelect,
   onSelectLink,
   onConnectRequest,
   onLayoutChange,
+  onToggleMaximize,
 }: {
   objects: CanvasObject[];
   links: CanvasLink[];
   layout?: Record<string, { x: number; y: number }>;
+  selectedLink?: string | null;
   onSelect: (name: string) => void;
   onSelectLink?: (name: string) => void;
   onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
+  onToggleMaximize?: () => void;
 }) {
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = layoutObjects(objects, links);
@@ -159,7 +165,8 @@ function Flow({
     const pos = layoutObjects(objects, links);
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
     onLayoutChange?.(Object.fromEntries(pos));
-    requestAnimationFrame(() => rf.fitView({ padding: 0.2 }));
+    // 双帧后取景：等节点重新测量完
+    requestAnimationFrame(() => requestAnimationFrame(() => rf.fitView({ padding: 0.2 })));
   }, [objects, links, setNodes, rf, onLayoutChange]);
 
   const edges: Edge[] = useMemo(
@@ -170,12 +177,25 @@ function Flow({
         source: l.from,
         target: l.to,
         label: l.inverse ? `${l.name} / ${l.inverse}` : l.name,
-        style: l.kind === "transition" ? { strokeDasharray: "6 4", stroke: "var(--warn)" } : undefined,
+        style: l.name === selectedLink
+          ? { stroke: "var(--accent)", strokeWidth: 2.5 } // 点中的边高亮
+          : l.kind === "transition"
+            ? { strokeDasharray: "6 4", stroke: "var(--warn)" }
+            : undefined,
         markerEnd: { type: MarkerType.ArrowClosed },
         interactionWidth: 20, // 线的点击热区放宽，细线也好点
       })),
-    [links]
+    [links, selectedLink]
   );
+
+  // 首批对象到达后才取景（挂载时 nodes 恒为空，fitView 等于白做）
+  const fittedOnce = useRef(false);
+  useEffect(() => {
+    if (!fittedOnce.current && objects.length > 0) {
+      fittedOnce.current = true;
+      requestAnimationFrame(() => rf.fitView({ padding: 0.2 }));
+    }
+  }, [objects.length, rf]);
 
   return (
     <ReactFlow
@@ -187,6 +207,7 @@ function Flow({
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
       nodesConnectable
+      deleteKeyCode={null} // 删除只走编辑卡/详情卡：键盘删节点不过草稿，状态会乱
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}
       onEdgeClick={(_, edge) => onSelectLink?.(edge.id)}
@@ -197,7 +218,8 @@ function Flow({
     >
       <Background gap={20} color="rgba(32,29,24,0.06)" />
       <Controls showInteractive={false} />
-      <Panel position="top-right">
+      <Panel position="top-right" style={{ display: "flex", gap: 8 }}>
+        {onToggleMaximize && <button className="btn" onClick={onToggleMaximize}>最大化</button>}
         <button className="btn" onClick={tidy}>整理布局</button>
       </Panel>
     </ReactFlow>

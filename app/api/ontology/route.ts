@@ -4,25 +4,30 @@
 
 import { NextResponse } from "next/server";
 import { getDraft, getPublished, sameConfig } from "@/lib/engine/configStore";
+import { internalError } from "@/app/api/_shared";
 
 export async function GET() {
-  const state = getDraft();
-  const published = getPublished().config;
-  const states: Record<string, "new" | "modified" | "same"> = {};
-  for (const [name, t] of Object.entries(state.draft.object_types)) {
-    const pub = published.object_types[name];
-    states[name] = !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
+  try {
+    const state = getDraft();
+    const published = getPublished().config;
+    const states: Record<string, "new" | "modified" | "same"> = {};
+    for (const [name, t] of Object.entries(state.draft.object_types)) {
+      const pub = published.object_types[name];
+      states[name] = !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
+    }
+    // 已发布但草稿里删掉的对象：给画布一个「待删除」名单
+    const deleted = Object.keys(published.object_types).filter((name) => !(name in state.draft.object_types));
+    return NextResponse.json({
+      version: state.baseVersion,
+      dirty: state.dirty,
+      layout: state.layout,
+      states,
+      deleted,
+      object_types: state.draft.object_types,
+      link_types: state.draft.link_types,
+      outlets: state.draft.outlets ?? {},
+    });
+  } catch (e) {
+    return internalError(e);
   }
-  // 已发布但草稿里删掉的对象：给画布一个「待删除」名单
-  const deleted = Object.keys(published.object_types).filter((name) => !(name in state.draft.object_types));
-  return NextResponse.json({
-    version: state.baseVersion,
-    dirty: state.dirty,
-    layout: state.layout,
-    states,
-    deleted,
-    object_types: state.draft.object_types,
-    link_types: state.draft.link_types,
-    outlets: state.draft.outlets ?? {},
-  });
 }

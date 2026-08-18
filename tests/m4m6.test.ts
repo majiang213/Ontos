@@ -36,8 +36,8 @@ describe("版本历史与回滚", () => {
   });
 });
 
-describe("验收问题集跑批（路由同款链路）", () => {
-  // 与仓库运行态隔离：loadConfig 读 cwd 下已发布快照，拷贝种子到临时目录
+describe("验收问题集跑批（真路由）", () => {
+  // 直接打 POST /api/questions?run=1，不在测试里重实现跑批；与仓库运行态隔离
   let tmp: string;
   let repoRoot: string;
   beforeEach(async () => {
@@ -48,32 +48,32 @@ describe("验收问题集跑批（路由同款链路）", () => {
     process.chdir(tmp);
     (await import("../lib/engine/configStore")).resetStore();
     (await import("../lib/meta/store")).resetMetaStore();
+    (await import("../lib/engine/load")).resetRegistry();
   });
   afterEach(async () => {
     (await import("../lib/engine/configStore")).resetStore();
     (await import("../lib/meta/store")).resetMetaStore();
+    (await import("../lib/engine/load")).resetRegistry();
     process.chdir(repoRoot);
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("四问全过；答错记失败", async () => {
-    const meta = (await import("../lib/meta/store")).freshMetaStore(join(mkdtempSync(join(tmpdir(), "ontos-q-")), "m.db"));
-    const { CannedSlot } = await import("../lib/engine/llmSlot");
-    const { runQuery } = await import("../lib/engine/query");
-    const { freshDriver, loadConfig } = await import("../lib/engine/load");
-    const slot = new CannedSlot();
-    const config = loadConfig();
-    meta.addQuestion("在役设备及其所属部门");
-    meta.addQuestion("还有多少在途设备");
-    meta.addQuestion("哪些设备过保了");
-    meta.addQuestion("每个部门多少台在役设备");
-    for (const q of meta.listQuestions()) {
-      const query = await slot.nlToQuery(q.question, config);
-      await runQuery(config, freshDriver(), query);
-      meta.setQuestionStatus(q.id, "通过", 1);
-    }
-    expect(meta.listQuestions().every((q) => q.status === "通过")).toBe(true);
-    meta.close();
+  it("期望行数对上记通过、对不上记失败；失败带明细，版本落上", async () => {
+    const meta = (await import("../lib/meta/store")).metaStore();
+    const { POST } = await import("../app/api/questions/route");
+    meta.addQuestion("在役设备及其所属部门", "97"); // 种子恰有 97 台在役
+    meta.addQuestion("还有多少在途设备", "1"); // 故意答错（实际 81）
+    const res = await POST(new Request("http://x/api/questions?run=1", { method: "POST" }) as never);
+    const data = await res.json();
+    const pass = data.results.find((r: { question: string }) => r.question === "在役设备及其所属部门");
+    const fail = data.results.find((r: { question: string }) => r.question === "还有多少在途设备");
+    expect(pass.status).toBe("通过");
+    expect(fail.status).toBe("失败");
+    expect(fail.detail).toContain("期望 1 行");
+    // 状态与版本落库
+    const stored = meta.listQuestions();
+    expect(stored.find((q) => q.question === "在役设备及其所属部门")?.status).toBe("通过");
+    expect(stored.every((q) => q.version === 1)).toBe(true);
   });
 });
 
@@ -102,22 +102,25 @@ describe("MCP 工具端点", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  async function call(name: string, args: Record<string, unknown>) {
+  /** JSON-RPC 2.0 调用：HTTP 一律 200，成败看信封（result / error）。 */
+  async function rpc(method: string, params?: Record<string, unknown>, rawBody?: string) {
     const { POST } = await import("../app/api/mcp/route");
     const req = new Request("http://localhost/api/mcp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ method: "tools/call", params: { name, arguments: args } }),
+      body: rawBody ?? JSON.stringify({ jsonrpc: "2.0", id: 7, method, params }),
     });
     const res = await POST(req as never);
-    return { status: res.status, data: await res.json() };
+    return (await res.json()) as { id?: unknown; result?: any; error?: { code: number; message: string } };
   }
+  const call = (name: string, args: Record<string, unknown>) => rpc("tools/call", { name, arguments: args });
 
-  it("tools/list 列出七个工具", async () => {
-    const { POST } = await import("../app/api/mcp/route");
-    const res = await POST(new Request("http://x", { method: "POST", body: JSON.stringify({ method: "tools/list" }) }) as never);
-    const data = await res.json();
-    expect(data.tools.map((t: { name: string }) => t.name)).toEqual([
+  it("initialize 握手 + tools/list 列出七个工具 + id 回显", async () => {
+    const init = await rpc("initialize");
+    expect(init.id).toBe(7);
+    expect(init.result.serverInfo.name).toBe("ontos");
+    const list = await rpc("tools/list");
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "query",
       "run_action",
       "propose_ontology",
@@ -129,33 +132,39 @@ describe("MCP 工具端点", () => {
   });
 
   it("query：执行结构化查询并留痕", async () => {
-    const { status, data } = await call("query", { query: { object: "equipment", filter: { status: "scrapped" } } });
-    expect(status).toBe(200);
-    expect(data.content.rows.length).toBe(3);
+    const r = await call("query", { query: { object: "equipment", filter: { status: "scrapped" } } });
+    expect(r.error).toBeUndefined();
+    expect(r.result.structuredContent.rows.length).toBe(3);
   });
 
   it("run_action：验收一台在途设备", async () => {
-    const { status, data } = await call("run_action", { action: "convert", object: "equipment", identity: "SN-40217" });
-    expect(status).toBe(200);
-    expect(data.content.ok).toBe(true);
-    expect(data.content.projections.length).toBe(3);
+    const r = await call("run_action", { action: "convert", object: "equipment", identity: "SN-40217" });
+    expect(r.error).toBeUndefined();
+    expect(r.result.structuredContent.ok).toBe(true);
+    expect(r.result.structuredContent.projections.length).toBe(3);
+    expect(r.result.isError).toBeUndefined();
+  });
+
+  it("run_action：前置不满足标 isError（与 /api/action 的 422 同语义）", async () => {
+    const r = await call("run_action", { action: "convert", object: "equipment", identity: "SN-40080" }); // 已在役，前置不满足
+    expect(r.result.structuredContent.ok).toBe(false);
+    expect(r.result.isError).toBe(true);
   });
 
   it("propose_ontology：对表产草稿建议（不落画布）", async () => {
-    const { status, data } = await call("propose_ontology", { tables: [{ connection: "device_sys", table: "department" }] });
-    expect(status).toBe(200);
-    expect(data.content.object_types.department.properties.dept_name).toBeDefined();
+    const r = await call("propose_ontology", { tables: [{ connection: "device_sys", table: "department" }] });
+    expect(r.result.structuredContent.object_types.department.properties.dept_name).toBeDefined();
   });
 
   it("propose_action：有转化关系的类给转化模板", async () => {
-    const { status, data } = await call("propose_action", { object: "equipment" });
-    expect(status).toBe(200);
-    expect(data.content.action.effect).toEqual([{ link: "converted" }]);
+    const r = await call("propose_action", { object: "equipment" });
+    expect(r.result.structuredContent.action.effect).toEqual([{ link: "converted" }]);
   });
 
-  it("未知工具 400；入参形状不合法 400；名字对不上 422", async () => {
-    expect((await call("fly", {})).status).toBe(400);
-    expect((await call("query", { query: { limit: "lots" } })).status).toBe(400);
-    expect((await call("query", { query: { object: "ghost" } })).status).toBe(422);
+  it("未知工具 -32601；入参形状不合法 -32602；领域拒绝 -32000；坏 JSON -32700", async () => {
+    expect((await call("fly", {})).error?.code).toBe(-32601);
+    expect((await call("query", { query: { limit: "lots" } })).error?.code).toBe(-32602);
+    expect((await call("query", { query: { object: "ghost" } })).error?.code).toBe(-32000);
+    expect((await rpc("tools/list", undefined, "not json")).error?.code).toBe(-32700);
   });
 });

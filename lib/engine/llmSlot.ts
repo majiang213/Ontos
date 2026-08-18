@@ -8,6 +8,8 @@ import type { ObjectType, OntologyConfig } from "../schema/config";
 import type { TableInfo } from "./driver";
 
 export interface LlmSlot {
+  /** 实现名，留痕用（离线回退 / 真模型名） */
+  readonly name: string;
   /** NL → 查询 JSON（问数槽位） */
   nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest>;
   /** 表结构 → 本体草稿（逆向建模槽位） */
@@ -26,6 +28,7 @@ export interface PairAdvice {
 /* ---------- 离线确定性回退 ---------- */
 
 export class CannedSlot implements LlmSlot {
+  readonly name = "canned-离线回退";
   async nlToQuery(question: string, _config: OntologyConfig): Promise<QueryRequest> {
     // 演示剧本四问 + 默认。形状与 generateObject 产物一致，过同一道 Zod
     if (/每个部门|各部门|多少台|多少设备/.test(question)) {

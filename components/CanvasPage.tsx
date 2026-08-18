@@ -39,8 +39,11 @@ export default function CanvasPage() {
   const [generating, setGenerating] = useState(false);
   const [linkDraft, setLinkDraft] = useState<{ from: string; to: string } | null>(null); // 拖线落地后等待取名的半成品
   const [selectedLink, setSelectedLink] = useState<string | null>(null); // 点中的边
+  const [maximized, setMaximized] = useState(false); // 画布最大化：藏起全部浮卡，Esc 退出
+  const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []); // 卸载清定时器
 
   const refresh = useCallback(() => fetch("/api/ontology").then((r) => r.json()).then(setOnt), []);
   // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
@@ -60,17 +63,22 @@ export default function CanvasPage() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
-  /** 编辑操作统一入口：发给草稿，刷新视图，错误进 toast。 */
+  /** 编辑操作统一入口：发给草稿，刷新视图，错误进 toast。网络层失败也要说。 */
   const op = useCallback(
     async (body: Record<string, unknown>) => {
-      const r = await fetch("/api/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await r.json();
-      if (!r.ok) {
-        showToast(data.error ?? "操作被拒");
+      try {
+        const r = await fetch("/api/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const data = await r.json();
+        if (!r.ok) {
+          showToast(data.error ?? "操作被拒");
+          return false;
+        }
+        await refresh();
+        return true;
+      } catch (e) {
+        showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
         return false;
       }
-      await refresh();
-      return true;
     },
     [refresh, showToast]
   );
@@ -91,15 +99,55 @@ export default function CanvasPage() {
       if (!r.ok) showToast(data.error ?? "发布被拒");
       else showToast(`已发布 v${data.version}，问数与动作即刻生效`);
       await refresh();
+    } catch (e) {
+      showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setPublishing(false);
     }
   };
   const discard = async () => {
-    await fetch("/api/publish", { method: "DELETE" });
-    showToast("已放弃改动，回到已发布快照");
-    setSelected(null);
-    await refresh();
+    if (publishing) return; // 与发布同一把闸，防连点
+    setPublishing(true);
+    try {
+      await fetch("/api/publish", { method: "DELETE" });
+      showToast("已放弃改动，回到已发布快照");
+      setSelected(null);
+      await refresh();
+    } catch (e) {
+      showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // Esc 关一切浮卡；最大化时先退出最大化
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (maximized) setMaximized(false);
+      setLinkDraft(null);
+      setSelectedLink(null);
+      setSelected(null);
+      setVersions(null);
+      setCreating(false);
+      setConnecting(false);
+      setQuestionsOpen(false);
+      setPanelOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [maximized]);
+
+  /** 左上四张卡互斥：开一个关其余。 */
+  const openTl = (which: "versions" | "create" | "connect" | "questions") => {
+    setCreating(false);
+    setConnecting(false);
+    setQuestionsOpen(false);
+    setVersions(null);
+    if (which === "create") setCreating(true);
+    if (which === "connect") setConnecting(true);
+    if (which === "questions") setQuestionsOpen(true);
+    // versions 的数据在调用方拉
   };
 
   /** 多选表 → 生成对象 → 直接上画布并收起抽屉。 */
@@ -188,6 +236,7 @@ export default function CanvasPage() {
         objects={objects}
         links={links}
         layout={ont?.layout}
+        selectedLink={selectedLink}
         onSelect={(name) => {
           setSelected(name);
           setSelectedLink(null);
@@ -198,35 +247,60 @@ export default function CanvasPage() {
         }}
         onConnectRequest={(from, to) => setLinkDraft({ from, to })}
         onLayoutChange={saveLayout}
+        onToggleMaximize={() => setMaximized((v) => !v)}
       />
 
-      {/* 左上：发布状态 + 入口 */}
-      <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button
-          className="eyebrow"
-          style={{ cursor: "pointer", border: "none" }}
-          title="版本历史"
-          onClick={async () => {
-            const r = await fetch("/api/versions");
-            const data = await r.json();
-            setVersions(data.versions ?? []);
-          }}
-        >
-          已发布 v{ont?.version ?? "…"} ▾
-        </button>
-        <button className="btn" onClick={() => setCreating(true)}>新建对象</button>
-        <button className="btn" onClick={() => setConnecting(true)}>连接数据源</button>
-        <button
-          className="btn"
-          onClick={async () => {
-            await loadPairs();
-            setPanelOpen(true);
-          }}
-        >
-          疑似重复
-        </button>
-        <button className="btn" onClick={() => setQuestionsOpen((v) => !v)}>验收问题集</button>
-      </div>
+      {/* 左上：发布状态 + 入口（最大化时藏起） */}
+      {!maximized && (
+        <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", maxWidth: "calc(100vw - 32px)" }}>
+          <button
+            className="eyebrow"
+            style={{ cursor: "pointer", border: "none" }}
+            title="版本历史"
+            onClick={async () => {
+              try {
+                const r = await fetch("/api/versions");
+                const data = await r.json();
+                openTl("versions");
+                setVersions(data.versions ?? []);
+              } catch (e) {
+                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+              }
+            }}
+          >
+            已发布 v{ont?.version ?? "…"} ▾
+          </button>
+          <button className="btn" onClick={() => openTl("create")}>新建对象</button>
+          <button className="btn" onClick={() => openTl("connect")}>连接数据源</button>
+          <button
+            className="btn"
+            onClick={async () => {
+              try {
+                await loadPairs();
+                setPanelOpen(true);
+              } catch (e) {
+                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+              }
+            }}
+          >
+            疑似重复
+          </button>
+          <button className="btn" onClick={() => (questionsOpen ? setQuestionsOpen(false) : openTl("questions"))}>验收问题集</button>
+        </div>
+      )}
+
+      {/* 空画布引导：没有任何对象时告诉人两条起步路径 */}
+      {ont && objects.length === 0 && (
+        <div className="float-card" style={{ top: "40%", left: "50%", translate: "-50% -50%", width: 380 }}>
+          <div className="bezel">
+            <div className="bezel-core" style={{ padding: 18, fontSize: 13, lineHeight: 2, color: "var(--ink-2)" }}>
+              画布还是空的。两条起步路径：
+              <br />· 点「连接数据源」接入库，再到「表结构」勾选表生成对象
+              <br />· 或点「新建对象」手动建模
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 版本历史卡（点版本号展开；回滚 = 旧内容作为新版本发布） */}
       {versions && (
@@ -235,7 +309,7 @@ export default function CanvasPage() {
             <div className="bezel-core" style={{ padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>
-                <button className="chip" onClick={() => setVersions(null)}>✕</button>
+                <button className="chip" aria-label="关闭" onClick={() => setVersions(null)}>✕</button>
               </div>
               {versions.map((v) => (
                 <div key={v.version} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
@@ -245,14 +319,23 @@ export default function CanvasPage() {
                   {v.version !== ont?.version && (
                     <button
                       className="chip"
+                      disabled={rollbacking}
                       onClick={async () => {
-                        const r = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: v.version }) });
-                        const data = await r.json();
-                        if (r.ok) {
-                          showToast(`已回滚到 v${v.version} 的内容（发布为 v${data.version}）`);
-                          setVersions(null);
-                          await refresh();
-                        } else showToast(data.error ?? "回滚失败");
+                        if (rollbacking) return; // 防连点：连发会产生两个新版本
+                        setRollbacking(true);
+                        try {
+                          const r = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: v.version }) });
+                          const data = await r.json();
+                          if (r.ok) {
+                            showToast(`已回滚到 v${v.version} 的内容（发布为 v${data.version}）`);
+                            setVersions(null);
+                            await refresh();
+                          } else showToast(data.error ?? "回滚失败");
+                        } catch (e) {
+                          showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+                        } finally {
+                          setRollbacking(false);
+                        }
                       }}
                     >
                       回滚到这版
@@ -268,14 +351,14 @@ export default function CanvasPage() {
       {/* 验收问题集卡 */}
       {questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
 
-      {/* 底中：裁决面板（候选对） */}
-      {panelOpen && !ont?.dirty && (
+      {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
+      {panelOpen && (
         <div className="float-card float-bc" style={{ width: 520, maxHeight: "60%" }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "56vh" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 处）</span>
-                <button className="chip" onClick={() => setPanelOpen(false)}>✕</button>
+                <button className="chip" aria-label="关闭" onClick={() => setPanelOpen(false)}>✕</button>
               </div>
               <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，两两列出，请你逐条定夺；三个以上重复时会出多条，裁完一条会自动重算。</div>
               {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
@@ -295,8 +378,8 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底中：发布条（有未发布改动时） */}
-      {ont?.dirty && (
+      {/* 底中：发布条（有未发布改动时；裁决面板打开时让位） */}
+      {ont?.dirty && !panelOpen && (
         <div className="float-card float-bc">
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 8, display: "flex", gap: 8, alignItems: "center" }}>
@@ -312,10 +395,19 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 左下：表结构抽屉开关（常驻，不被发布条挤掉） */}
-      <div className="float-card" style={{ bottom: 18, left: 16 }}>
-        <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
-      </div>
+      {/* 左下：表结构抽屉开关（常驻，不被发布条挤掉；最大化时藏起） */}
+      {!maximized && (
+        <div className="float-card" style={{ bottom: 18, left: 16 }}>
+          <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
+        </div>
+      )}
+
+      {/* 最大化时的出口（Esc 同效） */}
+      {maximized && (
+        <div className="float-card" style={{ top: 16, right: 16 }}>
+          <button className="btn" onClick={() => setMaximized(false)}>退出最大化（Esc）</button>
+        </div>
+      )}
 
       {/* toast：瞬时反馈 */}
       {toast && (
@@ -374,7 +466,7 @@ export default function CanvasPage() {
             <div className="bezel-core" style={{ padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>新建关系</span>
-                <button className="chip" onClick={() => setLinkDraft(null)}>✕</button>
+                <button className="chip" aria-label="关闭" onClick={() => setLinkDraft(null)}>✕</button>
               </div>
               <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px" }}>
                 {linkDraft.from} → {linkDraft.to}。关系得说清靠哪两个字段对上，默认用两边的识别字段。
@@ -405,7 +497,7 @@ export default function CanvasPage() {
             <div className="bezel-core" style={{ padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{selectedLink}</span>
-                <button className="chip" onClick={() => setSelectedLink(null)}>✕</button>
+                <button className="chip" aria-label="关闭" onClick={() => setSelectedLink(null)}>✕</button>
               </div>
               {(() => {
                 const l = ont.link_types[selectedLink] as any;
@@ -444,7 +536,7 @@ export default function CanvasPage() {
             <div className="bezel-core" style={{ padding: 16, overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{selected}</span>
-                <button className="chip" onClick={() => setSelected(null)}>✕</button>
+                <button className="chip" aria-label="关闭" onClick={() => setSelected(null)}>✕</button>
               </div>
               <div style={{ color: "var(--ink-3)", fontSize: 11, margin: "2px 0 8px" }}>
                 {ont?.states?.[selected!] === "new" ? "草稿，发布后生效" : ont?.states?.[selected!] === "modified" ? "有未发布改动" : "与已发布一致"}
@@ -456,7 +548,8 @@ export default function CanvasPage() {
                   rows={2}
                   style={{ width: "100%", fontSize: 12, padding: 8, borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel-2)", resize: "vertical" }}
                   onBlur={(e) => {
-                    if (e.target.value !== (sel.description ?? "")) void op({ op: "update_object", name: selected, description: e.target.value });
+                    // 跟挂载时的值比（defaultValue），不跟实时 sel 比——编辑期间的别处 refresh 不换基准
+                    if (e.target.value !== e.target.defaultValue) void op({ op: "update_object", name: selected, description: e.target.value });
                   }}
                 />
               </Section>
@@ -587,6 +680,7 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
   const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
   const [stage, setStage] = useState({ from: "", to: "" });
   const [busy, setBusy] = useState(false);
+  const [rateBusy, setRateBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const decide = async (verdict: string) => {
@@ -642,19 +736,28 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
         ) : (
           <button
             className="chip"
+            disabled={rateBusy}
             onClick={async () => {
+              if (rateBusy) return; // 交集是内存集合运算，连点没意义
+              setRateBusy(true);
               setError(null);
-              const r = await fetch("/api/overlap", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ class_a: pair.class_a, class_b: pair.class_b }),
-              });
-              const data = await r.json();
-              if (r.ok) setRate(data);
-              else setError(data.error ?? "算不了");
+              try {
+                const r = await fetch("/api/overlap", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ class_a: pair.class_a, class_b: pair.class_b }),
+                });
+                const data = await r.json();
+                if (r.ok) setRate(data);
+                else setError(data.error ?? "算不了");
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+              } finally {
+                setRateBusy(false);
+              }
             }}
           >
-            算一算实际重合度
+            {rateBusy ? "算着…" : "算一算实际重合度"}
           </button>
         )}
       </div>
@@ -691,11 +794,17 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
 function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
   const [items, setItems] = useState<{ id: number; question: string; status: string }[]>([]);
   const [text, setText] = useState("");
+  const [running, setRunning] = useState(false);
+  const [acting, setActing] = useState(false); // 增删的防连点
   const load = useCallback(async () => {
-    const r = await fetch("/api/questions");
-    const data = await r.json();
-    setItems(data.questions ?? []);
-  }, []);
+    try {
+      const r = await fetch("/api/questions");
+      const data = await r.json();
+      setItems(data.questions ?? []);
+    } catch {
+      showToast("问题集读不出来");
+    }
+  }, [showToast]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -705,7 +814,7 @@ function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast:
         <div className="bezel-core" style={{ padding: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
-            <button className="chip" onClick={onClose}>✕</button>
+            <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
           </div>
           {items.map((q) => (
             <div key={q.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
@@ -714,9 +823,16 @@ function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast:
                 <span className={`tag ${q.status === "通过" ? "tag-ok" : q.status === "失败" ? "tag-warn" : ""}`}>{q.status}</span>
                 <button
                   className="chip"
+                  aria-label="删除"
+                  disabled={acting}
                   onClick={async () => {
-                    await fetch("/api/questions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
-                    await load();
+                    setActing(true);
+                    try {
+                      await fetch("/api/questions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
+                      await load();
+                    } finally {
+                      setActing(false);
+                    }
                   }}
                 >
                   ✕
@@ -727,28 +843,43 @@ function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast:
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              if (!text.trim()) return;
-              await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
-              setText("");
-              await load();
+              if (!text.trim() || acting) return;
+              setActing(true);
+              try {
+                const r = await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
+                if (r.ok) setText("");
+                else showToast("没加上");
+                await load();
+              } finally {
+                setActing(false);
+              }
             }}
             style={{ display: "flex", gap: 6, marginTop: 8 }}
           >
             <input className="text-in" style={{ flex: 1, fontSize: 12, padding: "6px 10px" }} placeholder="加一条业务问题" value={text} onChange={(e) => setText(e.target.value)} />
-            <button type="submit" className="btn" style={{ fontSize: 12 }}>加</button>
+            <button type="submit" className="btn" style={{ fontSize: 12 }} disabled={acting}>加</button>
           </form>
           <button
             className="btn-cta"
             style={{ fontSize: 12, padding: "6px 16px", marginTop: 10 }}
+            disabled={running}
             onClick={async () => {
-              const r = await fetch("/api/questions?run=1", { method: "POST" });
-              const data = await r.json();
-              const failed = (data.results ?? []).filter((x: { status: string }) => x.status === "失败");
-              showToast(failed.length ? `${failed.length} 条失败，回 M2/M3 修本体或映射` : `全部通过（v${data.version}）`);
-              await load();
+              if (running) return; // 防连点：连跑多遍没意义
+              setRunning(true);
+              try {
+                const r = await fetch("/api/questions?run=1", { method: "POST" });
+                const data = await r.json();
+                const failed = (data.results ?? []).filter((x: { status: string }) => x.status === "失败");
+                showToast(failed.length ? `${failed.length} 条失败，回 M2/M3 修本体或映射` : `全部通过（v${data.version}）`);
+                await load();
+              } catch (e) {
+                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+              } finally {
+                setRunning(false);
+              }
             }}
           >
-            全量跑一遍
+            {running ? "跑着…" : "全量跑一遍"}
           </button>
         </div>
       </div>

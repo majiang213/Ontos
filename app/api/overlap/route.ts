@@ -8,9 +8,11 @@ import { demoDriver } from "@/lib/engine/load";
 import { EngineReject, mustCls } from "@/lib/engine/individual";
 import { computeOverlap } from "@/lib/engine/overlap";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError } from "@/app/api/_shared";
 
-const bodySchema = z.object({ class_a: z.string(), class_b: z.string() });
+const bodySchema = z
+  .object({ class_a: z.string(), class_b: z.string() })
+  .refine((b) => b.class_a !== b.class_b, { message: "自己和自己不算疑似重复" });
 
 export async function POST(req: Request) {
   try {
@@ -27,6 +29,6 @@ export async function POST(req: Request) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }

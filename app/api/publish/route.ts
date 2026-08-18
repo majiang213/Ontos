@@ -4,8 +4,11 @@
 import { NextResponse } from "next/server";
 import { discardDraft, DraftReject, publishDraft } from "@/lib/engine/configStore";
 import { ZodError } from "zod";
+import { requireWriteAuth } from "@/app/api/_shared";
 
-export async function POST() {
+export async function POST(req: Request) {
+  const denied = requireWriteAuth(req);
+  if (denied) return denied;
   try {
     const { version } = publishDraft();
     return NextResponse.json({ ok: true, version });
@@ -17,7 +20,13 @@ export async function POST() {
   }
 }
 
-export async function DELETE() {
-  discardDraft();
-  return NextResponse.json({ ok: true });
+export async function DELETE(req: Request) {
+  const denied = requireWriteAuth(req);
+  if (denied) return denied;
+  try {
+    discardDraft();
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
 }

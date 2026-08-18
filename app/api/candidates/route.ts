@@ -6,9 +6,11 @@ import { NextResponse } from "next/server";
 import { getDraft } from "@/lib/engine/configStore";
 import { getSlot, type PairAdvice } from "@/lib/engine/llmSlot";
 import { metaStore } from "@/lib/meta/store";
+import { internalError } from "@/app/api/_shared";
 
 export async function GET() {
-  const d = getDraft().draft;
+  try {
+    const d = getDraft().draft;
   const decided = new Set(metaStore().listDecisions().map((r) => [r.class_a, r.class_b].sort().join("|")));
   const classes = Object.entries(d.object_types)
     .filter(([, t]) => Object.keys(t.sources ?? {}).length > 0) // 无源对象不进裁决
@@ -31,5 +33,8 @@ export async function GET() {
     if ([...a.connections].some((c) => b.connections.has(c))) return false;
     return !decided.has([p.class_a, p.class_b].sort().join("|"));
   });
-  return NextResponse.json({ candidates });
+    return NextResponse.json({ candidates });
+  } catch (e) {
+    return internalError(e);
+  }
 }

@@ -1,5 +1,7 @@
-// 路由共用的小件：请求体解析与尽力留痕。
+// 路由共用的小件：请求体解析、尽力留痕、统一 500、写端点令牌闸。
 // 非路由文件（非 route.ts），只被各条 api 路由 import。
+
+import { NextResponse } from "next/server";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
 export class BadRequest extends Error {}
@@ -19,4 +21,19 @@ export function safeLog(fn: () => void): void {
   } catch {
     // 留痕失败不挡响应
   }
+}
+
+/** 统一的 500 形状：固定文案 + detail，不把驱动内部错误原样透出网。 */
+export function internalError(e: unknown): NextResponse {
+  return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+}
+
+/** 写端点的可选闸门：设了环境变量 ONTOS_TOKEN 才启用（演示默认放开）。
+ *  启用后写请求必须带 Authorization: Bearer <token>。返回 null 表示放行。 */
+export function requireWriteAuth(req: Request): NextResponse | null {
+  const token = process.env.ONTOS_TOKEN;
+  if (!token) return null;
+  const got = req.headers.get("authorization");
+  if (got === `Bearer ${token}`) return null;
+  return NextResponse.json({ error: "未授权：写操作需要有效的令牌" }, { status: 401 });
 }

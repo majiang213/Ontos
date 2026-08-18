@@ -10,7 +10,7 @@ import { demoDriver, loadConfig } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
 import { ZodError } from "zod";
-import { BadRequest, bodyJson, safeLog } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, safeLog } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
   const started = Date.now();
@@ -26,6 +26,6 @@ export async function POST(req: Request) {
     if (e instanceof ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 }); // 引擎拒绝，不猜
-    return NextResponse.json({ error: "引擎内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return internalError(e);
   }
 }

@@ -45,10 +45,10 @@ async function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: E
   const t = link.transition!;
   const clsOfLink = cls;
   const def = clsOfLink.def.properties[t.property];
-  if (!def?.derived || !Array.isArray(def.derived)) throw new Error(`transition.property 不是 when 派生：${t.property}`);
+  if (!def?.derived || !Array.isArray(def.derived)) throw new EngineReject(`transition.property 不是 when 派生：${t.property}`);
   const fromRule = def.derived.find((r) => r.value === t.from);
   const toRule = def.derived.find((r) => r.value === t.to);
-  if (!fromRule || !toRule) throw new Error(`派生规则里找不到阶段 ${String(t.from)} / ${String(t.to)}`);
+  if (!fromRule || !toRule) throw new EngineReject(`派生规则里找不到阶段 ${String(t.from)} / ${String(t.to)}`);
   const fromSourcesHaveRows = Object.entries(fromRule.when)
     .filter(([, cond]) => cond === true)
     .every(([src]) => ind.rows[src] != null);
@@ -97,6 +97,7 @@ interface SelectOpts {
   allColumns?: boolean; // 动作执行用：读全量映射列
   ctx?: EvalContext;
   path?: string[];
+  limit?: number; // 单源且无过滤时下推行数上限；多源/带过滤必须取全量再对齐核对，不下推
 }
 
 /** 本次涉及的属性：要返回的 + 过滤点到的 + 派生的输入 + 展开与 $link 的配对属性。 */
@@ -147,14 +148,14 @@ async function pushdownConditions(cls: Cls, filter: Filter | undefined, ctx: Eva
     if (def.derived) continue;
     const mapped = sourcesOf(cls).filter(([, e]) => e.fields[prop]);
     if (mapped.length !== 1) continue; // 多源都有时按声明顺序取值，推送会改变语义，留内存
-    const conds = await toConditions(mapped[0][1].fields[prop], cv, ctx);
+    const conds = await toConditions(mapped[0][1].fields[prop], cv, ctx, def.type === "date");
     if (!conds) continue;
     out.set(mapped[0][0], [...(out.get(mapped[0][0]) ?? []), ...conds]);
   }
   return out;
 }
 
-async function toConditions(column: string, cv: unknown, ctx: EvalContext): Promise<Condition[] | null> {
+async function toConditions(column: string, cv: unknown, ctx: EvalContext, dateLike = false): Promise<Condition[] | null> {
   try {
     if (cv !== null && typeof cv === "object" && !Array.isArray(cv)) {
       const rec = cv as Record<string, unknown>;
@@ -174,7 +175,7 @@ async function toConditions(column: string, cv: unknown, ctx: EvalContext): Prom
           else if (op === "ne") conds.push({ column, op: "notnull" });
           else return null; // 与 null 比大小：下推会改变语义（空按至今），留内存核对
         } else {
-          conds.push({ column, op: op as Condition["op"], value: v });
+          conds.push({ column, op: op as Condition["op"], value: v, nullLoose: dateLike || undefined });
         }
       }
       return conds;
@@ -198,6 +199,10 @@ export async function selectIndividuals(env: Env, clsName: string, opts: SelectO
   const pushed = await pushdownConditions(cls, opts.filter, ctx);
   const byKey = new Map<string, Individual>();
 
+  // limit 只在「单源、无过滤、无展开」时下推：多源要先取全量对齐，内存过滤同理，推下去会切掉候选
+  const pushLimit = opts.limit !== undefined && srcs.length === 1 && !opts.filter && !opts.expands?.length ? opts.limit : undefined;
+  let nullKeys = 0;
+  let dupKeys = 0;
   for (const [srcName, entry] of srcs) {
     const keyCol = keyColumn(cls, entry);
     const cols = new Set<string>([keyCol]);
@@ -205,17 +210,25 @@ export async function selectIndividuals(env: Env, clsName: string, opts: SelectO
     else for (const p of need) { const c = entry.fields[p]; if (c) cols.add(c); }
     const conds: Condition[] = [...(pushed.get(srcName) ?? [])];
     if (opts.identity !== undefined) conds.push({ column: keyCol, op: "eq", value: opts.identity });
-    const rows = await env.driver.select(entry.connection, entry.table, [...cols], conds);
+    const rows = await env.driver.select(entry.connection, entry.table, [...cols], conds, pushLimit);
     opts.path?.push(
-      `下推 ${entry.connection}.${entry.table}：取 ${[...cols].join("、")}${conds.length ? `，带条件 ${conds.length} 条` : ""}，命中 ${rows.length} 行（只读）`
+      `下推 ${entry.connection}.${entry.table}：取 ${[...cols].join("、")}${conds.length ? `，带条件 ${conds.length} 条` : ""}${pushLimit ? `，limit ${pushLimit} 下推` : ""}，命中 ${rows.length} 行（只读）`
     );
     for (const row of rows) {
-      const k = String(row[keyCol]);
+      const kv = row[keyCol];
+      if (kv == null || String(kv).trim() === "") {
+        nullKeys++; // 缺识别值的行没法对齐，排除并记账
+        continue;
+      }
+      const k = String(kv);
       const ind = byKey.get(k) ?? { key: k, rows: Object.fromEntries(srcs.map(([s]) => [s, null])) };
-      ind.rows[srcName] = row;
+      if (ind.rows[srcName] != null) dupKeys++; // 同源同键重复：保留首行，记账
+      else ind.rows[srcName] = row;
       byKey.set(k, ind);
     }
   }
+  if (nullKeys > 0) opts.path?.push(`${nullKeys} 行缺识别值，已排除（不对齐成个体）`);
+  if (dupKeys > 0) opts.path?.push(`${dupKeys} 行与同源已有行识别值重复，保留首行`);
 
   let list = [...byKey.values()];
   if (opts.filter) {
@@ -242,6 +255,11 @@ export async function runQuery(config: OntologyConfig, driver: SourceDriver, req
   const cls = mustCls(config, req.object);
   const ctx: EvalContext = { identity: req.identity };
 
+  if (req.aggregate && req.expand?.length) throw new EngineReject("聚合与展开不能同给：分组统计不携带逐个体明细");
+  // 展开深度上限：每层都是一轮下推，无上限会被深层请求打爆
+  const depthOf = (exs: ExpandNode[] | undefined, d: number): number => (exs?.length ? Math.max(...exs.map((e) => depthOf(e.expand, d + 1))) : d);
+  if (depthOf(req.expand, 0) > 3) throw new EngineReject("展开最多三层");
+
   // 聚合的分组键与指标字段也要下推进去
   const requested = req.aggregate
     ? [...req.aggregate.group_by, ...req.aggregate.metrics.flatMap((m) => Object.values(m)).filter((f) => f !== "*")]
@@ -254,6 +272,7 @@ export async function runQuery(config: OntologyConfig, driver: SourceDriver, req
     expands: req.expand,
     ctx,
     path,
+    limit: req.aggregate || req.order ? undefined : (req.limit ?? DEFAULT_LIMIT), // 聚合要全量分组、order 要全量排序，都不能先截断
   });
 
   // 展开：按已声明关系进入目标类
@@ -316,6 +335,7 @@ async function expandItem(
   const { link, reversed } = resolveLink(env.config, cls.name, item.relation);
   if (link.transition) {
     if (item.expand?.length) throw new EngineReject(`转化关系不支持嵌套展开：${item.relation}`);
+    if (item.filter !== undefined) throw new EngineReject(`转化关系不支持目标侧过滤：${item.relation}`); // 与 linkHolds 同口径，不静默吞
     return [item.relation, (await transitionHolds(cls, ind, link, env, ctx)) ? [await project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
@@ -370,7 +390,7 @@ async function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<Q
   const groups = new Map<string, { key: Record<string, unknown>; members: Individual[] }>();
   for (const ind of individuals) {
     const cur = await viewOf(ind);
-    const keyObj = Object.fromEntries(agg.group_by.map((g) => [g, cur[g]]));
+    const keyObj = Object.fromEntries(agg.group_by.map((g) => [g, cur[g] ?? null])); // undefined 丢键会坍组，归一成 null
     const k = JSON.stringify(keyObj);
     const g = groups.get(k) ?? { key: keyObj, members: [] };
     g.members.push(ind);
@@ -387,7 +407,7 @@ async function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<Q
       const vals = all.filter((v): v is number => typeof v === "number");
       if (op !== "count") dropped += all.length - vals.length;
       const name = field === "*" ? op : `${op}_${field}`;
-      if (op === "count") row[name] = members.length;
+      if (op === "count") row[name] = field === "*" ? members.length : all.filter((v) => v != null).length; // count:"*" 数行，count:"字段" 数非空值（同 SQL）
       else if (op === "avg") row[name] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
       else if (op === "sum") row[name] = vals.reduce((a, b) => a + b, 0);
       else if (op === "min") row[name] = vals.length ? Math.min(...vals) : null;

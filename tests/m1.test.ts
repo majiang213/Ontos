@@ -32,12 +32,16 @@ describe("方言 SQL 生成", () => {
     expect(params).toEqual(["D07", "SN-1"]);
   });
 
-  it("pg insert：$1..$n；gt 带 OR IS NULL（空按至今）", () => {
+  it("pg insert：$1..$n；gt 带 OR IS NULL 只限 date（nullLoose）", () => {
     const { sql, params } = buildInsert("pg", "warranty_card", { sn: "SN-1", expiry: 123 });
     expect(sql).toBe(`INSERT INTO "warranty_card" ("sn", "expiry") VALUES ($1, $2)`);
     expect(params).toEqual(["SN-1", 123]);
-    const gte = buildStatement("pg", "select", "t", { conditions: [{ column: "valid_to", op: "gte", value: 100 }] });
+    // date 属性（nullLoose）：空=至今，gt/gte 时 NULL 也算满足
+    const gte = buildStatement("pg", "select", "t", { conditions: [{ column: "valid_to", op: "gte", value: 100, nullLoose: true }] });
     expect(gte.sql).toContain(`OR "valid_to" IS NULL`);
+    // 非 date 属性：没有这条宽松，NULL 不比大小
+    const plain = buildStatement("pg", "select", "t", { conditions: [{ column: "qty", op: "gte", value: 100 }] });
+    expect(plain.sql).not.toContain("IS NULL");
   });
 
   it("contains 转义通配符", () => {
@@ -78,11 +82,11 @@ describe("SQLite 文件连接（连接表单的 sqlite 类型）", () => {
   });
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
-  it("文件库注册后可内省、可采样、可查", async () => {
+  it("文件库注册后可内省、可采样、可查；采样链路上敏感列真脱敏", async () => {
     const file = join(tmp, "ext.db");
     const db = new DatabaseSync(file);
-    db.exec(`CREATE TABLE meter (meter_no TEXT PRIMARY KEY, reading INTEGER)`);
-    db.prepare(`INSERT INTO meter VALUES ('M-01', 42)`).run();
+    db.exec(`CREATE TABLE meter (meter_no TEXT PRIMARY KEY, reading INTEGER, mobile TEXT)`);
+    db.prepare(`INSERT INTO meter VALUES ('M-01', 42, '13800001111')`).run();
     db.close();
 
     const fixture = new SqliteFixtureDriver();
@@ -95,5 +99,9 @@ describe("SQLite 文件连接（连接表单的 sqlite 类型）", () => {
     expect(tables[0].columns.find((c) => c.name === "meter_no")?.pk).toBe(true);
     const rows = await registry.select("ext_sys", "meter", ["meter_no", "reading"], []);
     expect(rows).toEqual([{ meter_no: "M-01", reading: 42 }]);
+    // 链路断言：mobile 是敏感列，采样回来的必须是脱敏形态而不是原文
+    const sample = await registry.sample("ext_sys", "meter", 1);
+    expect(sample[0].mobile).toBe("1380******11");
+    expect(sample[0].meter_no).toBe("M-01");
   });
 });

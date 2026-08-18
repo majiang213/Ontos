@@ -47,7 +47,7 @@ export interface NotificationRecord {
   note: string;
 }
 
-/* 每个进程一份的发号计数器（generate 的 sequence）。演示期驻内存，入元数据库是后续。 */
+/* 发号计数器的默认实现驻内存（测试/纯引擎用）；路由层经 runAction 的 opts 注入元数据库版，重启不复位。 */
 const sequenceCounters = new Map<string, number>();
 function nextSequence(key: string, start = 1): number {
   const n = Math.max(sequenceCounters.get(key) ?? 0, start - 1) + 1;
@@ -61,7 +61,12 @@ function emptyIndividual(cls: Cls): Individual {
 
 const reject = (stage: ActionResult["stage"], error: string): ActionResult => ({ ok: false, stage, error, projections: [] });
 
-export async function runAction(config: OntologyConfig, driver: SourceDriver, req: ActionRequest): Promise<ActionResult> {
+export async function runAction(
+  config: OntologyConfig,
+  driver: SourceDriver,
+  req: ActionRequest,
+  opts?: { nextSequence?: (key: string, start?: number) => number } // 路由层注入元数据库发号器；缺省用内存版
+): Promise<ActionResult> {
   if (!config.object_types[req.object]) return reject("pre", `配置中没有类：${req.object}`);
   const cls = mustCls(config, req.object);
   const action: ActionDef | undefined = cls.def.actions?.[req.action];
@@ -73,7 +78,7 @@ export async function runAction(config: OntologyConfig, driver: SourceDriver, re
     action: req.action,
     object: req.object,
     request: req.request ?? {},
-    nextSequence,
+    nextSequence: opts?.nextSequence ?? nextSequence,
     allowPreKeys: true, // 前置才许用 $request / $exists
   };
 
@@ -280,11 +285,19 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
             ...changed.map((prop) => ({ column: entry.fields[prop], op: "eq" as const, value: row[entry.fields[prop]] ?? null })),
           ];
           const n = await driver.update(entry.connection, entry.table, set, conds);
-          out.push(
-            n > 0
-              ? { source: srcName, table: entry.table, op: "update", ok: true }
-              : { source: srcName, table: entry.table, op: "update", ok: false, error: "条件更新未命中（行可能已被并发改动）" }
-          );
+          if (n > 0) {
+            out.push({ source: srcName, table: entry.table, op: "update", ok: true });
+          } else {
+            // MySQL 同值不改记 0 行：按键重读核对，已是目标值算幂等命中，不算失败
+            const reread = await driver.select(entry.connection, entry.table, [keyCol, ...changed.map((p) => entry.fields[p])], [{ column: keyCol, op: "eq", value: row[keyCol] }]);
+            const cur = reread[0];
+            const already = cur != null && changed.every((prop) => cur[entry.fields[prop]] === setVals[prop] || (cur[entry.fields[prop]] ?? null) === (setVals[prop] ?? null));
+            out.push(
+              already
+                ? { source: srcName, table: entry.table, op: "update", ok: true, note: "已是目标值（幂等命中）" }
+                : { source: srcName, table: entry.table, op: "update", ok: false, error: "条件更新未命中（行可能已被并发改动）" }
+            );
+          }
         } catch (e) {
           out.push({ source: srcName, table: entry.table, op: "update", ok: false, error: err(e) });
         }

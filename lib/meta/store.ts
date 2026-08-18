@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS log_action (
   ok INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS meta_seq (
+  name TEXT PRIMARY KEY,              -- 发号器名（如 appointment.appt_no）
+  value INTEGER NOT NULL              -- 已发出的最大序号
+);
 `;
 
 /* ---------- 记录类型 ---------- */
@@ -224,12 +228,33 @@ export class MetaStore {
     this.db.prepare(`UPDATE adj_decision SET version = ? WHERE version IS NULL`).run(version);
   }
 
+  /** 放弃草稿时：未绑版本的裁决标成 -1（已放弃），不再随下一次发布回填。 */
+  abandonPendingDecisions(): void {
+    this.db.prepare(`UPDATE adj_decision SET version = -1 WHERE version IS NULL`).run();
+  }
+
+  /** 发号器：进程重启不复位（动作 generate 的 sequence 走这里）。原子自增并返回新值。 */
+  nextSeq(name: string, start = 1): number {
+    const row = this.db
+      .prepare(
+        `INSERT INTO meta_seq (name, value) VALUES (?, ?)
+         ON CONFLICT(name) DO UPDATE SET value = MAX(value + 1, excluded.value)
+         RETURNING value`
+      )
+      .get(name, start) as { value: number };
+    return row.value;
+  }
+
   /** 交集按对更新（同一对重复计算只留最新计数）。 */
   recordOverlap(o: OverlapRec): void {
     this.db.prepare(`DELETE FROM adj_overlap WHERE class_a = ? AND class_b = ?`).run(o.class_a, o.class_b);
     this.db
       .prepare(`INSERT INTO adj_overlap (class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate);
+  }
+
+  listOverlaps(): (OverlapRec & { id: number; created_at: string })[] {
+    return this.db.prepare(`SELECT * FROM adj_overlap ORDER BY id DESC`).all() as never[];
   }
 
   /* 验收问题集 */

@@ -37,7 +37,6 @@ describe("归一化", () => {
 
 describe("交集率", () => {
   it("采购×设备：40 台重合 / max(121,100) ≈ 三分之一；只落计数", async () => {
-    const config = seedConfig();
     const meta = freshMetaStore(join(mkdtempSync(join(tmpdir(), "ontos-olap-")), "m.db"));
     // 两个视角的类：采购侧的 po_item、设备侧的 device
     const poItem: OntologyConfig["object_types"][string] = {
@@ -46,10 +45,6 @@ describe("交集率", () => {
       properties: { sn: { type: "string" }, name: { type: "string" } },
       sources: { purchase: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } },
     };
-    const deviceCls = config.object_types.equipment; // 已挂 purchase/device/asset 三源
-    void deviceCls;
-    const config2 = seedConfig();
-    config2.object_types.purchase_item = poItem;
     const a = { name: "purchase_item", def: poItem };
     const b = { name: "device_view", def: {
       kind: "thing" as const,
@@ -62,6 +57,11 @@ describe("交集率", () => {
     expect(result.count_b).toBe(100);
     expect(result.count_hit).toBe(40);
     expect(result.rate).toBeCloseTo(40 / 121, 2);
+    // 「只落计数」读回验证：adj_overlap 有且仅有计数列，没有值集合
+    const rows = meta.listOverlaps();
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({ class_a: "purchase_item", class_b: "device_view", count_a: 121, count_b: 100, count_hit: 40 });
+    expect(Object.keys(rows[0]).every((k) => !/value|set|ids/i.test(k))).toBe(true);
     meta.close();
   });
 });

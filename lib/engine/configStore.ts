@@ -4,8 +4,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dump, load } from "js-yaml";
-import { configSchema, type OntologyConfig } from "../schema/config";
-import { objectTypeSchema } from "../schema/config";
+import { configSchema, objectTypeSchema, type OntologyConfig } from "../schema/config";
 import type { DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
 import { validateSemantics } from "./validate";
@@ -93,8 +92,6 @@ export function applyOp(input: DraftOp): DraftState {
     case "delete_object": {
       if (!d.object_types[input.name]) throw new DraftReject(`类不存在：${input.name}`);
       delete d.object_types[input.name];
-      delete state.layout[input.name]; // 顺手清摆位
-      if (existsSync(layoutFile())) writeFileSync(layoutFile(), JSON.stringify(state.layout), "utf8");
       for (const [linkName, link] of Object.entries(d.link_types)) {
         if (link.from === input.name || link.to === input.name) delete d.link_types[linkName]; // 挂着的关系一并撤
       }
@@ -179,6 +176,11 @@ export function applyOp(input: DraftOp): DraftState {
     state.draft = backup;
     throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
+  // 校验过了再动摆位：被删对象的摆位随内容一起清（校验失败回退时摆位不丢）
+  if (input.op === "delete_object" && state.layout[input.name]) {
+    delete state.layout[input.name];
+    if (existsSync(layoutFile())) writeFileSync(layoutFile(), JSON.stringify(state.layout), "utf8");
+  }
   // 每次操作后按结构重算：改出去又改回来，dirty 要能收回来
   state.dirty = !sameConfig(state.draft, getPublished().config);
   return state;
@@ -206,10 +208,35 @@ function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[
     if (p !== prop && def.derived && derivedFilterKeys(def.derived).includes(prop)) refs.push(`派生属性 ${p}`);
   }
   refs.push(...actionRefs(d, clsName, prop));
+  // 值侧引用：过滤/赋值里的 { property: prop }（被比较、被读取的属性也是引用）
+  const valueRefs = new Set<string>();
+  for (const [hostName, hostCls] of Object.entries(d.object_types)) {
+    for (const [p, def] of Object.entries(hostCls.properties)) {
+      if (!def.derived || hostName !== clsName) continue;
+      const whens = Array.isArray(def.derived) ? def.derived.map((r) => (r as { when?: unknown }).when) : [def.derived];
+      for (const w of whens) valuePropRefs(w, hostName, `派生属性 ${hostName}.${p}`, d, clsName, prop, valueRefs);
+    }
+    for (const [actName, act] of Object.entries(hostCls.actions ?? {})) {
+      const trail = `动作 ${hostName}.${actName}`;
+      valuePropRefs(act.pre, hostName, trail, d, clsName, prop, valueRefs);
+      for (const item of act.effect ?? []) {
+        if ("link" in item) continue;
+        const op = "update" in item ? item.update : "delete" in item ? item.delete : "create" in item ? item.create : null;
+        if (!op) continue;
+        if ("filter" in op && op.filter) valuePropRefs(op.filter, op.object, trail, d, clsName, prop, valueRefs);
+        if ("properties" in op && op.properties) {
+          // update 的 current 是目标类视图；create 的 current 是动作宿主（主体）视图
+          const attrCls = "update" in item ? op.object : hostName;
+          for (const v of Object.values(op.properties)) valuePropRefs(v, attrCls, trail, d, clsName, prop, valueRefs);
+        }
+      }
+    }
+  }
+  refs.push(...valueRefs);
   return refs;
 }
 
-/** 关系的引用扫描：动作 pre 的 $link、effect 的 link 项、派生规则里的 $link。删关系前挡一道。 */
+/** 关系的引用扫描：动作 pre 的 $link、effect 的 link 项、effect update/delete 的 filter.$link、派生规则里的 $link。删关系前挡一道。 */
 function linkRefs(d: OntologyConfig, linkName: string): string[] {
   const refs = new Set<string>();
   const walkFilter = (f: Record<string, unknown> | undefined, trail: string) => {
@@ -222,9 +249,12 @@ function linkRefs(d: OntologyConfig, linkName: string): string[] {
   };
   for (const [clsName, cls] of Object.entries(d.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
-      walkFilter(act.pre as Record<string, unknown> | undefined, `动作 ${clsName}.${actName}`);
+      const trail = `动作 ${clsName}.${actName}`;
+      walkFilter(act.pre as Record<string, unknown> | undefined, trail);
       for (const item of act.effect ?? []) {
-        if ("link" in item && item.link === linkName) refs.add(`动作 ${clsName}.${actName}`);
+        if ("link" in item && item.link === linkName) refs.add(trail);
+        const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
+        if (op && "filter" in op) walkFilter(op.filter as Record<string, unknown> | undefined, trail);
       }
     }
     for (const [p, def] of Object.entries(cls.properties)) {
@@ -234,6 +264,30 @@ function linkRefs(d: OntologyConfig, linkName: string): string[] {
     }
   }
   return [...refs];
+}
+
+/** 值侧的 { property: x } 引用（from: request 指的是请求参数，不算）：递归过滤树/赋值表，命中即记账。 */
+function valuePropRefs(
+  node: unknown,
+  hostCls: string,
+  trail: string,
+  d: OntologyConfig,
+  clsName: string,
+  prop: string,
+  refs: Set<string>
+): void {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return;
+  const rec = node as Record<string, unknown>;
+  if (typeof rec.property === "string" && rec.from !== "request" && hostCls === clsName && rec.property === prop) refs.add(trail);
+  const linkBlock = rec.$link as Record<string, unknown> | undefined;
+  for (const [ln, sub] of Object.entries(linkBlock ?? {})) {
+    const target = linkTarget(d, hostCls, ln); // $link 嵌套里被点名的属性是目标类的
+    valuePropRefs(sub, target ?? hostCls, trail, d, clsName, prop, refs);
+  }
+  for (const [k, v] of Object.entries(rec)) {
+    if (k === "$link") continue;
+    if (v && typeof v === "object") valuePropRefs(v, hostCls, trail, d, clsName, prop, refs);
+  }
 }
 
 /** 过滤的顶层属性键（$ 键不进）。 */
@@ -351,6 +405,11 @@ export function publishDraft(): { version: number } {
 
 export function discardDraft(): void {
   store.draft = undefined; // 回到已发布快照；摆位存在独立小文件里，不随草稿丢
+  try {
+    metaStore().abandonPendingDecisions(); // 草稿里裁过又没发布的留痕标记「已放弃」，不挂到无关的下一次发布上
+  } catch {
+    // 留痕是附属，不挡放弃
+  }
 }
 
 /* ---------- 版本历史与回滚 ---------- */
@@ -376,8 +435,13 @@ export function rollbackTo(version: number): { version: number } {
   if (getDraft().dirty) throw new DraftReject("有未发布的改动，先发布或放弃再回滚");
   const entry = listVersions().find((v) => v.version === version);
   if (!entry) throw new DraftReject(`版本不存在：v${version}`);
-  const config = configSchema.parse(load(readFileSync(entry.file, "utf8")));
-  validateSemantics(config);
+  let config: OntologyConfig;
+  try {
+    config = configSchema.parse(load(readFileSync(entry.file, "utf8")));
+    validateSemantics(config);
+  } catch (e) {
+    throw new DraftReject(`配置不合法：v${version} 的内容读不回来（${e instanceof Error ? e.message : String(e)}）`); // 归一前缀，路由按 422 分层
+  }
   const newVersion = latestVersionFile().version + 1;
   mkdirSync(versionsDir(), { recursive: true });
   const target = join(versionsDir(), `v${newVersion}.yaml`);
