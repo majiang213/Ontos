@@ -1,6 +1,7 @@
-// 已发布配置的加载与驱动注册表 —— 引擎只读已发布版本（种子文件或 versions/ 里最新的 vN）。
+// 驱动注册表 —— 全部路由的唯一驱动入口：fixture 内置连接 + 元数据库里保存的连接（mysql/pg/sqlite 文件）。
 // 单例挂 globalThis：Next dev 下各路由包各有模块实例，挂全局才能保证
-// 「验收之后再问，看到的是同一个源库」「发布之后引擎立刻读新版」。
+// 「验收之后再问，看到的是同一个源库」「连接保存后即时生效」。
+// （已发布配置的加载在 configStore.ts：getPublished。）
 
 import { existsSync, statSync } from "node:fs";
 import type { SourceDriver, TableInfo } from "./driver";

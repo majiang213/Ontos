@@ -176,24 +176,24 @@ function buildNotifications(
       object: inf.object,
       to: inf.to,
       properties,
-    lines: plan.map((p) => {
-      if (p.kind === "create") {
-        const idProp = p.cls.def.identity;
-        const spec = idProp ? p.propSpec[idProp] : undefined;
-        const resolvable = spec !== undefined && !(typeof spec === "object" && spec !== null && (spec as Record<string, unknown>).from === "generated");
-        const v = resolvable ? resolveValue(spec, idProp!, ctx) : null;
-        return { op: p.kind, object: p.cls.name, targets: v == null ? [] : [String(v)] };
-      }
-      return {
-        op: p.kind,
-        object: p.kind === "link" ? req.object : p.cls.name,
-        targets: p.kind === "link" ? [String(req.identity)] : p.targets.map((t) => t.key),
-      };
-    }),
-    delivered: false,
-    note: anyFail
-      ? "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）"
-      : "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
+      lines: plan.map((p) => {
+        if (p.kind === "create") {
+          const idProp = p.cls.def.identity;
+          const spec = idProp ? p.propSpec[idProp] : undefined;
+          const resolvable = spec !== undefined && !(typeof spec === "object" && spec !== null && (spec as Record<string, unknown>).from === "generated");
+          const v = resolvable ? resolveValue(spec, idProp!, ctx) : null;
+          return { op: p.kind, object: p.cls.name, targets: v == null ? [] : [String(v)] };
+        }
+        return {
+          op: p.kind,
+          object: p.kind === "link" ? req.object : p.cls.name,
+          targets: p.kind === "link" ? [String(req.identity)] : p.targets.map((t) => t.key),
+        };
+      }),
+      delivered: false,
+      note: anyFail
+        ? "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）"
+        : "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
     };
   });
 }

@@ -23,11 +23,11 @@ const UNIT_S: Record<string, number> = {
 };
 const DATE_RE = /^now(?:[+-]\d+[yMwdhms])*(?:\/[yMwdhms])?$/;
 
-export function isDateExpr(v: unknown): v is string {
+function isDateExpr(v: unknown): v is string {
   return typeof v === "string" && DATE_RE.test(v);
 }
 
-export function evalDateExpr(expr: string, now = Math.floor(Date.now() / 1000)): number {
+function evalDateExpr(expr: string, now = Math.floor(Date.now() / 1000)): number {
   if (!DATE_RE.test(expr)) throw new Error(`非法日期表达式：${expr}`);
   let t = now;
   const steps = expr.match(/[+-]\d+[yMwdhms]/g) ?? [];
@@ -47,7 +47,7 @@ export function evalDateExpr(expr: string, now = Math.floor(Date.now() / 1000)):
    同样写 + -，但没有单位、不能取整。锚点是 current.属性名、request.参数名或数字字面量。 */
 const NUM_RE = /^((?:current|request)\.[A-Za-z_]\w*|\d+(?:\.\d+)?)([+-])((?:current|request)\.[A-Za-z_]\w*|\d+(?:\.\d+)?)$/;
 
-export function isNumberExpr(v: unknown): v is string {
+function isNumberExpr(v: unknown): v is string {
   return typeof v === "string" && NUM_RE.test(v);
 }
 
@@ -62,7 +62,7 @@ function numOperand(tok: string, ctx: EvalContext): number {
   return v;
 }
 
-export function evalNumberExpr(expr: string, ctx: EvalContext): number {
+function evalNumberExpr(expr: string, ctx: EvalContext): number {
   const m = NUM_RE.exec(expr);
   if (!m) throw new Error(`非法数字表达式：${expr}`);
   const a = numOperand(m[1], ctx);
@@ -139,7 +139,7 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
 /* ---------- generate：按列表拼编号 ---------- */
 const pad = (n: number, w: number) => String(n).padStart(w, "0");
 
-export function formatUtc(seconds: number, format: string): string {
+function formatUtc(seconds: number, format: string): string {
   const d = new Date(seconds * 1000);
   return format
     .replace("yyyy", String(d.getUTCFullYear()))

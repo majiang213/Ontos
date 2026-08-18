@@ -2,7 +2,7 @@
 // 同一：合并为一个对象、挂多源。阶段：收成一类 + 派生阶段 + 转化关系 + 转化动作。
 // 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
 
-import type { Filter, OntologyConfig } from "../schema/config";
+import type { Filter, OntologyConfig, WhenRule } from "../schema/config";
 import { dropClass, mutateDraft } from "./configStore";
 
 export type Verdict = "同一" | "部分重叠" | "阶段" | "仅名称相似" | "跳过";
@@ -39,7 +39,7 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
       if (prop === remapId || A.properties[prop] !== def) continue; // 只处理真正并进来的
       if (Array.isArray(def.derived)) {
         for (const rule of def.derived) {
-          rule.when = Object.fromEntries(Object.entries(rule.when).map(([k, v]) => [renamed.get(k) ?? k, v])) as never;
+          rule.when = Object.fromEntries(Object.entries(rule.when).map(([k, v]) => [renamed.get(k) ?? k, v])) as WhenRule["when"];
         }
       }
     }

@@ -1,5 +1,5 @@
 // 本体视图：GET /api/ontology
-// 画布读工作副本（已发布 + 未发布改动）；引擎读已发布快照（见 lib/engine/load.ts）。
+// 画布读工作副本（已发布 + 未发布改动）；引擎读已发布快照（见 lib/engine/configStore.ts 的 getPublished）。
 // states 标出每个对象的草稿态：new=未发布的新对象，modified=与已发布不同，same=一致。
 
 import { NextResponse } from "next/server";

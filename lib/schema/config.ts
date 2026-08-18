@@ -42,7 +42,7 @@ export type PropertyDef = z.infer<typeof propertySchema>;
 export const sourceEntrySchema = z.object({
   connection: z.string(),
   table: z.string(),
-  pk: z.string(), // 源表主键：仅供台账与展示（表结构抽屉标出）；引擎认行全走 identity/key，不读它
+  pk: z.string().optional(), // 源表主键：仅供台账与展示（表结构抽屉标出）；引擎认行全走 identity/key，不读它；读不出来就不写，不编造
   fields: z.record(z.string(), z.string()), // 源列属性 → 列名；派生属性不得出现
   key: z.string().optional(), // 该源用于对齐、认行的属性名；省略则用类的 identity
 });

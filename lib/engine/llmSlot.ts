@@ -88,7 +88,7 @@ export class CannedSlot implements LlmSlot {
             kind: "thing",
             identity,
             properties,
-            sources: { [connection]: { connection, table: table.name, pk: pkCol?.name ?? "id", fields } },
+            sources: { [connection]: { connection, table: table.name, ...(pkCol ? { pk: pkCol.name } : {}), fields } }, // 主键读不出就不写，不编造
           }
         : { kind: "thing", properties };
     }

@@ -47,6 +47,14 @@ export default function CanvasPage() {
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []); // 卸载清定时器
 
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  }, []);
+  /** 网络层失败（fetch reject）的统一提示。 */
+  const netErr = useCallback((e: unknown) => showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`), [showToast]);
+
   const refresh = useCallback(() => fetch("/api/ontology").then((r) => r.json()).then(setOnt), []);
   // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
   const loadPairs = useCallback(async () => {
@@ -55,17 +63,10 @@ export default function CanvasPage() {
     setPairs(data.candidates ?? []);
   }, []);
   useEffect(() => {
-    refresh();
-    fetch("/api/introspect").then((r) => r.json()).then(setSchema);
-  }, [refresh]);
-
-  const showToast = useCallback((text: string) => {
-    setToast(text);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2600);
-  }, []);
-  /** 网络层失败（fetch reject）的统一提示。 */
-  const netErr = useCallback((e: unknown) => showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`), [showToast]);
+    refresh().catch(netErr); // 首轮加载失败也要说
+    fetch("/api/introspect").then((r) => r.json()).then(setSchema).catch(netErr);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载时跑一次
+  }, [refresh, netErr]);
 
   /** 编辑操作统一入口：发给草稿，刷新视图，错误进 toast。网络层失败也要说。 */
   const op = useCallback(
@@ -445,9 +446,13 @@ export default function CanvasPage() {
                 onDone={async (msg) => {
                   setConnecting(false);
                   showToast(msg);
-                  const s = await fetch("/api/introspect").then((r) => r.json());
-                  setSchema(s);
-                  setDrawerOpen(true); // 保存后自动打开表结构抽屉
+                  try {
+                    const s = await fetch("/api/introspect").then((r) => r.json());
+                    setSchema(s);
+                    setDrawerOpen(true); // 保存后自动打开表结构抽屉
+                  } catch (e) {
+                    netErr(e); // 连上了但刷表结构失败：连接已存，刷新失败要告诉人
+                  }
                 }}
               />
             </div>
