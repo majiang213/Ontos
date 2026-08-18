@@ -3,6 +3,7 @@
 // 「验收之后再问，看到的是同一个源库」「发布之后引擎立刻读新版」。
 
 import type { OntologyConfig } from "../schema/config";
+import { existsSync, statSync } from "node:fs";
 import type { SourceDriver } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
@@ -28,12 +29,18 @@ export function demoDriver(): DriverRegistry {
   return g.__ontosRegistry;
 }
 
-/** 把元数据库里的连接注册成驱动。新保存的连接在运行时也走这里（即时生效）。 */
+/** 把元数据库里的连接注册成驱动。新保存的连接在运行时也走这里（即时生效）。
+ *  sqlite 文件必须已存在且不是目录——文件没了（被删/被移走）就跳过这个连接，不拖垮整个注册表。 */
 export function registerSaved(registry: DriverRegistry, rec: { name: string; type: string; host?: string; port?: number; db_name?: string; ro_user?: string; ro_pass?: string; rw_user?: string; rw_pass?: string }): void {
   if (rec.type === "sqlite") {
     // SQLite 文件库：db_name 是文件路径
+    const p = rec.db_name;
+    if (!p || !existsSync(p) || !statSync(p).isFile()) {
+      console.warn(`[ontos] 连接 ${rec.name} 的 sqlite 文件不存在，跳过注册：${p}`);
+      return;
+    }
     const d = new SqliteFixtureDriver();
-    d.registerFile(rec.name, rec.db_name ?? ":memory:");
+    d.registerFile(rec.name, p);
     registry.register(rec.name, d);
   } else {
     registry.register(rec.name, makeSqlDriver({ type: rec.type, host: rec.host, port: rec.port, db_name: rec.db_name, ro_user: rec.ro_user, ro_pass: rec.ro_pass, rw_user: rec.rw_user, rw_pass: rec.rw_pass }));

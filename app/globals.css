@@ -290,8 +290,8 @@ input { font-family: inherit; outline: none; }
 .float-tr { top: 76px; right: 16px; }
 .float-bc { bottom: 18px; left: 50%; translate: -50% 0; max-width: calc(100vw - 24px); } /* translate 属性居中，与 transform 入场动画解耦；窄屏不溢出 */
 
-/* 画布节点入场：backwards 填充，动画结束归还 xyflow 的定位 transform */
-.react-flow__node { animation: rise-in 560ms var(--ease-out) backwards; }
+/* 画布节点入场：动内壳不动节点——xyflow 的定位 transform 在节点上，动画改它会覆盖定位（新节点闪现堆叠） */
+.node-shell { animation: rise-in 560ms var(--ease-out) backwards; }
 
 /* ---------- 抽屉 ---------- */
 .drawer {

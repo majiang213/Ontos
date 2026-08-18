@@ -220,6 +220,34 @@ function compareOp(actual: unknown, op: string, expected: unknown, dateLike: boo
 
 const num = (v: unknown) => typeof v === "number";
 
+/** 过滤值形状校验：in 的值必须数组；其余运算符与等值位不许数组。查询与动作入口各跑一次，下推与内存共用同一把尺。 */
+export function assertFilterShapes(filter: Filter, trail = "过滤"): void {
+  for (const [key, v] of Object.entries(filter)) {
+    if (key === "$link") {
+      for (const [ln, sub] of Object.entries(v as Record<string, unknown>)) {
+        if (sub !== true && sub !== false) assertFilterShapes(sub as Filter, `${trail} 的 $link.${ln}`);
+      }
+      continue;
+    }
+    if (key.startsWith("$")) continue; // $request/$exists 的形状另行约束
+    if (Array.isArray(v)) throw new EngineReject(`${trail}的 ${key}：等值位不接受数组（数组只能出现在 in 里）`);
+    if (v !== null && typeof v === "object") {
+      const rec = v as Record<string, unknown>;
+      const keys = Object.keys(rec);
+      if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
+        for (const [op, operand] of Object.entries(rec)) {
+          if (op === "in") {
+            if (!Array.isArray(operand)) throw new EngineReject(`${trail}的 ${key}.in：值必须是数组`);
+          } else if (Array.isArray(operand)) {
+            throw new EngineReject(`${trail}的 ${key}.${op}：不接受数组`);
+          }
+        }
+      }
+      // 裸的 { property, from } 是操作数不是运算符块，跳过
+    }
+  }
+}
+
 /* ---------- 整条过滤在个体上的核对（前置、布尔派生、残余过滤共用） ---------- */
 
 export async function evalFilterOnIndividual(cls: Cls, ind: Individual, filter: Filter, env: Env, ctx: EvalContext): Promise<boolean> {

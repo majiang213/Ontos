@@ -7,12 +7,13 @@ import {
   buildSelect,
   conditionSql,
   maskValue,
+  quoteFor,
   type Condition,
   type SourceDriver,
 } from "./driver";
 import { EngineReject } from "./individual";
 
-const quote = (id: string) => `"${id}"`;
+const quote = quoteFor("sqlite"); // 与方言层同一套引号（含双写转义）
 // node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
 // node:sqlite 不认 boolean，绑定前归一成 1/0。
 const bind = (params: unknown[]) => params.map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v)) as never[];

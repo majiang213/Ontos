@@ -76,14 +76,18 @@ const EXPR_LIKE = /^(now([+\-/\d]|$)|(current|request)\.)/;
 
 export function resolveLiteral(v: unknown): unknown {
   if (typeof v !== "string") return v;
-  if (isDateExpr(v)) return evalDateExpr(v);
-  if (EXPR_LIKE.test(v)) throw new Error(`非法表达式：${v}`);
-  if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
-    const ms = Date.parse(v);
-    if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${v}`);
+  const s: string = v;
+  // isDateExpr 的类型谓词（v is string）会把 string 变量的假分支收成 never——Boolean() 包一层丢掉谓词
+  if (Boolean(isDateExpr(s))) return evalDateExpr(s);
+  if (EXPR_LIKE.test(s)) throw new Error(`非法表达式：${s}`);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    // 兼容 MySQL dateStrings 的 "YYYY-MM-DD HH:mm:ss"：按 UTC 算（引擎的日期契约）
+    const iso = s.includes("T") ? s : s.includes(" ") ? `${s.replace(" ", "T")}Z` : s;
+    const ms = Date.parse(iso);
+    if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${s}`);
     return Math.floor(ms / 1000);
   }
-  return v;
+  return s;
 }
 
 /* ---------- 属性值来源 ----------
@@ -111,7 +115,11 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
     }
     if (from === "action") return ctx.action;
     if (from === "object") return ctx.object;
-    if (from === "current") return ctx.current?.[propName];
+    if (from === "current") {
+      const hit = ctx.current?.[propName];
+      if (hit === undefined) throw new Error(`取不到值：${propName}`); // 与 { property } 同口径，不静默少写列
+      return hit;
+    }
     if (from === "generated") {
       if (!gen) throw new Error(`该路径不支持 from: generated（属性 ${propName}：发号只在 create 投影里可用）`);
       return gen();

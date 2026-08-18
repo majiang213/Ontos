@@ -6,6 +6,7 @@ import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../sche
 import type { ActionRequest } from "../schema/request";
 import type { SourceDriver } from "./driver";
 import {
+  assertFilterShapes,
   currentView,
   evalDerived,
   evalFilterOnIndividual,
@@ -90,6 +91,7 @@ export async function runAction(
   if (action.pre) {
     let preOk = false;
     try {
+      assertFilterShapes(action.pre, "前置");
       preOk = await evalFilterOnIndividual(cls, subject, action.pre, env, ctx);
     } catch (e) {
       return reject("pre", e instanceof Error ? e.message : String(e));
@@ -226,6 +228,7 @@ async function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Indi
     if (op.object === reqCls.name && id === ctx.identity) targets = [subject];
     else targets = await selectIndividuals(env, cls.name, { identity: id, allColumns: true, ctx: filterCtx });
   } else if (op.filter) {
+    assertFilterShapes(op.filter, "效应过滤");
     targets = await selectIndividuals(env, cls.name, { filter: op.filter, allColumns: true, ctx: filterCtx });
   } else {
     throw new Error(`认人必须写明：${op.object} 缺 identity 或 filter`);

@@ -64,23 +64,33 @@ export class CannedSlot implements LlmSlot {
       const properties: Record<string, ObjectType["properties"][string]> = {};
       const fields: Record<string, string> = {};
       let identity: string | undefined;
+      const pkCol = table.columns.find((c) => c.pk);
       for (const col of table.columns) {
-        if (col.pk) continue; // 表主键只定位行，不进属性
+        if (col.pk) continue; // 表主键只定位行，不进属性——除非它就是识别字段（见下）
         const t = col.type.toUpperCase(); // mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判
         const type = t.includes("INT") ? "number" : t.includes("DATE") || t.includes("TIME") ? "date" : "string";
         properties[col.name] = { type };
         fields[col.name] = col.name;
-        if (!identity && /_no$|_id$/.test(col.name)) identity = col.name; // 识别字段猜编号列；答不出就留白问人
+        if (!identity && /_no$|_id$/.test(col.name)) identity = col.name; // 识别字段先猜编号列
       }
-      const pkCol = table.columns.find((c) => c.pk);
+      // 编号列猜不到、主键本身就是业务编号（如 person_no）时：主键当识别字段，破格进属性
+      if (!identity && pkCol) {
+        identity = pkCol.name;
+        const t = pkCol.type.toUpperCase();
+        properties[pkCol.name] = { type: t.includes("INT") ? "number" : "string" };
+        fields[pkCol.name] = pkCol.name;
+      }
       // 跨连接同名表是裁决主场景：撞名带连接前缀，不静默覆盖
       const clsName = out[table.name] ? `${connection}_${table.name}` : table.name;
-      out[clsName] = {
-        kind: "thing",
-        identity,
-        properties,
-        sources: { [connection]: { connection, table: table.name, pk: pkCol?.name ?? "id", fields } },
-      };
+      // 还是猜不到识别字段：不挂 sources 进 manual 桶（有源无 identity 过不了发布闸），人到编辑卡拉列设置
+      out[clsName] = identity
+        ? {
+            kind: "thing",
+            identity,
+            properties,
+            sources: { [connection]: { connection, table: table.name, pk: pkCol?.name ?? "id", fields } },
+          }
+        : { kind: "thing", properties };
     }
     return out;
   }

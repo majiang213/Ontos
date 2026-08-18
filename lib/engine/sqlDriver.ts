@@ -89,6 +89,7 @@ export class MysqlDriver implements SourceDriver {
         user: writable ? (this.cfg.rw_user ?? this.cfg.ro_user) : this.cfg.ro_user,
         password: writable ? (this.cfg.rw_pass ?? this.cfg.ro_pass) : this.cfg.ro_pass,
         connectionLimit: 4,
+        dateStrings: true, // DATE/DATETIME 按字符串回来（引擎的日期契约是 ISO 串/Unix 秒），不要 JS Date
       });
       this.pools.set(key, p);
     }

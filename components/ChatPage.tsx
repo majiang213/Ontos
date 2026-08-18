@@ -39,17 +39,18 @@ export default function ChatPage() {
   const [apis, setApis] = useState<SavedApi[]>([]);
   const lastQuestion = useRef<string | null>(null); // 动作成功后的复查用，不从消息列表反推
   const listRef = useRef<HTMLDivElement>(null);
+  const curIdRef = useRef<string | null>(null); // 闭包外读当前会话：删光再开时动作与复查不落两个会话
 
   // 会话从 localStorage 读回（刷新不丢）
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
-        const s = JSON.parse(raw) as Session[];
-        if (Array.isArray(s)) {
-          setSessions(s);
-          if (s.length) setCurId(s[0].id);
-        }
+        const s = (JSON.parse(raw) as unknown[]).filter(
+          (x): x is Session => Boolean(x) && typeof (x as Session).id === "string" && Array.isArray((x as Session).msgs)
+        );
+        setSessions(s);
+        if (s.length) setCurId(s[0].id);
       }
     } catch {
       // 坏数据当没有
@@ -57,16 +58,29 @@ export default function ChatPage() {
     setLoaded(true);
   }, []);
   useEffect(() => {
-    if (loaded) localStorage.setItem(STORE_KEY, JSON.stringify(sessions));
+    curIdRef.current = curId;
+  }, [curId]);
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      // 结果集不长久留存（数据边界）：答案卡只留前 20 行做回看，完整数据永远在源库现查
+      const trimmed = sessions.map((s) => ({
+        ...s,
+        msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, rows: m.answer.rows.slice(0, 20) } } : m)),
+      }));
+      localStorage.setItem(STORE_KEY, JSON.stringify(trimmed));
+    } catch {
+      // 配额满了不挡对话
+    }
   }, [sessions, loaded]);
 
   const msgs = sessions.find((s) => s.id === curId)?.msgs ?? [];
 
-  // 新消息滚到底：答案卡很高，不滚用户以为没响应
+  // 新消息滚到底：答案卡很高，不滚用户以为没响应；切会话也滚
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs.length, busy]);
+  }, [msgs.length, busy, curId]);
 
   const loadApis = useCallback(async () => {
     try {
@@ -81,19 +95,20 @@ export default function ChatPage() {
     void loadApis();
   }, [loadApis]);
 
-  /** 没有会话就先开一个（标题取第一句问的话）。返回会话 id。 */
+  /** 没有会话就先开一个（标题取第一句问的话）。读 ref 不读闭包——append 是函数式更新，不依赖渲染时序。 */
   const ensureSession = (titleSeed: string): string => {
-    if (curId) return curId;
-    const id = `s${Date.now().toString(36)}`;
+    if (curIdRef.current) return curIdRef.current;
+    const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     setSessions((ss) => [{ id, title: titleSeed.slice(0, 24), msgs: [] }, ...ss]);
     setCurId(id);
+    curIdRef.current = id;
     return id;
   };
   const append = (sid: string, m: Msg) => {
     setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, msgs: [...s.msgs, m] } : s)));
   };
   const newSession = () => {
-    const id = `s${Date.now().toString(36)}`;
+    const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     setSessions((ss) => [{ id, title: "新会话", msgs: [] }, ...ss]);
     setCurId(id);
   };
@@ -128,6 +143,7 @@ export default function ChatPage() {
 
   /** 跑台账里的已存 API：直接执行保存的结构化查询，不重新编译。 */
   async function runApi(api: SavedApi) {
+    lastQuestion.current = api.question; // 台账问题也算「上一条问题」，动作后的复查看它
     const sid = ensureSession(api.name);
     setBusy(true);
     append(sid, { role: "user", text: `运行问数 API：${api.name}` });
@@ -173,9 +189,9 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="chat-wrap" style={{ display: "flex", gap: 14 }}>
+    <div className="chat-wrap" style={{ display: "flex", flexDirection: "row", gap: 14 }}>
       {/* 会话列表：可新建、可切换、可删 */}
-      <div style={{ flex: "0 0 168px", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ flex: "0 0 168px", display: "flex", flexDirection: "column", gap: 6, overflow: "auto" }}>
         <button className="btn" onClick={newSession}>新建会话</button>
         {sessions.map((s) => (
           <div
@@ -220,9 +236,9 @@ export default function ChatPage() {
           )}
           {msgs.map((m, i) =>
             m.role === "user" ? (
-              <div key={i} className="msg-user">{m.text}</div>
+              <div key={`${curId}-${i}`} className="msg-user">{m.text}</div>
             ) : (
-              <div key={i} className="msg-agent">
+              <div key={`${curId}-${i}`} className="msg-agent">
                 {m.text && (
                   <div className="bezel"><div className="bezel-core" style={{ padding: "10px 14px", fontSize: 14 }}>{m.text}</div></div>
                 )}

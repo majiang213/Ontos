@@ -109,7 +109,12 @@ export default function CanvasPage() {
     if (publishing) return; // 与发布同一把闸，防连点
     setPublishing(true);
     try {
-      await fetch("/api/publish", { method: "DELETE" });
+      const r = await fetch("/api/publish", { method: "DELETE" });
+      if (!r.ok) {
+        const data = await r.json();
+        showToast(data.error ?? "放弃失败");
+        return;
+      }
       showToast("已放弃改动，回到已发布快照");
       setSelected(null);
       await refresh();
@@ -120,10 +125,11 @@ export default function CanvasPage() {
     }
   };
 
-  // Esc 关一切浮卡；最大化时先退出最大化
+  // Esc 关一切浮卡；最大化时先退出最大化。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
       if (maximized) setMaximized(false);
       setLinkDraft(null);
       setSelectedLink(null);
@@ -156,8 +162,8 @@ export default function CanvasPage() {
     setGenerating(true);
     try {
       const tables = [...selectedTables].map((key) => {
-        const [connection, table] = key.split(".");
-        return { connection, table };
+        const dot = key.indexOf("."); // 只切第一个点：连接名/表名里再有点不炸
+        return { connection: key.slice(0, dot), table: key.slice(dot + 1) };
       });
       const r = await fetch("/api/generate", {
         method: "POST",
@@ -258,10 +264,15 @@ export default function CanvasPage() {
             style={{ cursor: "pointer", border: "none" }}
             title="版本历史"
             onClick={async () => {
+              if (versions) {
+                setVersions(null); // toggle：再点收起
+                return;
+              }
+              openTl("versions");
+              setVersions([]); // 先开卡给 loading 态再填数据——慢网络下不顶掉别人正在填的卡
               try {
                 const r = await fetch("/api/versions");
                 const data = await r.json();
-                openTl("versions");
                 setVersions(data.versions ?? []);
               } catch (e) {
                 showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
@@ -303,7 +314,7 @@ export default function CanvasPage() {
       )}
 
       {/* 版本历史卡（点版本号展开；回滚 = 旧内容作为新版本发布） */}
-      {versions && (
+      {!maximized && versions && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14 }}>
@@ -311,6 +322,7 @@ export default function CanvasPage() {
                 <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>
                 <button className="chip" aria-label="关闭" onClick={() => setVersions(null)}>✕</button>
               </div>
+              {versions.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>读着呢…</div>}
               {versions.map((v) => (
                 <div key={v.version} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
                   <span>
@@ -349,10 +361,10 @@ export default function CanvasPage() {
       )}
 
       {/* 验收问题集卡 */}
-      {questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
+      {!maximized && questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
 
       {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
-      {panelOpen && (
+      {!maximized && panelOpen && (
         <div className="float-card float-bc" style={{ width: 520, maxHeight: "60%" }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "56vh" }}>
@@ -378,8 +390,8 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底中：发布条（有未发布改动时；裁决面板打开时让位） */}
-      {ont?.dirty && !panelOpen && (
+      {/* 底中：发布条（有未发布改动时；裁决面板打开时让位；最大化时藏起） */}
+      {ont?.dirty && !panelOpen && !maximized && (
         <div className="float-card float-bc">
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 8, display: "flex", gap: 8, alignItems: "center" }}>
@@ -417,7 +429,7 @@ export default function CanvasPage() {
       )}
 
       {/* 连接数据源卡（左上） */}
-      {connecting && (
+      {!maximized && connecting && (
         <div className="float-card float-tl" style={{ top: 120, width: 320 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14 }}>
@@ -438,7 +450,7 @@ export default function CanvasPage() {
       )}
 
       {/* 新建对象卡（左上） */}
-      {creating && (
+      {!maximized && creating && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14 }}>
@@ -460,7 +472,7 @@ export default function CanvasPage() {
       )}
 
       {/* 右侧：连线表单卡（从节点拖线落地后弹出） */}
-      {linkDraft && (
+      {!maximized && linkDraft && (
         <div className="float-card float-tr" style={{ width: 340 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16 }}>
@@ -491,7 +503,7 @@ export default function CanvasPage() {
       )}
 
       {/* 右侧：关系详情卡（点边弹出） */}
-      {selectedLink && ont?.link_types?.[selectedLink] && !linkDraft && (
+      {!maximized && selectedLink && ont?.link_types?.[selectedLink] && !linkDraft && (
         <div className="float-card float-tr" style={{ width: 320 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16 }}>
@@ -530,7 +542,7 @@ export default function CanvasPage() {
       )}
 
       {/* 右侧：对象编辑卡 */}
-      {sel && !creating && !linkDraft && !selectedLink && (
+      {!maximized && sel && !creating && !linkDraft && !selectedLink && (
         <div className="float-card float-tr" style={{ width: 340, maxHeight: "calc(100% - 110px)" }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16, overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
@@ -1020,6 +1032,8 @@ function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => void; onCa
           const data = await r.json();
           if (!r.ok) setError(data.error ?? "连不上");
           else onDone(data.warning ?? `已连接 ${name}，读到 ${data.tables?.length ?? 0} 张表`);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err)); // 网络层失败也留卡内
         } finally {
           setBusy(false);
         }

@@ -23,9 +23,10 @@ export function safeLog(fn: () => void): void {
   }
 }
 
-/** 统一的 500 形状：固定文案 + detail，不把驱动内部错误原样透出网。 */
+/** 统一的 500 形状：固定文案；detail（内部错误细节）只在非生产环境给，生产不透。 */
 export function internalError(e: unknown): NextResponse {
-  return NextResponse.json({ error: "内部错误", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  const detail = e instanceof Error ? e.message : String(e);
+  return NextResponse.json({ error: "内部错误", ...(process.env.NODE_ENV === "production" ? {} : { detail }) }, { status: 500 });
 }
 
 /** 写端点的可选闸门：设了环境变量 ONTOS_TOKEN 才启用（演示默认放开）。

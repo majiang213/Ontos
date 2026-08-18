@@ -25,12 +25,20 @@ export function validateSemantics(config: OntologyConfig): void {
         if (!cls.properties[prop]) throw new Error(`配置不合法：${clsName}.${srcName} 的 fields 指向不存在的属性 ${prop}`);
       }
     }
-    // when 派生的每条规则：键必须是该类的源条目名（拼错源名会被静默吞，必须在发布闸拦住）
+    // when 派生的每条规则：键必须是该类的源条目名；规则里的过滤键必须是该源条目映射了的属性（拼错会被静默吞，发布闸拦住）
     for (const [prop, def] of Object.entries(cls.properties)) {
       if (!Array.isArray(def.derived)) continue;
       for (const rule of def.derived) {
-        for (const src of Object.keys(rule.when)) {
-          if (!cls.sources?.[src]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则指向不存在的源条目 ${src}`);
+        for (const [src, cond] of Object.entries(rule.when)) {
+          const entry = cls.sources?.[src];
+          if (!entry) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则指向不存在的源条目 ${src}`);
+          if (cond && typeof cond === "object") {
+            for (const k of Object.keys(cond as Record<string, unknown>)) {
+              if (k === "$link") continue;
+              if (k.startsWith("$")) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则里 ${src} 的过滤不支持 ${k}`);
+              if (!entry.fields[k]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则在 ${src} 上过滤未映射的属性 ${k}`);
+            }
+          }
         }
       }
     }
@@ -41,12 +49,17 @@ export function validateSemantics(config: OntologyConfig): void {
     }
     if (link.match) {
       for (const pair of link.match) {
-        if (!config.object_types[link.from].properties[pair.from]) {
+        const fromDef = config.object_types[link.from].properties[pair.from];
+        const toDef = config.object_types[link.to].properties[pair.to];
+        if (!fromDef) {
           throw new Error(`配置不合法：关系 ${linkName} 的 match 指向不存在的属性 ${link.from}.${pair.from}`);
         }
-        if (!config.object_types[link.to].properties[pair.to]) {
+        if (!toDef) {
           throw new Error(`配置不合法：关系 ${linkName} 的 match 指向不存在的属性 ${link.to}.${pair.to}`);
         }
+        // 配对要读真实列值：派生属性没有列，配上了也永远不成立
+        if (fromDef.derived) throw new Error(`配置不合法：关系 ${linkName} 的 match 指向派生属性 ${link.from}.${pair.from}`);
+        if (toDef.derived) throw new Error(`配置不合法：关系 ${linkName} 的 match 指向派生属性 ${link.to}.${pair.to}`);
       }
     }
     if (link.transition) {

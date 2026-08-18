@@ -59,11 +59,13 @@ export async function POST(req: Request) {
     if (body.method === "initialize") {
       return rpcOk(id, { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "ontos", version: "0.1.0" } });
     }
-    if (body.method === "notifications/initialized" || body.method?.startsWith("notifications/")) return rpcOk(id, {});
+    // JSON-RPC 通知不应有响应（Streamable HTTP：202 空体）
+    if (body.method?.startsWith("notifications/")) return new NextResponse(null, { status: 202 });
     if (body.method === "tools/list") return rpcOk(id, { tools: TOOLS });
     if (body.method !== "tools/call") return rpcErr(id, -32601, `未知方法：${body.method}`);
 
     const name = body.params?.name as string | undefined;
+    if (!name) return rpcErr(id, -32602, "tools/call 缺 params.name");
     const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
     const config = loadConfig();
     const driver = demoDriver();
@@ -114,14 +116,16 @@ export async function POST(req: Request) {
     }
     if (name === "propose_ontology") {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
-      const infos = await Promise.all(
-        tables.map(async ({ connection, table }) => {
-          const all = await driver.introspect(connection);
-          const info = all.find((t) => t.name === table);
-          if (!info) throw new EngineReject(`表不存在：${connection}.${table}`);
-          return { connection, table: info };
-        })
-      );
+      // 按连接分组：每个连接内省一次
+      const byConn = new Map<string, Awaited<ReturnType<typeof driver.introspect>>>();
+      for (const { connection } of tables) {
+        if (!byConn.has(connection)) byConn.set(connection, await driver.introspect(connection));
+      }
+      const infos = tables.map(({ connection, table }) => {
+        const info = byConn.get(connection)!.find((t) => t.name === table);
+        if (!info) throw new EngineReject(`表不存在：${connection}.${table}`);
+        return { connection, table: info };
+      });
       const draft = await getSlot().draftObjects(infos);
       return rpcOk(id, toolResult({ object_types: draft }));
     }

@@ -11,28 +11,29 @@ import { internalError } from "@/app/api/_shared";
 export async function GET() {
   try {
     const d = getDraft().draft;
-  const decided = new Set(metaStore().listDecisions().map((r) => [r.class_a, r.class_b].sort().join("|")));
-  const classes = Object.entries(d.object_types)
-    .filter(([, t]) => Object.keys(t.sources ?? {}).length > 0) // 无源对象不进裁决
-    .map(([name, t]) => ({
-      name,
-      connections: new Set(Object.values(t.sources ?? {}).map((s) => s.connection)),
-      fields: Object.keys(t.properties),
-    }));
-  const byName = new Map(classes.map((c) => [c.name, c]));
+    // version=-1 是「已放弃」的裁决（草稿被丢弃）——不算定案，候选对可以再出现
+    const decided = new Set(metaStore().listDecisions().filter((r) => r.version !== -1).map((r) => [r.class_a, r.class_b].sort().join("|")));
+    const classes = Object.entries(d.object_types)
+      .filter(([, t]) => Object.keys(t.sources ?? {}).length > 0) // 无源对象不进裁决
+      .map(([name, t]) => ({
+        name,
+        connections: new Set(Object.values(t.sources ?? {}).map((s) => s.connection)),
+        fields: Object.keys(t.properties),
+      }));
+    const byName = new Map(classes.map((c) => [c.name, c]));
 
-  // 整批交槽位评估（它自己两两比对）
-  const advices: PairAdvice[] = await getSlot().suggestPairs(
-    classes.map((c) => ({ name: c.name, source: [...c.connections].sort().join("+"), fields: c.fields }))
-  );
-  // 槽位只看单字符串源；跨源与已定案的复核在这里做
-  const candidates = advices.filter((p) => {
-    const a = byName.get(p.class_a);
-    const b = byName.get(p.class_b);
-    if (!a || !b) return false;
-    if ([...a.connections].some((c) => b.connections.has(c))) return false;
-    return !decided.has([p.class_a, p.class_b].sort().join("|"));
-  });
+    // 整批交槽位评估（它自己两两比对）
+    const advices: PairAdvice[] = await getSlot().suggestPairs(
+      classes.map((c) => ({ name: c.name, source: [...c.connections].sort().join("+"), fields: c.fields }))
+    );
+    // 槽位只看单字符串源；跨源与已定案的复核在这里做
+    const candidates = advices.filter((p) => {
+      const a = byName.get(p.class_a);
+      const b = byName.get(p.class_b);
+      if (!a || !b) return false;
+      if ([...a.connections].some((c) => b.connections.has(c))) return false;
+      return !decided.has([p.class_a, p.class_b].sort().join("|"));
+    });
     return NextResponse.json({ candidates });
   } catch (e) {
     return internalError(e);

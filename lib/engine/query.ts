@@ -7,6 +7,7 @@ import type { ExpandNode, QueryRequest } from "../schema/request";
 import type { Condition, SourceDriver } from "./driver";
 import type { EvalContext } from "./expr";
 import {
+  assertFilterShapes,
   currentOf,
   EngineReject,
   evalDerived,
@@ -80,7 +81,11 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
         if (v == null) return false;
         conds[targetProp] = v;
       }
-      const merged: Filter = { ...conds, ...((targetFilter as Filter | undefined) ?? {}) };
+      const merged: Filter = { ...conds };
+      for (const [k, v] of Object.entries((targetFilter as Filter | undefined) ?? {})) {
+        if (k in conds) throw new EngineReject(`目标侧过滤 ${k} 与关系 ${linkName} 的配对字段冲突`); // 静默覆盖会让配对形同虚设
+        merged[k] = v;
+      }
       return (await selectIndividuals(env, targetClsName, { filter: merged, ctx })).length > 0;
     },
   };
@@ -254,6 +259,10 @@ export async function runQuery(config: OntologyConfig, driver: SourceDriver, req
   const path: string[] = [];
   const cls = mustCls(config, req.object);
   const ctx: EvalContext = { identity: req.identity };
+  // 过滤形状入口校验：in 必须数组、其余运算符与等值位禁数组——下推与内存共用一把尺
+  if (req.filter) assertFilterShapes(req.filter);
+  const checkExpand = (exs?: ExpandNode[]) => exs?.forEach((e) => { if (e.filter) assertFilterShapes(e.filter, `展开 ${e.relation}`); checkExpand(e.expand); });
+  checkExpand(req.expand);
 
   if (req.aggregate && req.expand?.length) throw new EngineReject("聚合与展开不能同给：分组统计不携带逐个体明细");
   // 展开深度上限：每层都是一轮下推，无上限会被深层请求打爆
@@ -347,7 +356,11 @@ async function expandItem(
     if (v == null) return [item.relation, []]; // 配对值为空：关系不成立，没有目标——与 linkHolds 同语义
     conds[targetProp] = v;
   }
-  const merged: Filter = { ...conds, ...(item.filter ?? {}) };
+  const merged: Filter = { ...conds };
+  for (const [k, v] of Object.entries(item.filter ?? {})) {
+    if (k in conds) throw new EngineReject(`展开 ${item.relation} 的目标侧过滤 ${k} 与配对字段冲突`);
+    merged[k] = v;
+  }
   const targetCls = mustCls(env.config, targetClsName);
   const sub = await selectIndividuals(env, targetClsName, {
     filter: merged,

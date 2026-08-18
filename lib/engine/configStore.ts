@@ -161,6 +161,7 @@ export function applyOp(input: DraftOp): DraftState {
     }
     case "import_objects": {
       for (const [name, raw] of Object.entries(input.objects)) {
+        if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new DraftReject(`类名必须是小写字母/数字/下划线，字母开头：${name}`);
         if (d.object_types[name]) throw new DraftReject(`类已存在：${name}`);
         d.object_types[name] = objectTypeSchema.parse(raw); // 逐类过结构校验
       }
@@ -208,6 +209,23 @@ function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[
     if (p !== prop && def.derived && derivedFilterKeys(def.derived).includes(prop)) refs.push(`派生属性 ${p}`);
   }
   refs.push(...actionRefs(d, clsName, prop));
+  // 他类派生经 $link 落到本类的过滤键（键侧，跨类）
+  for (const [hostName, hostCls] of Object.entries(d.object_types)) {
+    if (hostName === clsName) continue;
+    for (const [p, def] of Object.entries(hostCls.properties)) {
+      if (!def.derived) continue;
+      const whens = Array.isArray(def.derived) ? def.derived.map((r) => (r as { when?: unknown }).when) : [def.derived];
+      const check = (f: unknown, host: string) => {
+        if (!f || typeof f !== "object") return;
+        for (const [ln, sub] of Object.entries((f as Record<string, unknown>).$link ?? {})) {
+          const target = linkTarget(d, host, ln);
+          if (target === clsName && sub && typeof sub === "object" && filterTopKeys(sub as Record<string, unknown>).includes(prop)) refs.push(`派生属性 ${hostName}.${p}`);
+          if (target) check(sub, target);
+        }
+      };
+      for (const w of whens) check(w, hostName);
+    }
+  }
   // 值侧引用：过滤/赋值里的 { property: prop }（被比较、被读取的属性也是引用）
   const valueRefs = new Set<string>();
   for (const [hostName, hostCls] of Object.entries(d.object_types)) {
@@ -229,6 +247,10 @@ function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[
           const attrCls = "update" in item ? op.object : hostName;
           for (const v of Object.values(op.properties)) valuePropRefs(v, attrCls, trail, d, clsName, prop, valueRefs);
         }
+      }
+      // inform 的属性表在动作宿主（主体）上取值
+      for (const inf of act.inform ?? []) {
+        for (const v of Object.values(inf.properties)) valuePropRefs(v, hostName, trail, d, clsName, prop, valueRefs);
       }
     }
   }
@@ -286,6 +308,7 @@ function valuePropRefs(
   }
   for (const [k, v] of Object.entries(rec)) {
     if (k === "$link") continue;
+    if (k === "$request") continue; // $request 块里的 { property } 指的是请求参数袋，不是类属性
     if (v && typeof v === "object") valuePropRefs(v, hostCls, trail, d, clsName, prop, refs);
   }
 }

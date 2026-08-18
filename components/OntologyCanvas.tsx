@@ -182,7 +182,8 @@ function Flow({
           : l.kind === "transition"
             ? { strokeDasharray: "6 4", stroke: "var(--warn)" }
             : undefined,
-        markerEnd: { type: MarkerType.ArrowClosed },
+        // 箭头跟着边色走，高亮时不拖灰箭头
+        markerEnd: { type: MarkerType.ArrowClosed, color: l.name === selectedLink ? "#3b36b0" : l.kind === "transition" ? "#8a5f0b" : undefined },
         interactionWidth: 20, // 线的点击热区放宽，细线也好点
       })),
     [links, selectedLink]
