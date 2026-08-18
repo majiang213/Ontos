@@ -41,6 +41,12 @@ export default function CanvasPage() {
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
   const refresh = useCallback(() => fetch("/api/ontology").then((r) => r.json()).then(setOnt), []);
+  // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
+  const loadPairs = useCallback(async () => {
+    const r = await fetch("/api/candidates");
+    const data = await r.json();
+    setPairs(data.candidates ?? []);
+  }, []);
   useEffect(() => {
     refresh();
     fetch("/api/introspect").then((r) => r.json()).then(setSchema);
@@ -197,9 +203,7 @@ export default function CanvasPage() {
         <button
           className="btn"
           onClick={async () => {
-            const r = await fetch("/api/candidates");
-            const data = await r.json();
-            setPairs(data.candidates ?? []);
+            await loadPairs();
             setPanelOpen(true);
           }}
         >
@@ -254,19 +258,19 @@ export default function CanvasPage() {
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "56vh" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 对）</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 处）</span>
                 <button className="chip" onClick={() => setPanelOpen(false)}>✕</button>
               </div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，请你一对一对定夺。</div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，两两列出，请你逐条定夺；三个以上重复时会出多条，裁完一条会自动重算。</div>
               {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
               {pairs.map((p) => (
                 <PairCard
                   key={`${p.class_a}|${p.class_b}`}
                   pair={p}
                   onDone={(msg) => {
-                    setPairs((prev) => prev.filter((x) => !(x.class_a === p.class_a && x.class_b === p.class_b)));
                     showToast(msg);
-                    void refresh();
+                    // 重新拉一遍：被合并撤掉的类，挂着它的条目随之消失（三个以上重复时会连环）
+                    void loadPairs().then(() => refresh());
                   }}
                 />
               ))}
