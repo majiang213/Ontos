@@ -3,9 +3,9 @@
   "private": true,
   "description": "Ontos 平台（Next.js 前后端一体）：引擎 lib/engine/，种子配置 lib/config/ontology.yaml，测试 tests/。",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 6688",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 6688",
     "test": "vitest run"
   },
   "dependencies": {

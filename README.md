@@ -50,6 +50,6 @@
 
 ```bash
 npm install
-npm run dev    # 浏览器打开 http://localhost:3000
+npm run dev    # 浏览器打开 http://localhost:6688（端口固定，不再改）
 npm test       # 引擎 golden 测试（vitest）
 ```
