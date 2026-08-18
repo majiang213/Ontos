@@ -50,7 +50,7 @@ export function keyColumn(cls: Cls, entry: { fields: Record<string, string>; key
 /** 源列属性的值：按 sources 声明顺序，排在前面的源优先；该源无行则看下一个。 */
 export function propValue(cls: Cls, ind: Individual, prop: string): unknown {
   const def = cls.def.properties[prop];
-  if (!def) throw new Error(`类上没有属性：${prop}`);
+  if (!def) throw new EngineReject(`类上没有属性：${prop}`); // 点错名是配置/请求问题（422），不是系统故障
   for (const [src, entry] of sourcesOf(cls)) {
     const col = entry.fields[prop];
     const row = ind.rows[src];
@@ -111,7 +111,7 @@ export async function whenRuleHits(cls: Cls, ind: Individual, rule: WhenRule, en
 export async function evalDerived(cls: Cls, ind: Individual, prop: string, env: Env, ctx: EvalContext): Promise<unknown> {
   const def = cls.def.properties[prop];
   const derived = def?.derived;
-  if (!derived) throw new Error(`属性不是派生的：${prop}`);
+  if (!derived) throw new EngineReject(`属性不是派生的：${prop}`);
   if (Array.isArray(derived)) {
     for (const r of derived) {
       if (await whenRuleHits(cls, ind, r, env, ctx)) return r.value;
@@ -144,17 +144,9 @@ export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unkn
       }
       const hit = ctx.current?.[rec.property];
       if (hit === undefined) {
-        if (ctx.currentDerived) {
-          // 派生按需现算。只归一「点错名」这一类（非派生/没有该属性 → 422）；
-          // EngineReject 原样透传，源库故障（$link 派生真查库）原样上抛走 500——不拿基础设施故障冒充业务拒答
-          try {
-            return await ctx.currentDerived(rec.property);
-          } catch (e) {
-            if (e instanceof EngineReject) throw e;
-            if (e instanceof Error && /不是派生|没有属性|取不到值/.test(e.message)) throw new EngineReject(e.message);
-            throw e;
-          }
-        }
+        // 派生按需现算。错误分类在源头就是对的：点错名（evalDerived/propValue）抛 EngineReject，
+        // 源库故障（$link 派生真查库）是原生异常——都不需要在这里归一，原样透传即可
+        if (ctx.currentDerived) return await ctx.currentDerived(rec.property);
         throw new EngineReject(`操作数取不到值：${rec.property}`); // 下推层接到这个错就退回内存核对
       }
       return dataLiteral(hit); // 源库数据：只转换，不抛错
