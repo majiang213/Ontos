@@ -529,21 +529,35 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
     }
   };
 
+  // 五种结论的白话说明：名字是定案术语，解释是给用户扫一眼的
+  const options: { v: string; hint: string }[] = [
+    { v: "同一", hint: "就是同一批东西——合并成一个对象，挂多个来源" },
+    { v: "部分重叠", hint: "有一部分重合——公共字段立一个公共对象，各自特有的字段留下" },
+    { v: "阶段", hint: "同一批东西的不同阶段——合并成一个对象，加状态和转化动作" },
+    { v: "仅名称相似", hint: "只是名字像，其实不相干——各自独立" },
+    { v: "跳过", hint: "这次不判，先放着" },
+  ];
+
   return (
-    <div style={{ borderTop: "1px solid var(--hairline)", padding: "10px 0" }}>
+    <div style={{ borderTop: "1px solid var(--hairline)", padding: "12px 0" }}>
       <div style={{ fontSize: 13 }}>
         <code>{pair.class_a}</code> × <code>{pair.class_b}</code>
       </div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "4px 0" }}>
-        建议：{pair.tendency}（{pair.reason}）
+      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "6px 0 2px" }}>
+        AI 建议「{pair.tendency}」，依据：{pair.reason}。
       </div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>建议只是参考——起名像不像会骗人，定夺要看真实数据和你。</div>
       <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "4px 0" }}>
         {rate ? (
-          <>交集率 {(rate.rate * 100).toFixed(0)}%（{pair.class_a} {rate.count_a} 条 / {pair.class_b} {rate.count_b} 条 / 重合 {rate.count_hit}）</>
+          <>
+            两边识别字段实际重合 <strong>{(rate.rate * 100).toFixed(0)}%</strong>（{pair.class_a} {rate.count_a} 条、{pair.class_b} {rate.count_b} 条，其中 {rate.count_hit} 条对得上号）
+            {rate.count_hit === 0 ? "——完全对不上，多半不相干" : rate.rate >= 0.5 ? "——多半是同一批" : ""}
+          </>
         ) : (
           <button
             className="chip"
             onClick={async () => {
+              setError(null);
               const r = await fetch("/api/overlap", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -551,23 +565,36 @@ function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) =>
               });
               const data = await r.json();
               if (r.ok) setRate(data);
+              else setError(data.error ?? "算不了");
             }}
           >
-            计算交集率
+            算一算实际重合度
           </button>
         )}
       </div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6 }}>是同一批现实对象吗？选一个结论：</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, alignItems: "center" }}>
-        <button className="chip" title="合并成一个对象，挂多个来源" disabled={busy} onClick={() => decide("同一")}>同一</button>
-        <button className="chip" title="有一部分是同一批：公共字段立上位对象，各自特有字段留下" disabled={busy} onClick={() => decide("部分重叠")}>部分重叠</button>
-        <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-          <button className="chip" title="同一批东西的不同阶段：合并成一个对象，加状态与转化" disabled={busy || !stage.from || !stage.to} onClick={() => decide("阶段")}>阶段</button>
-          <input placeholder="前阶段" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 64, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)" }} />
-          <input placeholder="后阶段" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 64, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)" }} />
-        </span>
-        <button className="chip" title="名字像但不相干，各自独立" disabled={busy} onClick={() => decide("仅名称相似")}>仅名称相似</button>
-        <button className="chip" title="本次不判，先放着" disabled={busy} onClick={() => decide("跳过")}>跳过</button>
+      <div style={{ fontSize: 11, color: "var(--ink-3)" }}>实际重合度 = 两边识别字段的取值有多少对得上号（内存里算，不搬数据出库）。</div>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "10px 0 4px" }}>是同一批现实对象吗？选一个结论：</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {options.map((o) => (
+          <div key={o.v} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+            <button
+              className="chip"
+              style={{ minWidth: 76, textAlign: "center" }}
+              disabled={busy || (o.v === "阶段" && (!stage.from || !stage.to))}
+              onClick={() => decide(o.v)}
+            >
+              {o.v}
+            </button>
+            <span style={{ color: "var(--ink-3)" }}>{o.hint}</span>
+            {o.v === "阶段" && (
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                <input placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 110, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                <span style={{ color: "var(--ink-3)" }}>→</span>
+                <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 110, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+              </span>
+            )}
+          </div>
+        ))}
       </div>
       {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
     </div>
