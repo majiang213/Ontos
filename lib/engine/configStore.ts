@@ -30,7 +30,7 @@ function latestVersionFile(): { version: number; file: string } {
   return { version: v, file: join(versionsDir(), `v${v}.yaml`) };
 }
 
-export function loadPublished(): { config: OntologyConfig; version: number } {
+function loadPublished(): { config: OntologyConfig; version: number } {
   const { version, file } = latestVersionFile();
   const config = configSchema.parse(load(readFileSync(file, "utf8")));
   validateSemantics(config);

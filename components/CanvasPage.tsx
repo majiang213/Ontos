@@ -84,7 +84,7 @@ export default function CanvasPage() {
         return false;
       }
     },
-    [refresh, showToast]
+    [refresh, showToast, netErr]
   );
 
   const saveLayout = useCallback(
@@ -185,7 +185,7 @@ export default function CanvasPage() {
       setDrawerOpen(false);
       await refresh();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : String(e));
+      netErr(e);
     } finally {
       setGenerating(false);
     }

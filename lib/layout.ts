@@ -1,8 +1,26 @@
 // 自动分层布局 —— dagre 按有向边分层：被引用的根对象在上，引用它们的在下，边顺一个方向。
 // 自环（转化关系）不参与分层，只画线。
+// 画布的两个输入类型也住这里（layout 是它们的唯一下游定义点，组件不反向依赖组件）。
 
 import dagre from "@dagrejs/dagre";
-import type { CanvasLink, CanvasObject } from "../components/OntologyCanvas";
+
+export interface CanvasObject {
+  name: string;
+  description?: string;
+  kind: "thing" | "event";
+  properties: { name: string; type: string; derived: boolean; values?: (string | number)[] }[];
+  sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
+  actions: string[];
+  state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
+}
+
+export interface CanvasLink {
+  name: string;
+  from: string;
+  to: string;
+  inverse?: string;
+  kind: "match" | "transition";
+}
 
 const NODE_W = 300;
 

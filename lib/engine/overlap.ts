@@ -2,11 +2,9 @@
 // 只读采样，内存里算，集合算完即弃；落库的只有计数与比率（adj_overlap）。
 
 import type { SourceDriver } from "./driver";
-import type { Cls } from "./individual";
-import { keyColumn, sourcesOf } from "./individual";
+import { EngineReject, keyColumn, sourcesOf, type Cls } from "./individual";
 import { pickRule, normalizeWith } from "./normalize";
 import type { MetaStore } from "../meta/store";
-import { EngineReject } from "./individual";
 
 /** 识别列全量扫的行数上限：交集是内存集合运算，超大表先收窄再算。 */
 const MAX_SCAN = 50_000;

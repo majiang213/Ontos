@@ -383,6 +383,11 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
   );
 }
 
+/** 投影操作的白话名（引擎的 op 是 insert/update/delete，不上屏）。 */
+function opLabel(op: string): string {
+  return op === "insert" ? "插入" : op === "update" ? "更新" : op === "delete" ? "删除" : op;
+}
+
 function ActionCard({ r }: { r: NonNullable<Msg["actionResult"]> }) {
   return (
     <div className="bezel">
@@ -392,7 +397,7 @@ function ActionCard({ r }: { r: NonNullable<Msg["actionResult"]> }) {
         </div>
         {r.projections.map((p, i) => (
           <div key={i} style={{ fontSize: 12, lineHeight: 1.9, color: p.ok ? "var(--ink-2)" : "var(--danger)" }}>
-            {p.ok ? "✓" : "✗"} {p.source}.{p.table} {p.op}
+            {p.ok ? "✓" : "✗"} {p.source}.{p.table} {opLabel(p.op)}
             {p.note ? `（${p.note}）` : ""}
             {p.error ? `（${p.error}）` : ""}
           </div>

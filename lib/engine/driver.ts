@@ -39,14 +39,14 @@ export interface SourceDriver {
 /* ---------- 方言 ---------- */
 
 /** 标识符引号：mysql 反引号，pg/sqlite 双引号。标识符内的引号字符双写转义。 */
-export function quoteFor(dialect: "sqlite" | "mysql" | "pg"): (id: string) => string {
+function quoteFor(dialect: "sqlite" | "mysql" | "pg"): (id: string) => string {
   return dialect === "mysql"
     ? (id) => `\`${id.replace(/`/g, "``")}\``
     : (id) => `"${id.replace(/"/g, '""')}"`;
 }
 
 /** 占位符风格：sqlite/mysql 用 ?，pg 用 $1..$n。 */
-export function renderPlaceholders(sql: string, dialect: "sqlite" | "mysql" | "pg"): string {
+function renderPlaceholders(sql: string, dialect: "sqlite" | "mysql" | "pg"): string {
   if (dialect !== "pg") return sql;
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);
@@ -77,7 +77,7 @@ export function maskValue(column: string, value: unknown): unknown {
 }
 
 /* 条件 → WHERE 片段。占位符统一用 ?；标识符引号按方言给。 */
-export function conditionSql(cond: Condition, quote: (id: string) => string, dialect: "sqlite" | "mysql" | "pg" = "sqlite"): { sql: string; params: unknown[] } {
+function conditionSql(cond: Condition, quote: (id: string) => string, dialect: "sqlite" | "mysql" | "pg"): { sql: string; params: unknown[] } {
   const col = quote(cond.column);
   switch (cond.op) {
     case "null":

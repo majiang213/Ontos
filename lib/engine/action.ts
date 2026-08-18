@@ -313,7 +313,7 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
             });
             out.push(
               already
-                ? { source: srcName, table: entry.table, op: "update", ok: true, note: "已是目标值（幂等命中）" }
+                ? { source: srcName, table: entry.table, op: "update", ok: true, note: "已是目标值，没重复写" }
                 : { source: srcName, table: entry.table, op: "update", ok: false, error: "条件更新未命中（行可能已被并发改动）" }
             );
           }
@@ -344,7 +344,7 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
           const keyCol = keyColumn(p.cls, entry);
           const dup = await driver.select(entry.connection, entry.table, [keyCol], [{ column: keyCol, op: "eq", value: idVal }]);
           if (dup.length > 0) {
-            out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有行，跳过（幂等）" });
+            out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有这行，没重复插" });
             continue;
           }
         }

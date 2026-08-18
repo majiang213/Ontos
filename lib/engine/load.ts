@@ -2,20 +2,14 @@
 // 单例挂 globalThis：Next dev 下各路由包各有模块实例，挂全局才能保证
 // 「验收之后再问，看到的是同一个源库」「发布之后引擎立刻读新版」。
 
-import type { OntologyConfig } from "../schema/config";
 import { existsSync, statSync } from "node:fs";
 import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
-import { getPublished } from "./configStore";
 import { metaStore } from "../meta/store";
 
 const g = globalThis as unknown as { __ontosRegistry?: DriverRegistry };
-
-export function loadConfig(): OntologyConfig {
-  return getPublished().config; // 已发布快照；工作副本的读写走 configStore
-}
 
 /** 驱动注册表（全部路由的唯一驱动入口）：fixture 四个内置连接 + 元数据库里保存的连接（mysql/pg/sqlite 文件）。 */
 export function getDriverRegistry(): DriverRegistry {

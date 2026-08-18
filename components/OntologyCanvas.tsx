@@ -20,26 +20,11 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { layoutObjects } from "../lib/layout";
+import { layoutObjects, type CanvasLink, type CanvasObject } from "../lib/layout";
 import FloatingEdge from "./FloatingEdge";
 
-export interface CanvasObject {
-  name: string;
-  description?: string;
-  kind: "thing" | "event";
-  properties: { name: string; type: string; derived: boolean; values?: (string | number)[] }[];
-  sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
-  actions: string[];
-  state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
-}
-
-export interface CanvasLink {
-  name: string;
-  from: string;
-  to: string;
-  inverse?: string;
-  kind: "match" | "transition";
-}
+// CanvasObject/CanvasLink 定义在 lib/layout.ts（布局是唯一下游定义点）；这里再导出，老调用方不用改
+export type { CanvasLink, CanvasObject };
 
 function ObjectNode({ data }: { data: ObjNodeData }) {
   const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
