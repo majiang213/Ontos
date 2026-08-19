@@ -286,6 +286,23 @@ export default function CanvasPage() {
           >
             已发布 v{ont?.version ?? "…"} ▾
           </button>
+          {/* 发布常驻工具条、永可点：有改动时是「发布 vN+1 / 放弃」，没改动点一下给提示（不置灰） */}
+          {ont?.dirty ? (
+            <>
+              <button
+                className="btn-cta"
+                style={{ fontSize: 12, padding: "6px 10px 6px 14px" }}
+                title={ont.deleted?.length ? `将删除：${ont.deleted.join("、")}` : undefined}
+                onClick={publish}
+                disabled={publishing}
+              >
+                发布 v{(ont?.version ?? 1) + 1}
+              </button>
+              <button className="btn" onClick={discard} disabled={publishing}>放弃</button>
+            </>
+          ) : (
+            <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>
+          )}
           <button className="btn" onClick={() => openTl("create")}>新建对象</button>
           <button className="btn" onClick={() => openTl("connect")}>连接数据源</button>
           <button
@@ -384,7 +401,7 @@ export default function CanvasPage() {
                   key={`${p.class_a}|${p.class_b}`}
                   pair={p}
                   onDone={(msg) => {
-                    showToast(msg);
+                    if (msg) showToast(msg); // 空串 = 不动草稿的结论（仅名称相似/跳过），不弹提示
                     // 重新拉一遍：被合并撤掉的类，挂着它的条目随之消失（三个以上重复时会连环）
                     void loadPairs().then(() => refresh());
                   }}
@@ -395,24 +412,7 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底中：发布条（有未发布改动时；裁决面板打开时让位） */}
-      {ont?.dirty && !panelOpen && (
-        <div className="float-card float-bc">
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 8, display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--ink-2)", paddingLeft: 6 }}>
-                有未发布的改动{ont.deleted?.length ? `；将删除：${ont.deleted.join("、")}` : ""}
-              </span>
-              <button className="btn-cta" style={{ fontSize: 13, padding: "6px 8px 6px 16px" }} onClick={publish} disabled={publishing}>
-                发布 v{(ont?.version ?? 1) + 1}
-              </button>
-              <button className="btn" onClick={discard} disabled={publishing}>放弃</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 左下：表结构抽屉开关（常驻，不被发布条挤掉） */}
+      {/* 左下：表结构抽屉开关（常驻） */}
       {(
         <div className="float-card" style={{ bottom: 18, left: 16 }}>
           <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>

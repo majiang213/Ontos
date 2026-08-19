@@ -35,7 +35,9 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
         onDone(
           verdict === "阶段"
             ? `已裁决 ${pair.class_a} × ${pair.class_b}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
-            : `已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+            : verdict === "同一" || verdict === "部分重叠"
+              ? `已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+              : "" // 仅名称相似/跳过：不动草稿，条目从面板消失即是反馈，不弹提示
         );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
