@@ -32,9 +32,6 @@ const SUGGESTED = ["在役设备及其所属部门", "还有多少在途设备",
 // 对话历史按工作空间分键：切空间互不可见（切空间时本页整体重挂，挂载时取的是新空间的键）
 const storeKey = () => `ontos-chat-sessions:${getWs()}`;
 
-/** 会话栏宽度。page.tsx 的顶部胶囊按它右移半宽，与 hero 共用「会话栏以右」的中轴。 */
-export const CHAT_ASIDE_W = 216;
-
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [curId, setCurId] = useState<string | null>(null);
@@ -254,7 +251,7 @@ export default function ChatPage() {
             }}
             style={{ width: "100%", border: "none", outline: "none", background: "transparent", fontSize: 14, color: "var(--ink)", padding: "2px 0 10px", resize: "vertical", lineHeight: 1.7, fontFamily: "inherit" }}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid var(--hairline-strong)", paddingTop: 8 }}>
             <button type="button" className="chip" onClick={() => setActOpen((v) => !v)}>
               ⚡ 对设备发起动作
             </button>
@@ -269,9 +266,9 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="chat-wrap" style={{ display: "flex", flexDirection: "row" }}>
-      {/* 左侧会话栏（常驻，右缘发丝线与主区分开）：主区阅读列按「会话栏以右」居中，与顶部胶囊同轴 */}
-      <aside style={{ width: CHAT_ASIDE_W, flexShrink: 0, borderRight: "1px solid var(--hairline)", display: "flex", flexDirection: "column", padding: "78px 10px 12px 20px" }}>
+    <div className="chat-wrap" style={{ position: "relative" }}>
+      {/* 左侧会话栏：浮在左缘不占主区宽度——顶部胶囊与阅读列都按视口居中，位置恒定 */}
+      <aside style={{ position: "absolute", left: 16, top: 78, bottom: 12, width: 200, zIndex: 10, display: "flex", flexDirection: "column", borderRight: "1px solid var(--hairline-strong)", paddingRight: 10 }}>
         <button className="btn" style={{ justifyContent: "center", marginBottom: 12 }} onClick={newSession}>＋ 新建会话</button>
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
           {sessions.map((s) => (
@@ -307,8 +304,8 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* 主区：消息流 + 底部输入卡（内容居中成阅读列，不通栏） */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, padding: "78px 24px 12px" }}>
+      {/* 主区：消息流 + 底部输入卡（阅读列按视口居中，不通栏） */}
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minWidth: 0, padding: "78px 24px 12px" }}>
         <div style={{ width: "100%", maxWidth: 820, margin: "0 auto", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div ref={listRef} style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
           {msgs.length === 0 && (
