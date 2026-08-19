@@ -194,6 +194,77 @@ export default function ChatPage() {
     }
   }
 
+  /** 输入组合区：动作区 + 问数 API 台账 + 输入卡。空态时收进 hero（对话框在上，同 Claude）；有消息后沉到底部。 */
+  const renderComposer = () => (
+    <>
+      {/* 动作区（点开才展开）；绑的是种子本体的演示剧本，通用形态是外部 Agent 经 MCP 发动作 */}
+      {actOpen && (
+        <div className="bezel" style={{ marginBottom: 10 }}>
+          <div className="bezel-core" style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--ink-2)" }}>对序列号</span>
+            <input className="text-in" style={{ width: 140, padding: "6px 12px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="SN-40217" />
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>发起动作：</span>
+            <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
+            <button className="btn" onClick={() => act("transfer", "equipment", sn, { dept: "D07" })} disabled={busy}>调拨到 D07</button>
+            <button className="btn" onClick={() => act("scrap", "equipment", sn)} disabled={busy}>报废</button>
+            <button className="chip" aria-label="收起" style={{ marginLeft: "auto" }} onClick={() => setActOpen(false)}>收起</button>
+          </div>
+        </div>
+      )}
+      {/* 问数 API 台账：已保存的查询，点了直接重跑 */}
+      {apis.length > 0 && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          <span style={{ fontSize: 11, color: "var(--ink-3)" }}>问数 API：</span>
+          {apis.map((a) => (
+            <button key={a.id} className="chip" title={a.question} onClick={() => !busy && runApi(a)}>
+              {a.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* 输入卡：输入区 + 底部工具条（动作开关在左，发送在右） */}
+      <form
+        className="bezel"
+        style={{ flexShrink: 0, boxShadow: "0 0 0 1px var(--hairline-strong), var(--shadow-soft)" }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (input.trim() && !busy) {
+            ask(input.trim());
+            setInput("");
+          }
+        }}
+      >
+        <div className="bezel-core" style={{ padding: "12px 14px 8px" }}>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="问数：在役设备及其所属部门…"
+            rows={3}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault(); // 回车发送，Shift+回车换行
+                if (input.trim() && !busy) {
+                  ask(input.trim());
+                  setInput("");
+                }
+              }
+            }}
+            style={{ width: "100%", border: "none", outline: "none", background: "transparent", fontSize: 14, color: "var(--ink)", padding: "2px 0 10px", resize: "vertical", lineHeight: 1.7, fontFamily: "inherit" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>
+            <button type="button" className="chip" onClick={() => setActOpen((v) => !v)}>
+              ⚡ 对设备发起动作
+            </button>
+            <span style={{ flex: 1 }} />
+            <button type="submit" className="btn-cta" aria-label="发送" disabled={busy}>
+              <span className="ico"><ArrowUpRight size={14} weight="light" /></span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </>
+  );
+
   return (
     <div className="chat-wrap" style={{ position: "relative" }}>
       {/* 左侧会话栏：浮在左缘不占主区宽度（消息列与顶部页签共用视口中轴），右缘发丝线与主区分开 */}
@@ -238,11 +309,12 @@ export default function ChatPage() {
         <div style={{ width: "100%", maxWidth: 820, margin: "0 auto", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div ref={listRef} style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
           {msgs.length === 0 && (
-            /* 空态 = 引导：一句话说明 + 四个示例问题卡（点了直接问）。在消息区里上下居中；与输入卡同宽，左右边线对齐 */
+            /* 空态 = 引导：标题 + 输入卡 + 示例问题（同 Claude：对话框在上方居中，不沉底） */
             <div style={{ margin: "auto", width: "100%", textAlign: "center" }}>
               <div style={{ fontFamily: "var(--font-serif)", fontSize: 24, color: "var(--ink)", marginBottom: 8 }}>问数据，或对设备发起动作</div>
               <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 24 }}>回答永远是源库里的真数据，附取数路径。</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ textAlign: "left" }}>{renderComposer()}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 14 }}>
                 {SUGGESTED.map((s) => (
                   <button
                     key={s}
@@ -284,72 +356,8 @@ export default function ChatPage() {
           {busy && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>查着呢…</div>}
         </div>
 
-        {/* 动作区（点开才展开）；绑的是种子本体的演示剧本，通用形态是外部 Agent 经 MCP 发动作 */}
-        {actOpen && (
-          <div className="bezel" style={{ marginBottom: 10 }}>
-            <div className="bezel-core" style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: "var(--ink-2)" }}>对序列号</span>
-              <input className="text-in" style={{ width: 140, padding: "6px 12px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="SN-40217" />
-              <span style={{ fontSize: 12, color: "var(--ink-3)" }}>发起动作：</span>
-              <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
-              <button className="btn" onClick={() => act("transfer", "equipment", sn, { dept: "D07" })} disabled={busy}>调拨到 D07</button>
-              <button className="btn" onClick={() => act("scrap", "equipment", sn)} disabled={busy}>报废</button>
-              <button className="chip" aria-label="收起" style={{ marginLeft: "auto" }} onClick={() => setActOpen(false)}>收起</button>
-            </div>
-          </div>
-        )}
-        {/* 问数 API 台账：已保存的查询，点了直接重跑 */}
-        {apis.length > 0 && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>问数 API：</span>
-            {apis.map((a) => (
-              <button key={a.id} className="chip" title={a.question} onClick={() => !busy && runApi(a)}>
-                {a.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* 输入卡：输入区 + 底部工具条（动作开关在左，发送在右） */}
-        <form
-          className="bezel"
-          style={{ flexShrink: 0, boxShadow: "0 0 0 1px var(--hairline-strong), var(--shadow-soft)" }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (input.trim() && !busy) {
-              ask(input.trim());
-              setInput("");
-            }
-          }}
-        >
-          <div className="bezel-core" style={{ padding: "12px 14px 8px" }}>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="问数：在役设备及其所属部门…"
-              rows={3}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault(); // 回车发送，Shift+回车换行
-                  if (input.trim() && !busy) {
-                    ask(input.trim());
-                    setInput("");
-                  }
-                }
-              }}
-              style={{ width: "100%", border: "none", outline: "none", background: "transparent", fontSize: 14, color: "var(--ink)", padding: "2px 0 10px", resize: "vertical", lineHeight: 1.7, fontFamily: "inherit" }}
-            />
-            <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>
-              <button type="button" className="chip" onClick={() => setActOpen((v) => !v)}>
-                ⚡ 对设备发起动作
-              </button>
-              <span style={{ flex: 1 }} />
-              <button type="submit" className="btn-cta" aria-label="发送" disabled={busy}>
-                <span className="ico"><ArrowUpRight size={14} weight="light" /></span>
-              </button>
-            </div>
-          </div>
-        </form>
+        {/* 有消息后输入区沉到底部 */}
+        {msgs.length > 0 && renderComposer()}
         </div>
       </div>
     </div>
