@@ -8,7 +8,7 @@ import { getDriverRegistry, resolveTableInfos } from "@/lib/engine/load";
 import { getSlot } from "@/lib/engine/llmSlot";
 import { applyOp, DraftReject } from "@/lib/engine/configStore";
 import { EngineReject } from "@/lib/engine/individual";
-import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z.object({
   tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty(),
@@ -18,12 +18,13 @@ export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
   try {
+    const ws = wsOf(req);
     const { tables } = bodySchema.parse(await bodyJson(req));
-    const registry = getDriverRegistry();
+    const registry = getDriverRegistry(ws);
     // 按连接分组内省 + 逐表定位：引擎共享实现（mcp 同款）
     const infos = await resolveTableInfos(registry, tables, (m) => new DraftReject(m));
     const objects = await getSlot().draftObjects(infos);
-    applyOp({ op: "import_objects", objects });
+    applyOp({ op: "import_objects", objects }, ws);
     return NextResponse.json({ ok: true, created: Object.keys(objects) });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });

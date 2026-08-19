@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OntologyCanvas, { type CanvasLink, type CanvasObject } from "./OntologyCanvas";
 import PairCard from "./PairCard";
+import { apiUrl } from "./wsClient";
 import QuestionsCard from "./QuestionsCard";
 import { AddProperty, ConnectForm, CreateForm, LinkForm, Section } from "./forms";
 import type { PairAdvice } from "../lib/engine/llmSlot";
@@ -55,16 +56,16 @@ export default function CanvasPage() {
   /** 网络层失败（fetch reject）的统一提示。 */
   const netErr = useCallback((e: unknown) => showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`), [showToast]);
 
-  const refresh = useCallback(() => fetch("/api/ontology").then((r) => r.json()).then(setOnt), []);
+  const refresh = useCallback(() => fetch(apiUrl("/api/ontology")).then((r) => r.json()).then(setOnt), []);
   // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
   const loadPairs = useCallback(async () => {
-    const r = await fetch("/api/candidates");
+    const r = await fetch(apiUrl("/api/candidates"));
     const data = await r.json();
     setPairs(data.candidates ?? []);
   }, []);
   useEffect(() => {
     refresh().catch(netErr); // 首轮加载失败也要说
-    fetch("/api/introspect").then((r) => r.json()).then(setSchema).catch(netErr);
+    fetch(apiUrl("/api/introspect")).then((r) => r.json()).then(setSchema).catch(netErr);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载时跑一次
   }, [refresh, netErr]);
 
@@ -72,7 +73,7 @@ export default function CanvasPage() {
   const op = useCallback(
     async (body: Record<string, unknown>) => {
       try {
-        const r = await fetch("/api/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const r = await fetch(apiUrl("/api/draft"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const data = await r.json();
         if (!r.ok) {
           showToast(data.error ?? "操作被拒");
@@ -99,7 +100,7 @@ export default function CanvasPage() {
     if (publishing) return; // 防连点：重复发布会产生空版本
     setPublishing(true);
     try {
-      const r = await fetch("/api/publish", { method: "POST" });
+      const r = await fetch(apiUrl("/api/publish"), { method: "POST" });
       const data = await r.json();
       if (!r.ok) showToast(data.error ?? "发布被拒");
       else showToast(`已发布 v${data.version}，问数与动作即刻生效`);
@@ -114,7 +115,7 @@ export default function CanvasPage() {
     if (publishing) return; // 与发布同一把闸，防连点
     setPublishing(true);
     try {
-      const r = await fetch("/api/publish", { method: "DELETE" });
+      const r = await fetch(apiUrl("/api/publish"), { method: "DELETE" });
       if (!r.ok) {
         const data = await r.json();
         showToast(data.error ?? "放弃失败");
@@ -171,7 +172,7 @@ export default function CanvasPage() {
         const dot = key.indexOf("."); // 只切第一个点：连接名/表名里再有点不炸
         return { connection: key.slice(0, dot), table: key.slice(dot + 1) };
       });
-      const r = await fetch("/api/generate", {
+      const r = await fetch(apiUrl("/api/generate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tables }),
@@ -277,7 +278,7 @@ export default function CanvasPage() {
               openTl("versions");
               setVersions([]); // 先开卡给 loading 态再填数据——慢网络下不顶掉别人正在填的卡
               try {
-                const r = await fetch("/api/versions");
+                const r = await fetch(apiUrl("/api/versions"));
                 const data = await r.json();
                 // 用户可能已去开别的卡（openTl 会把 versions 置 null）：只在本卡还开着时填数
                 setVersions((cur) => (cur === null ? null : (data.versions ?? [])));
@@ -343,7 +344,7 @@ export default function CanvasPage() {
                         if (rollbacking) return; // 防连点：连发会产生两个新版本
                         setRollbacking(true);
                         try {
-                          const r = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: v.version }) });
+                          const r = await fetch(apiUrl("/api/versions"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: v.version }) });
                           const data = await r.json();
                           if (r.ok) {
                             showToast(`已回滚到 v${v.version} 的内容（发布为 v${data.version}）`);
@@ -447,7 +448,7 @@ export default function CanvasPage() {
                   setConnecting(false);
                   showToast(msg);
                   try {
-                    const s = await fetch("/api/introspect").then((r) => r.json());
+                    const s = await fetch(apiUrl("/api/introspect")).then((r) => r.json());
                     setSchema(s);
                     setDrawerOpen(true); // 保存后自动打开表结构抽屉
                   } catch (e) {

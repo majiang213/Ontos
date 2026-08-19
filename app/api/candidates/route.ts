@@ -6,13 +6,14 @@ import { NextResponse } from "next/server";
 import { getDraft } from "@/lib/engine/configStore";
 import { getSlot, type PairAdvice } from "@/lib/engine/llmSlot";
 import { metaStore } from "@/lib/meta/store";
-import { internalError } from "@/app/api/_shared";
+import { internalError, wsOf } from "@/app/api/_shared";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const d = getDraft().draft;
+    const ws = wsOf(req);
+    const d = getDraft(ws).draft;
     // version=-1 是「已放弃」的裁决（草稿被丢弃）——不算定案，候选对可以再出现
-    const decided = new Set(metaStore().listDecisions().filter((r) => r.version !== -1).map((r) => [r.class_a, r.class_b].sort().join("|")));
+    const decided = new Set(metaStore(ws).listDecisions().filter((r) => r.version !== -1).map((r) => [r.class_a, r.class_b].sort().join("|")));
     const classes = Object.entries(d.object_types)
       .filter(([, t]) => Object.keys(t.sources ?? {}).length > 0) // 无源对象不进裁决
       .map(([name, t]) => ({

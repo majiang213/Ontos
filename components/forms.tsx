@@ -3,6 +3,7 @@
 "use client";
 
 import { useState } from "react";
+import { apiUrl } from "./wsClient";
 
 export const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
 
@@ -122,7 +123,7 @@ export function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => voi
         setBusy(true);
         setError(null);
         try {
-          const r = await fetch("/api/connections", {
+          const r = await fetch(apiUrl("/api/connections"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

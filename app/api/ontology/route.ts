@@ -4,12 +4,13 @@
 
 import { NextResponse } from "next/server";
 import { getDraft, getPublished, sameConfig } from "@/lib/engine/configStore";
-import { internalError } from "@/app/api/_shared";
+import { internalError, wsOf } from "@/app/api/_shared";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const state = getDraft();
-    const published = getPublished().config;
+    const ws = wsOf(req);
+    const state = getDraft(ws);
+    const published = getPublished(ws).config;
     const states: Record<string, "new" | "modified" | "same"> = {};
     for (const [name, t] of Object.entries(state.draft.object_types)) {
       const pub = published.object_types[name];

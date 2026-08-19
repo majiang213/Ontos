@@ -58,7 +58,7 @@ describe("配置存储（工作副本与发布）", () => {
     expect(s.getDraft().dirty).toBe(false);
     expect(s.getPublished().version).toBe(2);
     expect(s.getPublished().config.object_types.vendor.identity).toBe("vendor_no");
-    expect(existsSync(join(tmp, "lib/config/versions/v2.yaml"))).toBe(true);
+    expect(existsSync(join(tmp, "lib/config/workspaces/default/versions/v2.yaml"))).toBe(true);
     // 引擎读已发布：新类可查（无源 → 空结果，不报错）
     const { runQuery } = await import("../lib/engine/query");
     const { freshDriver } = await import("../lib/engine/load");
@@ -156,7 +156,7 @@ describe("配置存储（工作副本与发布）", () => {
     const s = await freshStore();
     const { version } = s.publishDraft();
     expect(version).toBe(1);
-    expect(existsSync(join(tmp, "lib/config/versions/v2.yaml"))).toBe(false);
+    expect(existsSync(join(tmp, "lib/config/workspaces/default/versions/v2.yaml"))).toBe(false);
   });
 
   it("回滚守卫：草稿脏时拒绝；版本不存在拒绝", async () => {

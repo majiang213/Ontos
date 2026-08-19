@@ -2,6 +2,7 @@
 // 非路由文件（非 route.ts），只被各条 api 路由 import。
 
 import { NextResponse } from "next/server";
+import { DEFAULT_WS, isWsName } from "@/lib/engine/workspace";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
 export class BadRequest extends Error {}
@@ -27,6 +28,14 @@ export function safeLog(fn: () => void): void {
 export function internalError(e: unknown): NextResponse {
   const detail = e instanceof Error ? e.message : String(e);
   return NextResponse.json({ error: "内部错误", ...(process.env.NODE_ENV === "production" ? {} : { detail }) }, { status: 500 });
+}
+
+/** 工作空间：?ws= 或 x-ontos-ws 头，缺省 default；名字不合法抛 BadRequest。 */
+export function wsOf(req: Request): string {
+  const url = new URL(req.url);
+  const ws = url.searchParams.get("ws") ?? req.headers.get("x-ontos-ws") ?? DEFAULT_WS;
+  if (!isWsName(ws)) throw new BadRequest(`空间名不合法：${ws}`);
+  return ws;
 }
 
 /** 写端点的可选闸门：设了环境变量 ONTOS_TOKEN 才启用（演示默认放开）。

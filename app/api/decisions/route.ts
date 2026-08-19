@@ -6,7 +6,7 @@ import { z } from "zod";
 import { adjudicate, type Verdict } from "@/lib/engine/adjudicate";
 import { DraftReject, getDraft } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z
   .object({
@@ -28,9 +28,9 @@ const bodySchema = z
   })
   .refine((b) => b.class_a !== b.class_b, { message: "class_a 与 class_b 不能是同一个类" });
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    return NextResponse.json({ decisions: metaStore().listDecisions() });
+    return NextResponse.json({ decisions: metaStore(wsOf(req)).listDecisions() });
   } catch (e) {
     return internalError(e);
   }
@@ -40,10 +40,11 @@ export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
   try {
+    const ws = wsOf(req);
     const body = bodySchema.parse(await bodyJson(req));
     // 先裁决后留痕：裁决被校验闸回退时不留幻影记录（候选对也不能因此被永久排除）。
     // 源名要在裁决前读——「同一/阶段」会把 B 类撤掉。
-    const d = getDraft().draft;
+    const d = getDraft(ws).draft;
     const clsA = d.object_types[body.class_a];
     const clsB = d.object_types[body.class_b];
     if (!clsA || !clsB) return NextResponse.json({ error: "类不存在，先刷新画布" }, { status: 422 });
@@ -60,11 +61,11 @@ export async function POST(req: Request) {
     const sourceOf = (name: string) => Object.keys(d.object_types[name]?.sources ?? {})[0] ?? "";
     const source_a = sourceOf(body.class_a);
     const source_b = sourceOf(body.class_b);
-    adjudicate({ class_a: body.class_a, class_b: body.class_b }, body.verdict, body.stage_names);
+    adjudicate({ class_a: body.class_a, class_b: body.class_b }, body.verdict, body.stage_names, ws);
     // 留痕失败如实告诉调用方（裁决已进草稿），不装成功也不把请求炸成 500
     let recorded = true;
     try {
-      metaStore().recordDecision({
+      metaStore(ws).recordDecision({
         class_a: body.class_a,
         class_b: body.class_b,
         source_a,

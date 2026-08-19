@@ -9,11 +9,11 @@ import { getSlot } from "@/lib/engine/llmSlot";
 import { getDriverRegistry } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    return NextResponse.json({ questions: metaStore().listQuestions() });
+    return NextResponse.json({ questions: metaStore(wsOf(req)).listQuestions() });
   } catch (e) {
     return internalError(e);
   }
@@ -25,16 +25,17 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   if (url.searchParams.get("run")) {
     try {
-      const config = getPublished().config;
-      const version = getPublished().version;
+      const ws = wsOf(req);
+      const config = getPublished(ws).config;
+      const version = getPublished(ws).version;
       const slot = getSlot();
       const results = [];
-      for (const q of metaStore().listQuestions()) {
+      for (const q of metaStore(ws).listQuestions()) {
         let status = "通过";
         let detail = "";
         try {
           const query = await slot.nlToQuery(q.question, config);
-          const { rows } = await runQuery(config, getDriverRegistry(), query);
+          const { rows } = await runQuery(config, getDriverRegistry(ws), query);
           // expected 是数字时按行数比对，不符记失败
           if (q.expected && /^\d+$/.test(q.expected.trim()) && rows.length !== Number(q.expected.trim())) {
             status = "失败";
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
           status = "失败";
           detail = e instanceof Error ? e.message : String(e);
         }
-        metaStore().setQuestionStatus(q.id, status, version);
+        metaStore(ws).setQuestionStatus(q.id, status, version);
         results.push({ id: q.id, question: q.question, status, detail });
       }
       return NextResponse.json({ results, version });
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
   }
   try {
     const { question, expected } = z.object({ question: z.string().min(1), expected: z.string().optional() }).parse(await bodyJson(req));
-    metaStore().addQuestion(question, expected);
+    metaStore(wsOf(req)).addQuestion(question, expected);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
@@ -68,7 +69,7 @@ export async function DELETE(req: Request) {
   if (denied) return denied;
   try {
     const { id } = z.object({ id: z.number() }).parse(await bodyJson(req));
-    metaStore().removeQuestion(id);
+    metaStore(wsOf(req)).removeQuestion(id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });

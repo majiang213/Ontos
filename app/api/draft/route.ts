@@ -5,14 +5,14 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { draftOpSchema } from "@/lib/schema/ops";
 import { applyOp, DraftReject } from "@/lib/engine/configStore";
-import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
   try {
     const op = draftOpSchema.parse(await bodyJson(req));
-    const state = applyOp(op);
+    const state = applyOp(op, wsOf(req));
     return NextResponse.json({ ok: true, dirty: state.dirty });
   } catch (e) {
     if (e instanceof ZodError) return NextResponse.json({ error: "操作形状不合法", issues: e.issues }, { status: 400 });

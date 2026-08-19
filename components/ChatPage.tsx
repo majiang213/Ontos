@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiUrl, getWs } from "./wsClient";
 import { ArrowUpRight } from "@phosphor-icons/react";
 
 interface Msg {
@@ -27,7 +28,8 @@ interface SavedApi {
 }
 
 const SUGGESTED = ["在役设备及其所属部门", "还有多少在途设备", "哪些设备过保了", "每个部门多少台在役设备"];
-const STORE_KEY = "ontos-chat-sessions";
+// 对话历史按工作空间分键：切空间互不可见（切空间时本页整体重挂，挂载时取的是新空间的键）
+const storeKey = () => `ontos-chat-sessions:${getWs()}`;
 
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -45,7 +47,7 @@ export default function ChatPage() {
   // 会话从 localStorage 读回（刷新不丢）
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORE_KEY);
+      const raw = localStorage.getItem(storeKey());
       if (raw) {
         const s = (JSON.parse(raw) as unknown[]).filter(
           (x): x is Session => Boolean(x) && typeof (x as Session).id === "string" && Array.isArray((x as Session).msgs)
@@ -69,7 +71,7 @@ export default function ChatPage() {
         ...s,
         msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, total: m.answer.total ?? m.answer.rows.length, rows: m.answer.rows.slice(0, 20) } } : m)),
       }));
-      localStorage.setItem(STORE_KEY, JSON.stringify(trimmed));
+      localStorage.setItem(storeKey(), JSON.stringify(trimmed));
     } catch {
       // 配额满了不挡对话
     }
@@ -85,7 +87,7 @@ export default function ChatPage() {
 
   const loadApis = useCallback(async () => {
     try {
-      const r = await fetch("/api/saved-queries");
+      const r = await fetch(apiUrl("/api/saved-queries"));
       const data = await r.json();
       setApis(data.apis ?? []);
     } catch {
@@ -127,7 +129,7 @@ export default function ChatPage() {
     setBusy(true);
     append(sid, { role: "user", text: question });
     try {
-      const r = await fetch("/api/ask", {
+      const r = await fetch(apiUrl("/api/ask"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
@@ -149,7 +151,7 @@ export default function ChatPage() {
     setBusy(true);
     append(sid, { role: "user", text: `运行问数 API：${api.name}` });
     try {
-      const r = await fetch("/api/query", {
+      const r = await fetch(apiUrl("/api/query"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: api.query_json,
@@ -169,7 +171,7 @@ export default function ChatPage() {
     setBusy(true);
     append(sid, { role: "user", text: `${action} ${object} ${identity}` });
     try {
-      const r = await fetch("/api/action", {
+      const r = await fetch(apiUrl("/api/action"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, object, identity, request }),
@@ -397,7 +399,7 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
             if (!saveName.trim()) return;
             setSaveError(null);
             try {
-              const r = await fetch("/api/saved-queries", {
+              const r = await fetch(apiUrl("/api/saved-queries"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: saveName.trim(), question: a.question ?? "", query: a.query }),

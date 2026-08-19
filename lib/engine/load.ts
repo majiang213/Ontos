@@ -9,19 +9,23 @@ import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
 import { metaStore } from "../meta/store";
+import { DEFAULT_WS } from "./workspace";
 
-const g = globalThis as unknown as { __ontosRegistry?: DriverRegistry };
+const g = globalThis as unknown as { __ontosRegistry?: Map<string, DriverRegistry> };
+const registries: Map<string, DriverRegistry> = g.__ontosRegistry ?? (g.__ontosRegistry = new Map());
 
-/** 驱动注册表（全部路由的唯一驱动入口）：fixture 四个内置连接 + 元数据库里保存的连接（mysql/pg/sqlite 文件）。 */
-export function getDriverRegistry(): DriverRegistry {
-  if (!g.__ontosRegistry) {
+/** 驱动注册表（全部路由的唯一驱动入口）：fixture 四个内置连接 + 该空间元数据库里保存的连接。按工作空间键控。 */
+export function getDriverRegistry(ws: string = DEFAULT_WS): DriverRegistry {
+  let r = registries.get(ws);
+  if (!r) {
     const registry = new DriverRegistry();
     const fixture = SqliteFixtureDriver.seeded();
     for (const conn of fixture.connections()) registry.register(conn, fixture);
-    for (const rec of metaStore().listConnections()) registerSaved(registry, rec);
-    g.__ontosRegistry = registry;
+    for (const rec of metaStore(ws).listConnections()) registerSaved(registry, rec);
+    r = registry;
+    registries.set(ws, r);
   }
-  return g.__ontosRegistry;
+  return r;
 }
 
 /** 把元数据库里的连接注册成驱动。新保存的连接在运行时也走这里（即时生效）。
@@ -64,9 +68,17 @@ export function freshDriver(): SourceDriver {
   return SqliteFixtureDriver.seeded();
 }
 
-/** 测试用：关掉并清掉注册表单例。fixture 内存库全进程共享，换测试目录前必须清。 */
-export function resetRegistry(): void {
-  const r = g.__ontosRegistry;
-  if (r) for (const name of r.connectionNames()) r.unregister(name);
-  g.__ontosRegistry = undefined;
+/** 测试用：关掉并清掉注册表单例。fixture 内存库全进程共享，换测试目录前必须清；不传 ws 清全部。 */
+export function resetRegistry(ws?: string): void {
+  const close = (r: DriverRegistry) => {
+    for (const name of r.connectionNames()) r.unregister(name);
+  };
+  if (ws) {
+    const r = registries.get(ws);
+    if (r) close(r);
+    registries.delete(ws);
+  } else {
+    for (const r of registries.values()) close(r);
+    registries.clear();
+  }
 }

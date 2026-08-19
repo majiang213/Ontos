@@ -5,11 +5,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { queryRequestSchema } from "@/lib/schema/request";
 import { metaStore } from "@/lib/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    return NextResponse.json({ apis: metaStore().listQueryApis() });
+    return NextResponse.json({ apis: metaStore(wsOf(req)).listQueryApis() });
   } catch (e) {
     return internalError(e);
   }
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
   }
   try {
     const query = queryRequestSchema.parse(body.query);
-    metaStore().saveQueryApi(body.name, body.question, JSON.stringify(query));
+    metaStore(wsOf(req)).saveQueryApi(body.name, body.question, JSON.stringify(query));
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "查询形状不合法", issues: e.issues }, { status: 400 }); // 形状问题一律 400，与其它路由同层
@@ -39,7 +39,7 @@ export async function DELETE(req: Request) {
   if (denied) return denied;
   try {
     const { id } = z.object({ id: z.number() }).parse(await bodyJson(req));
-    metaStore().deleteQueryApi(id);
+    metaStore(wsOf(req)).deleteQueryApi(id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });

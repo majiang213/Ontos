@@ -4,13 +4,13 @@
 import { NextResponse } from "next/server";
 import { discardDraft, DraftReject, publishDraft } from "@/lib/engine/configStore";
 import { ZodError } from "zod";
-import { internalError, requireWriteAuth } from "@/app/api/_shared";
+import { internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
   try {
-    const { version } = publishDraft();
+    const { version } = publishDraft(wsOf(req));
     return NextResponse.json({ ok: true, version });
   } catch (e) {
     if (e instanceof ZodError) return NextResponse.json({ error: "配置结构不合法", issues: e.issues }, { status: 422 });
@@ -23,7 +23,7 @@ export async function DELETE(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
   try {
-    discardDraft();
+    discardDraft(wsOf(req));
     return NextResponse.json({ ok: true });
   } catch (e) {
     return internalError(e);

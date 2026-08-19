@@ -5,6 +5,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { ensureWorkspace, wsDir } from "../engine/workspace";
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS conn_source (
@@ -303,16 +304,19 @@ export class MetaStore {
   }
 }
 
-/* ---------- 单例（globalThis，Next dev 多路由包共享） ---------- */
+/* ---------- 单例（globalThis，Next dev 多路由包共享；按工作空间键控） ---------- */
 
-const g = globalThis as unknown as { __ontosMeta?: MetaStore };
+const g = globalThis as unknown as { __ontosMeta?: Map<string, MetaStore> };
+const stores: Map<string, MetaStore> = g.__ontosMeta ?? (g.__ontosMeta = new Map());
 
-export function metaStore(): MetaStore {
-  if (!g.__ontosMeta) {
-    const file = join(process.cwd(), "lib/config/ontos-meta.db");
-    g.__ontosMeta = new MetaStore(file);
+/** 每个工作空间一个元库文件（workspaces/<ws>/ontos-meta.db）。 */
+export function metaStore(ws = "default"): MetaStore {
+  let s = stores.get(ws);
+  if (!s) {
+    s = new MetaStore(join(ensureWorkspace(ws), "ontos-meta.db")); // ensure 建目录，元库才有处可放
+    stores.set(ws, s);
   }
-  return g.__ontosMeta;
+  return s;
 }
 
 /** 测试用：独立临时库。 */
@@ -320,8 +324,13 @@ export function freshMetaStore(path: string): MetaStore {
   return new MetaStore(path);
 }
 
-/** 测试用：关掉并清掉单例。单例的文件句柄绑死创建时的 cwd，换目录前必须清。 */
-export function resetMetaStore(): void {
-  g.__ontosMeta?.close();
-  g.__ontosMeta = undefined;
+/** 测试用：关掉并清掉单例。单例的文件句柄绑死创建时的目录，换目录前必须清；不传 ws 清全部。 */
+export function resetMetaStore(ws?: string): void {
+  if (ws) {
+    stores.get(ws)?.close();
+    stores.delete(ws);
+  } else {
+    for (const s of stores.values()) s.close();
+    stores.clear();
+  }
 }

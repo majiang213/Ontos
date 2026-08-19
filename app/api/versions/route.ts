@@ -4,12 +4,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { listVersions, rollbackTo, DraftReject } from "@/lib/engine/configStore";
-import { BadRequest, bodyJson, internalError, requireWriteAuth } from "@/app/api/_shared";
+import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     return NextResponse.json({
-      versions: listVersions().map((v) => ({ version: v.version, createdAt: v.createdAt })),
+      versions: listVersions(wsOf(req)).map((v) => ({ version: v.version, createdAt: v.createdAt })),
     });
   } catch (e) {
     return internalError(e);
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   if (denied) return denied;
   try {
     const { version } = z.object({ version: z.number().int().positive() }).parse(await bodyJson(req));
-    const result = rollbackTo(version);
+    const result = rollbackTo(version, wsOf(req));
     return NextResponse.json({ ok: true, version: result.version });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });

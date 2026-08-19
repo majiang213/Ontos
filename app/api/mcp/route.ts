@@ -13,7 +13,7 @@ import { listClasses, readClass, search } from "@/lib/engine/views";
 import { getDriverRegistry, resolveTableInfos } from "@/lib/engine/load";
 import { getPublished } from "@/lib/engine/configStore";
 import { metaStore } from "@/lib/meta/store";
-import { requireWriteAuth, safeLog } from "@/app/api/_shared";
+import { BadRequest, requireWriteAuth, safeLog, wsOf } from "@/app/api/_shared";
 
 const TOOLS = [
   { name: "query", description: "按已发布本体执行结构化查询（只读）。入参：{ query: 查询 JSON }" },
@@ -67,17 +67,18 @@ export async function POST(req: Request) {
     const name = body.params?.name as string | undefined;
     if (!name) return rpcErr(id, -32602, "tools/call 缺 params.name");
     const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
-    const config = getPublished().config;
-    const driver = getDriverRegistry();
+    const ws = wsOf(req);
+    const config = getPublished(ws).config;
+    const driver = getDriverRegistry(ws);
 
     if (name === "query") {
       const query = queryRequestSchema.parse(args.query);
       try {
         const { rows, path } = await runQuery(config, driver, query);
-        safeLog(() => metaStore().logQuery({ version: getPublished().version, query_json: JSON.stringify(query), row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
+        safeLog(() => metaStore(ws).logQuery({ version: getPublished(ws).version, query_json: JSON.stringify(query), row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
         return rpcOk(id, toolResult({ rows, path }));
       } catch (e) {
-        safeLog(() => metaStore().logQuery({ version: getPublished().version, query_json: JSON.stringify(query), ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
+        safeLog(() => metaStore(ws).logQuery({ version: getPublished(ws).version, query_json: JSON.stringify(query), ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
         throw e;
       }
     }
@@ -87,8 +88,8 @@ export async function POST(req: Request) {
       const action = actionRequestSchema.parse(args);
       // 留痕的公共部分：成功/失败两支只补差异字段
       const log = (outcome: { ok: boolean; error?: string; projections?: unknown }) =>
-        safeLog(() => metaStore().logAction({
-          version: getPublished().version,
+        safeLog(() => metaStore(ws).logAction({
+          version: getPublished(ws).version,
           action: action.action,
           object_type: action.object,
           subject: String(action.identity),
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
           duration_ms: Date.now() - started,
         }));
       try {
-        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore().nextSeq(k, s) });
+        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore(ws).nextSeq(k, s) });
         log({ ok: result.ok, error: result.error, projections: result.projections });
         // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
         return rpcOk(id, toolResult(result, !result.ok));
@@ -139,6 +140,7 @@ export async function POST(req: Request) {
     return rpcErr(id, -32601, `未知工具：${name}`);
   } catch (e) {
     if (e instanceof ZodError) return rpcErr(id, -32602, "入参形状不合法");
+    if (e instanceof BadRequest) return rpcErr(id, -32602, e.message);
     if (e instanceof EngineReject) return rpcErr(id, -32000, e.message);
     return rpcErr(id, -32603, e instanceof Error ? e.message : String(e));
   }

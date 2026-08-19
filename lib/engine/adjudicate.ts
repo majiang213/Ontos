@@ -154,6 +154,6 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
 }
 
 /** 事务入口：走 configStore 的草稿变更通道（dirty 重算 + 立即校验，不合法则回退）。 */
-export function adjudicate(pair: { class_a: string; class_b: string }, verdict: Verdict, stageNames?: { from: string; to: string }): void {
-  mutateDraft((d) => applyVerdict(d, pair, verdict, stageNames));
+export function adjudicate(pair: { class_a: string; class_b: string }, verdict: Verdict, stageNames?: { from: string; to: string }, ws?: string): void {
+  mutateDraft((d) => applyVerdict(d, pair, verdict, stageNames), ws);
 }

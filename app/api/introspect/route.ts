@@ -3,11 +3,11 @@
 
 import { NextResponse } from "next/server";
 import { getDriverRegistry } from "@/lib/engine/load";
-import { internalError } from "@/app/api/_shared";
+import { internalError, wsOf } from "@/app/api/_shared";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const registry = getDriverRegistry();
+    const registry = getDriverRegistry(wsOf(req));
     const sources = [];
     for (const connection of registry.connectionNames()) {
       try {

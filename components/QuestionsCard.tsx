@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { apiUrl } from "./wsClient";
 
 export default function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
   const [items, setItems] = useState<{ id: number; question: string; status: string }[]>([]);
@@ -10,7 +11,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
   const [acting, setActing] = useState(false); // 增删的防连点
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/questions");
+      const r = await fetch(apiUrl("/api/questions"));
       const data = await r.json();
       setItems(data.questions ?? []);
     } catch {
@@ -40,7 +41,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
                   onClick={async () => {
                     setActing(true);
                     try {
-                      await fetch("/api/questions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
+                      await fetch(apiUrl("/api/questions"), { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
                       await load();
                     } finally {
                       setActing(false);
@@ -58,7 +59,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
               if (!text.trim() || acting) return;
               setActing(true);
               try {
-                const r = await fetch("/api/questions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
+                const r = await fetch(apiUrl("/api/questions"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
                 if (r.ok) setText("");
                 else showToast("没加上");
                 await load();
@@ -79,7 +80,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
               if (running) return; // 防连点：连跑多遍没意义
               setRunning(true);
               try {
-                const r = await fetch("/api/questions?run=1", { method: "POST" });
+                const r = await fetch(apiUrl("/api/questions?run=1"), { method: "POST" });
                 const data = await r.json();
                 const failed = (data.results ?? []).filter((x: { status: string }) => x.status === "失败");
                 showToast(failed.length ? `${failed.length} 条失败——回画布改对象或来源映射，再跑一遍` : `全部通过（v${data.version}）`);

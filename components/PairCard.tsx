@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import type { PairAdvice } from "../lib/engine/llmSlot";
+import { apiUrl } from "./wsClient";
 
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
   const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
@@ -15,7 +16,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch("/api/decisions", {
+      const r = await fetch(apiUrl("/api/decisions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -70,7 +71,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               setRateBusy(true);
               setError(null);
               try {
-                const r = await fetch("/api/overlap", {
+                const r = await fetch(apiUrl("/api/overlap"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ class_a: pair.class_a, class_b: pair.class_b }),
