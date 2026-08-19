@@ -329,9 +329,14 @@ export default function ChatPage() {
                 ⚡ 对设备发起动作
               </button>
               <span style={{ flex: 1 }} />
-              <button type="submit" className="btn-cta" disabled={busy}>
-                问
-                <span className="ico"><ArrowUpRight size={14} weight="light" /></span>
+              <span style={{ fontSize: 11, color: "var(--ink-3)" }}>回车发送</span>
+              <button
+                type="submit"
+                aria-label="发送"
+                disabled={busy}
+                style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ink-3)", padding: 4, display: "inline-flex" }}
+              >
+                <ArrowUpRight size={16} weight="light" />
               </button>
             </div>
           </div>
