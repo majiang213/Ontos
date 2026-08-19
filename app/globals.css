@@ -178,25 +178,24 @@ input { font-family: inherit; outline: none; }
 .btn-cta {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   border: none;
   cursor: pointer;
-  font-size: 14px;
-  padding: 7px 8px 7px 20px;
+  font-size: 13px;
+  padding: 9px 16px;
   border-radius: var(--r-chip);
   background: var(--accent);
   color: #fff;
-  box-shadow: 0 10px 24px -10px rgba(59, 54, 176, 0.5);
-  transition: transform var(--t-fast), box-shadow var(--t-med);
+  transition: background var(--t-fast), transform var(--t-fast);
 }
-.btn-cta:hover { box-shadow: 0 14px 30px -10px rgba(59, 54, 176, 0.6); transform: translateY(-1px); }
+.btn-cta:hover { background: var(--accent-ink); }
 .btn-cta:active { transform: scale(0.98); }
 .btn-cta .ico {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.16);
   transition: transform var(--t-fast);
@@ -358,7 +357,7 @@ details.fold summary:hover { color: var(--ink); }
   border-radius: var(--r-chip);
   background: var(--panel);
   color: var(--ink);
-  box-shadow: 0 0 0 1px var(--hairline), var(--shadow-soft);
+  box-shadow: 0 0 0 1px var(--hairline-strong), var(--shadow-soft);
   transition: box-shadow var(--t-fast);
 }
 .text-in:focus { box-shadow: 0 0 0 1px var(--accent), var(--shadow-soft); }
@@ -371,7 +370,7 @@ details.fold summary:hover { color: var(--ink); }
   border-radius: var(--r-chip);
   background: transparent;
   color: var(--ink-2);
-  box-shadow: 0 0 0 1px var(--hairline);
+  box-shadow: 0 0 0 1px var(--hairline-strong);
   transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
 }
 .chip:hover { background: var(--panel); color: var(--ink); transform: translateY(-1px); }

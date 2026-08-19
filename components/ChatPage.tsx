@@ -238,7 +238,7 @@ export default function ChatPage() {
                   <button
                     key={s}
                     className="bezel"
-                    style={{ border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}
+                    style={{ border: "none", cursor: "pointer", textAlign: "left", padding: 0, boxShadow: "0 0 0 1px var(--hairline-strong), var(--shadow-soft)" }}
                     onClick={() => !busy && ask(s)}
                   >
                     <div className="bezel-core" style={{ padding: "12px 14px", fontSize: 13, color: "var(--ink-2)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -334,7 +334,7 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
           {a.question && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{a.question}</div>}
         </div>
         {cols.length > 0 && (
-          <div style={{ maxHeight: 320, overflow: "auto", borderRadius: 8, boxShadow: "0 0 0 1px var(--hairline)" }}>
+          <div style={{ maxHeight: 320, overflow: "auto", borderRadius: 8, boxShadow: "0 0 0 1px var(--hairline-strong)" }}>
             <table className="answer-table" style={{ width: "100%" }}>
               <thead style={{ position: "sticky", top: 0, background: "var(--panel)" }}>
                 <tr>{cols.concat(expandCols).map((c) => <th key={c}>{c}</th>)}</tr>
