@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CaretDown, Check, Plus } from "@phosphor-icons/react";
 import CanvasPage from "@/components/CanvasPage";
-import ChatPage from "@/components/ChatPage";
+import ChatPage, { CHAT_ASIDE_W } from "@/components/ChatPage";
 import { setWs } from "@/components/wsClient";
 
 export default function Home() {
@@ -22,7 +22,8 @@ export default function Home() {
         <span className="nav-brand">Ontos</span>
         <WsSwitcher ws={ws} onChange={switchWs} />
       </div>
-      <nav className="nav-float">
+      {/* 对话页有会话栏占左：胶囊右移半栏宽，与 hero 共用「会话栏以右」的中轴（画布页全幅，不动） */}
+      <nav className="nav-float" style={{ transform: page === "chat" ? `translateX(calc(-50% + ${CHAT_ASIDE_W / 2}px))` : undefined, transition: "transform var(--t-med)" }}>
         {(
           [
             ["build", "本体构建"],
