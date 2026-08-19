@@ -1,7 +1,7 @@
 // 疑似重复面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。失败留在面板里可重试。
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { PairAdvice } from "../lib/engine/llmSlot";
 import { apiUrl } from "./wsClient";
 
@@ -11,6 +11,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
   const [busy, setBusy] = useState(false);
   const [rateBusy, setRateBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const stageFromRef = useRef<HTMLInputElement>(null);
 
   const decide = async (verdict: string) => {
     setBusy(true);
@@ -48,20 +49,22 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
   ];
 
   return (
-    <div style={{ borderTop: "1px solid var(--hairline)", padding: "12px 0" }}>
-      <div style={{ fontSize: 13 }}>
+    <div style={{ borderTop: "1px solid var(--hairline)", padding: "14px 0 4px" }}>
+      {/* 候选对 + AI 软证据 */}
+      <div style={{ fontSize: 14, fontWeight: 600 }}>
         <code>{pair.class_a}</code> × <code>{pair.class_b}</code>
       </div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "6px 0 2px" }}>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6 }}>
         AI 建议「{pair.tendency}」，依据：{pair.reason}。
+        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>建议只是参考——起名像不像会骗人，定夺要看真实数据和你。</div>
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>建议只是参考——起名像不像会骗人，定夺要看真实数据和你。</div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "4px 0" }}>
+      {/* 交集率：硬证据，按需算；注解跟在同一行 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 12, color: "var(--ink-2)", marginTop: 8 }}>
         {rate ? (
-          <>
+          <span>
             交集率 <strong>{(rate.rate * 100).toFixed(0)}%</strong>（{pair.class_a} {rate.count_a} 条、{pair.class_b} {rate.count_b} 条，其中 {rate.count_hit} 条对得上号）
             {rate.count_hit === 0 ? "——完全对不上，多半不相干" : rate.rate >= 0.5 ? "——多半是同一批" : ""}
-          </>
+          </span>
         ) : (
           <button
             className="chip"
@@ -89,33 +92,45 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
             {rateBusy ? "算着…" : "算一算交集率"}
           </button>
         )}
+        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>交集率 = 两边识别字段的取值有多少对得上号（内存里算，不搬数据出库）。</span>
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)" }}>交集率 = 两边识别字段的取值有多少对得上号（内存里算，不搬数据出库）。</div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "10px 0 4px" }}>是同一批现实对象吗？选一个结论：</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {options.map((o) => (
-          <div key={o.v} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12 }}>
-            <button
-              className="chip"
-              style={{ minWidth: 76, textAlign: "center", flexShrink: 0 }}
-              disabled={busy || (o.v === "阶段" && (!stage.from || !stage.to))}
-              onClick={() => decide(o.v)}
+      {/* 结论：整宽行卡，名字在左、说明跟随，整行可点 */}
+      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "14px 0 6px" }}>是同一批现实对象吗？选一个结论：</div>
+      <div style={{ borderTop: "1px solid var(--hairline)" }}>
+        {options.map((o) => {
+          const incomplete = o.v === "阶段" && (!stage.from || !stage.to); // 阶段缺参数：不置灰（输入框在行里），点击改成聚焦
+          return (
+            <div
+              key={o.v}
+              className="verdict-row"
+              role="button"
+              tabIndex={0}
+              aria-disabled={busy}
+              onClick={() => {
+                if (busy) return;
+                if (incomplete) {
+                  stageFromRef.current?.focus();
+                  return;
+                }
+                void decide(o.v);
+              }}
+              onKeyDown={(e) => {
+                if (busy || incomplete) return;
+                if (e.key === "Enter" || e.key === " ") void decide(o.v);
+              }}
             >
-              {o.v}
-            </button>
-            {/* 说明拿满剩余宽度，换行不受挤；阶段的两个输入框落到说明下一行 */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5, paddingTop: 3 }}>
-              <span style={{ color: "var(--ink-3)" }}>{o.hint}</span>
+              <span className="verdict-name">{o.v}</span>
+              <span className="verdict-hint">{o.hint}</span>
               {o.v === "阶段" && (
-                <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                  <input placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 120, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                <span className="verdict-stage" onClick={(e) => e.stopPropagation()}>
+                  <input ref={stageFromRef} placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 130, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
                   <span style={{ color: "var(--ink-3)" }}>→</span>
-                  <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 120, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                  <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 130, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
                 </span>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
     </div>
