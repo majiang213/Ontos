@@ -41,18 +41,20 @@ export default function ChatPage() {
   const [sn, setSn] = useState("SN-40217");
   const [actOpen, setActOpen] = useState(false); // 动作区默认收起：演示剧本不抢主视觉
   const [apis, setApis] = useState<SavedApi[]>([]);
+  const [narrow, setNarrow] = useState(false); // 窄视口（≤1252px，浮动栏右缘与阅读列左缘相切的宽度）：会话栏收成 ☰，不与阅读列重叠
+  const [asideOpen, setAsideOpen] = useState(false);
   const lastQuestion = useRef<string | null>(null); // 动作成功后的复查用，不从消息列表反推
   const listRef = useRef<HTMLDivElement>(null);
   const curIdRef = useRef<string | null>(null); // 闭包外读当前会话：删光再开时动作与复查不落两个会话
 
-  // 诊断信标（临时）：上报一次渲染环境，排查显示差异
   useEffect(() => {
-    try {
-      navigator.sendBeacon("/api/debug", JSON.stringify({ dpr: window.devicePixelRatio, w: window.innerWidth, h: window.innerHeight, ua: navigator.userAgent }));
-    } catch {
-      // 不挡页面
-    }
+    const mq = window.matchMedia("(max-width: 1252px)");
+    const update = () => setNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
   }, []);
+
   // 会话从 localStorage 读回（刷新不丢）
   useEffect(() => {
     try {
@@ -273,44 +275,70 @@ export default function ChatPage() {
     </>
   );
 
-  return (
-    <div className="chat-wrap" style={{ position: "relative" }}>
-      {/* 左侧会话栏：浮在左缘不占主区宽度——顶部胶囊与阅读列都按视口居中，位置恒定 */}
-      <aside style={{ position: "absolute", left: 16, top: 78, bottom: 12, width: 200, zIndex: 10, display: "flex", flexDirection: "column", borderRight: "1px solid var(--hairline-strong)", paddingRight: 10 }}>
-        <button className="btn" style={{ justifyContent: "center", marginBottom: 12 }} onClick={newSession}>＋ 新建会话</button>
-        <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              onClick={() => setCurId(s.id)}
-              style={{
-                fontSize: 12,
-                padding: "6px 10px",
-                borderRadius: 8,
-                cursor: "pointer",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 4,
-                background: s.id === curId ? "var(--accent-soft)" : "transparent",
-                color: s.id === curId ? "var(--accent-ink)" : "var(--ink-2)",
+  /** 会话栏内容（宽屏浮动栏与窄屏浮层共用）。 */
+  const renderSessionList = () => (
+    <>
+      <button className="btn" style={{ justifyContent: "center", marginBottom: 12 }} onClick={newSession}>＋ 新建会话</button>
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+        {sessions.map((s) => (
+          <div
+            key={s.id}
+            onClick={() => {
+              setCurId(s.id);
+              setAsideOpen(false); // 窄屏浮层里选完即收
+            }}
+            style={{
+              fontSize: 12,
+              padding: "6px 10px",
+              borderRadius: 8,
+              cursor: "pointer",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 4,
+              background: s.id === curId ? "var(--accent-soft)" : "transparent",
+              color: s.id === curId ? "var(--accent-ink)" : "var(--ink-2)",
+            }}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+            <button
+              aria-label="删除会话"
+              style={{ border: "none", background: "none", color: "var(--ink-3)", cursor: "pointer", padding: 0, fontSize: 12 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                removeSession(s.id);
               }}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
-              <button
-                aria-label="删除会话"
-                style={{ border: "none", background: "none", color: "var(--ink-3)", cursor: "pointer", padding: 0, fontSize: 12 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeSession(s.id);
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      </aside>
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  return (
+    <div className="chat-wrap" style={{ position: "relative" }}>
+      {/* 宽屏（>1252px）：会话栏浮在左缘不占主区宽度，顶部胶囊与阅读列都按视口居中，位置恒定 */}
+      {!narrow && (
+        <aside style={{ position: "absolute", left: 16, top: 78, bottom: 12, width: 200, zIndex: 10, display: "flex", flexDirection: "column", borderRight: "1px solid var(--hairline-strong)", paddingRight: 10 }}>
+          {renderSessionList()}
+        </aside>
+      )}
+      {/* 窄屏（≤1252px）：浮动栏会盖住阅读列，收成 ☰；点开是不透明的浮层，点外收起 */}
+      {narrow && (
+        <button className="chip" style={{ position: "absolute", left: 16, top: 78, zIndex: 20 }} title="会话列表" onClick={() => setAsideOpen((v) => !v)}>
+          ☰ 会话
+        </button>
+      )}
+      {narrow && asideOpen && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 29 }} onClick={() => setAsideOpen(false)} />
+          <aside style={{ position: "absolute", left: 16, top: 108, bottom: 12, width: 216, zIndex: 30, display: "flex", flexDirection: "column", padding: 10, borderRadius: 12, background: "var(--panel)", boxShadow: "0 0 0 1px var(--hairline-strong), var(--shadow-lift)" }}>
+            {renderSessionList()}
+          </aside>
+        </>
+      )}
 
       {/* 主区：消息流 + 底部输入卡（阅读列按视口居中，不通栏） */}
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minWidth: 0, padding: "78px 24px 12px" }}>
@@ -376,8 +404,9 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
   const [saveName, setSaveName] = useState("");
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // 列取所有行的并集：稀疏行不丢列；展开列按「任一行的值是数组」认
-  const allKeys = [...new Set(a.rows.flatMap((r) => Object.keys(r)))];
+  // 列取所有行的并集：稀疏行不丢列；展开列按「任一行的值是数组」认。
+  // 值全为空的列直接跳过——旧版本答案里可能留着这种键：看不见内容却把表格顶宽
+  const allKeys = [...new Set(a.rows.flatMap((r) => Object.keys(r)))].filter((c) => a.rows.some((r) => r[c] !== undefined && r[c] !== null && r[c] !== ""));
   const cols = allKeys.filter((c) => !a.rows.some((r) => Array.isArray(r[c])));
   const expandCols = allKeys.filter((c) => a.rows.some((r) => Array.isArray(r[c])));
   return (
