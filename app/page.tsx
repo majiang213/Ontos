@@ -20,6 +20,7 @@ export default function Home() {
       {/* 左上角：品牌 + 空间切换器（全局）；页面切换留在中栏 */}
       <div style={{ position: "fixed", top: 14, left: 16, zIndex: 30, display: "flex", gap: 8, alignItems: "center" }}>
         <span className="nav-brand">Ontos</span>
+        <span style={{ fontSize: 10, color: "var(--ink-3)", userSelect: "none" }} title="当前代码版本（git 短 hash）">{process.env.NEXT_PUBLIC_GIT_SHA}</span>
         <WsSwitcher ws={ws} onChange={switchWs} />
       </div>
       <nav className="nav-float">
