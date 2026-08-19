@@ -9,10 +9,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/xai": "^4.0.40",
     "@dagrejs/dagre": "^3.1.1",
     "@phosphor-icons/react": "^2.1.10",
     "@types/js-yaml": "^4.0.9",
     "@xyflow/react": "^12.11.2",
+    "ai": "^7.0.66",
     "js-yaml": "^5.2.3",
     "mysql2": "^3.23.3",
     "next": "^15.3.0",

@@ -53,3 +53,11 @@ npm install
 npm run dev    # 浏览器打开 http://localhost:6688（端口固定，不再改）
 npm test       # 引擎 golden 测试（vitest）
 ```
+
+### 可选环境变量
+
+| 变量 | 作用 | 缺省 |
+|---|---|---|
+| `XAI_API_KEY` | 接真模型（xAI，OpenAI 兼容）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（演示四问可用） |
+| `ONTOS_LLM_BASE_URL` / `ONTOS_LLM_MODEL` | 换接入点/模型 | `https://api.x.ai/v1` / `grok-4.5` |
+| `ONTOS_TOKEN` | 写端点令牌闸（连接/发布/裁决/动作等要写库的 API 需 `Authorization: Bearer <token>`） | 不设 = 演示模式全放开 |

@@ -41,6 +41,28 @@ describe("配置三视图", () => {
   });
 });
 
+describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校验）", () => {
+  const fakeModel = { modelId: "test-model" } as never;
+
+  it("合法产出过闸；乱说话的产出被 Zod 拒绝（模型当顾问不当计算器）", async () => {
+    const { AiSdkSlot } = await import("../lib/engine/llmSlot");
+    const good = { object: "equipment", filter: { status: "in_service" }, properties: ["name"] };
+    const slot = new AiSdkSlot(fakeModel, (async () => ({ object: good })) as never);
+    expect((await slot.nlToQuery("在役设备", config)).object).toBe("equipment");
+    const bad = new AiSdkSlot(fakeModel, (async () => ({ object: { object: 123 } })) as never);
+    await expect(bad.nlToQuery("x", config)).rejects.toThrow();
+  });
+
+  it("getSlot：没 XAI_API_KEY 回退罐头，有 key 走真模型", async () => {
+    const { getSlot } = await import("../lib/engine/llmSlot");
+    delete process.env.XAI_API_KEY;
+    expect(getSlot().name).toBe("canned-离线回退");
+    process.env.XAI_API_KEY = "test-key";
+    expect(getSlot().name).toContain("ai-sdk:");
+    delete process.env.XAI_API_KEY;
+  });
+});
+
 describe("LLM 槽位离线回退", () => {
   const slot = new CannedSlot();
 
