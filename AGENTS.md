@@ -88,7 +88,7 @@ _UI 说法_：映射。_Avoid_：新系统、出码、运行中、对象列表�
 _UI 说法_：本体（产品核心词，保留）。
 
 **工作空间** 🔴：
-隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位、对话历史。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链在 `onto_version`，各表都带 `workspace_id`；后端可换（默认单文件 SQLite `lib/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。新建从种子模板（`lib/config/ontology.yaml`）起步；默认空间 `default`；API 用 `?ws=` 指定。
+隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位、对话历史。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链在 `onto_version`，各表都带 `workspace_id`；后端可换（默认单文件 SQLite `lib/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。**新建从空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`lib/config/ontology.yaml`）与四个演示 fixture 连接只属于 `default`；API 用 `?ws=` 指定。
 _UI 说法_：工作空间（左上角下拉）。
 
 **对象类型 / 属性 / 关系** 🔶：

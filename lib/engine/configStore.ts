@@ -2,20 +2,13 @@
 // 画布读写副本；引擎只读已发布。已发布配置与版本链存共享元库（onto_version，按 workspace_id 隔离）；
 // 发布 = 校验 + 插入新版行（git revert 语义，历史链不断）。摆位存 onto_workspace.layout。
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { dump, load } from "js-yaml";
 import { configSchema, objectTypeSchema, type OntologyConfig } from "../schema/config";
 import type { DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
 import { findLink } from "./individual";
 import { validateSemantics } from "./validate";
-import { DEFAULT_WS } from "./workspace";
-
-/** 种子模板（lib/config/ontology.yaml）：新建空间的 v1 内容。cwd 现算，测试切目录不冻结。 */
-function seedYaml(): string {
-  return readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8");
-}
+import { DEFAULT_WS, seedYamlFor } from "./workspace";
 
 /* ---------- 已发布 ---------- */
 
@@ -43,7 +36,7 @@ function storeOf(ws: string): Store {
 }
 
 async function loadPublished(ws: string): Promise<{ config: OntologyConfig; version: number }> {
-  const { version, yaml } = await metaStore().latestVersion(ws, seedYaml());
+  const { version, yaml } = await metaStore().latestVersion(ws, seedYamlFor(ws));
   const config = configSchema.parse(load(yaml));
   validateSemantics(config);
   return { config, version };
@@ -413,7 +406,7 @@ export async function publishDraft(ws: string = DEFAULT_WS): Promise<{ version: 
   } catch (e) {
     throw new DraftReject(e instanceof Error ? e.message : String(e)); // 归一到类型，路由不用嗅探文案
   }
-  const version = (await metaStore().latestVersion(ws, seedYaml())).version + 1; // 版本号以库里的链为准
+  const version = (await metaStore().latestVersion(ws, seedYamlFor(ws))).version + 1; // 版本号以库里的链为准
   await metaStore().insertVersion(ws, version, dump(config, { lineWidth: 120, noRefs: true }), "publish");
   storeOf(ws).published = { config, version }; // 换掉已发布快照：引擎下一次 getPublished 即读新版
   state.baseVersion = version;
@@ -449,7 +442,7 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
   } catch (e) {
     throw new DraftReject(`配置不合法：v${version} 的内容读不回来（${e instanceof Error ? e.message : String(e)}）`); // 归一前缀，路由按 422 分层
   }
-  const newVersion = (await metaStore().latestVersion(ws, seedYaml())).version + 1;
+  const newVersion = (await metaStore().latestVersion(ws, seedYamlFor(ws))).version + 1;
   await metaStore().insertVersion(ws, newVersion, dump(config, { lineWidth: 120, noRefs: true }), "rollback", version);
   storeOf(ws).published = { config, version: newVersion };
   storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: await metaStore().getLayout(ws) };

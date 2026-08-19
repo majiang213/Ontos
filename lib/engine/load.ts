@@ -14,13 +14,15 @@ import { DEFAULT_WS } from "./workspace";
 const g = globalThis as unknown as { __ontosRegistry?: Map<string, DriverRegistry> };
 const registries: Map<string, DriverRegistry> = g.__ontosRegistry ?? (g.__ontosRegistry = new Map());
 
-/** 驱动注册表（全部路由的唯一驱动入口）：fixture 四个内置连接 + 该空间元数据库里保存的连接。按工作空间键控。 */
+/** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 四个内置连接只注入 default——新空间空白起步，数据源自己接。按工作空间键控。 */
 export async function getDriverRegistry(ws: string = DEFAULT_WS): Promise<DriverRegistry> {
   let r = registries.get(ws);
   if (!r) {
     const registry = new DriverRegistry();
-    const fixture = SqliteFixtureDriver.seeded();
-    for (const conn of fixture.connections()) registry.register(conn, fixture);
+    if (ws === DEFAULT_WS) {
+      const fixture = SqliteFixtureDriver.seeded();
+      for (const conn of fixture.connections()) registry.register(conn, fixture);
+    }
     for (const rec of await metaStore().listConnections(ws)) registerSaved(registry, rec);
     r = registry;
     registries.set(ws, r);

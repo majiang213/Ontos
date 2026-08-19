@@ -28,15 +28,16 @@ afterEach(async () => {
 });
 
 describe("空间隔离", () => {
-  it("两个空间各自发布升级，互不干扰；首次访问自动从模板播种", async () => {
+  it("两个空间各自发布升级，互不干扰；新空间空白起步，演示模板只属于 default", async () => {
     const s = await import("../lib/engine/configStore");
     const meta = (await import("../lib/meta/store")).metaStore();
     // default 建对象并发布 → v2
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, "default");
     expect((await s.publishDraft("default")).version).toBe(2);
-    // lab 首次访问：从模板播种，v1，没有 vendor
+    // lab 首次访问：空白起步（v1、空本体）；模板只属于 default
     expect((await s.getPublished("lab")).version).toBe(1);
-    expect((await s.getPublished("lab")).config.object_types.vendor).toBeUndefined();
+    expect(Object.keys((await s.getPublished("lab")).config.object_types)).toEqual([]);
+    expect((await s.getPublished("default")).config.object_types.equipment).toBeDefined();
     // lab 自己发布：default 的版本与内容都不受影响
     await s.applyOp({ op: "create_object", name: "person_x", kind: "thing" }, "lab");
     expect((await s.publishDraft("lab")).version).toBe(2);

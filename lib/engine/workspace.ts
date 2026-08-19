@@ -12,24 +12,25 @@ export function isWsName(name: string): boolean {
   return NAME_RE.test(name);
 }
 
-/** 种子模板内容（新建空间的 v1）。 */
-function seedYaml(): string {
-  return readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8");
+/** 空间的 v1 种子：default 用演示模板；其余空间空白起步（空本体）——切换空间要看得出是另一套。 */
+export function seedYamlFor(ws: string): string {
+  if (ws === DEFAULT_WS) return readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8");
+  return "object_types: {}\n";
 }
 
 export function listWorkspaces(): Promise<string[]> {
   return metaStore().listWorkspaces();
 }
 
-/** 注册（若不存在）并把种子模板插成该空间的 v1。 */
+/** 注册（若不存在）并把种子插成该空间的 v1。 */
 export function ensureWorkspace(ws: string): Promise<number> {
   if (!isWsName(ws)) throw new Error(`空间名不合法：${ws}`);
-  return metaStore().ensureWorkspace(ws, seedYaml());
+  return metaStore().ensureWorkspace(ws, seedYamlFor(ws));
 }
 
-/** 新建空间（从种子模板起步）。 */
+/** 新建空间（空白起步：空本体、无连接，从连接数据源开始玩）。 */
 export async function createWorkspace(name: string): Promise<void> {
   if (!isWsName(name)) throw new Error(`空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`);
   if ((await metaStore().listWorkspaces()).includes(name)) throw new Error(`空间已存在：${name}`);
-  await metaStore().ensureWorkspace(name, seedYaml());
+  await metaStore().ensureWorkspace(name, seedYamlFor(name));
 }
