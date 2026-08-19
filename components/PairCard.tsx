@@ -31,7 +31,12 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
       });
       const data = await r.json();
       if (!r.ok) setError(data.error ?? "裁决被拒"); // 留在面板里，能重试
-      else onDone(`已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`);
+      else
+        onDone(
+          verdict === "阶段"
+            ? `已裁决 ${pair.class_a} × ${pair.class_b}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+            : `已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+        );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -43,7 +48,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
   const options: { v: string; hint: string }[] = [
     { v: "同一", hint: "就是同一批东西——合并成一个对象，挂多个来源" },
     { v: "部分重叠", hint: "有一部分重合——公共字段立一个公共对象，各自特有的字段留下" },
-    { v: "阶段", hint: "同一批东西的不同阶段——合并成一个对象，加状态和转化动作" },
+    { v: "阶段", hint: "同一批东西的不同时期（如在途设备 → 在役设备）——并成一个对象，自动加状态字段和「转为晚阶段」动作" },
     { v: "仅名称相似", hint: "只是名字像，其实不相干——各自独立" },
     { v: "跳过", hint: "这次不判，先放着" },
   ];
@@ -123,9 +128,13 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               <span className="verdict-hint">{o.hint}</span>
               {o.v === "阶段" && (
                 <span className="verdict-stage" onClick={(e) => e.stopPropagation()}>
-                  <input ref={stageFromRef} placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 130, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
-                  <span style={{ color: "var(--ink-3)" }}>→</span>
-                  <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 130, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>填两个时期的名字：</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>早</span>
+                    <input ref={stageFromRef} placeholder="如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                    <span style={{ color: "var(--ink-3)" }}>→</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>晚</span>
+                    <input placeholder="如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>，再点本行定案</span>
                 </span>
               )}
             </div>
