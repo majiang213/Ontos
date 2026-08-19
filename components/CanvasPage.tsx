@@ -373,9 +373,9 @@ export default function CanvasPage() {
 
       {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
       {!maximized && panelOpen && (
-        <div className="float-card float-bc" style={{ width: 520, maxHeight: "60%" }}>
+        <div className="float-card float-bc" style={{ width: 760, maxHeight: "78%" }}>
           <div className="bezel">
-            <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "56vh" }}>
+            <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "72vh" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 处）</span>
                 <button className="chip" aria-label="关闭" onClick={() => setPanelOpen(false)}>✕</button>
