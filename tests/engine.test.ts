@@ -419,7 +419,7 @@ describe("源条目级对齐键 key", () => {
 
 describe("表达式与发号", () => {
   it("uuid v7 是合法 UUID 形态", async () => {
-    const v = generateValue("c", "p", { type: "string", generate: [{ uuid: "v7" }] }, {});
+    const v = await generateValue("c", "p", { type: "string", generate: [{ uuid: "v7" }] }, {});
     expect(v).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
@@ -637,9 +637,9 @@ describe("第五轮修复的回归", () => {
   });
 
   it("generate 的 { property, from } 项按点名的属性取值", async () => {
-    const v = generateValue("c", "p", { type: "string", generate: [{ property: "title", from: "request" }] }, { request: { title: "经理" } });
+    const v = await generateValue("c", "p", { type: "string", generate: [{ property: "title", from: "request" }] }, { request: { title: "经理" } });
     expect(v).toBe("经理");
-    expect(() => generateValue("c", "p", { type: "string", generate: [{ property: "nope", from: "request" }] }, { request: {} })).toThrow(); // 缺参不拼 "undefined"
+    await expect(generateValue("c", "p", { type: "string", generate: [{ property: "nope", from: "request" }] }, { request: {} })).rejects.toThrow(); // 缺参不拼 "undefined"
   });
 
   it("in 的元素级解析：ISO 日期串也能命中", async () => {

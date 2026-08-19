@@ -30,7 +30,7 @@ const bodySchema = z
 
 export async function GET(req: Request) {
   try {
-    return NextResponse.json({ decisions: metaStore(wsOf(req)).listDecisions() });
+    return NextResponse.json({ decisions: await metaStore().listDecisions(wsOf(req)) });
   } catch (e) {
     return internalError(e);
   }
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const body = bodySchema.parse(await bodyJson(req));
     // 先裁决后留痕：裁决被校验闸回退时不留幻影记录（候选对也不能因此被永久排除）。
     // 源名要在裁决前读——「同一/阶段」会把 B 类撤掉。
-    const d = getDraft(ws).draft;
+    const d = (await getDraft(ws)).draft;
     const clsA = d.object_types[body.class_a];
     const clsB = d.object_types[body.class_b];
     if (!clsA || !clsB) return NextResponse.json({ error: "类不存在，先刷新画布" }, { status: 422 });
@@ -61,11 +61,11 @@ export async function POST(req: Request) {
     const sourceOf = (name: string) => Object.keys(d.object_types[name]?.sources ?? {})[0] ?? "";
     const source_a = sourceOf(body.class_a);
     const source_b = sourceOf(body.class_b);
-    adjudicate({ class_a: body.class_a, class_b: body.class_b }, body.verdict, body.stage_names, ws);
+    await adjudicate({ class_a: body.class_a, class_b: body.class_b }, body.verdict, body.stage_names, ws);
     // 留痕失败如实告诉调用方（裁决已进草稿），不装成功也不把请求炸成 500
     let recorded = true;
     try {
-      metaStore(ws).recordDecision({
+      await metaStore().recordDecision(ws, {
         class_a: body.class_a,
         class_b: body.class_b,
         source_a,

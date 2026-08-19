@@ -1,7 +1,8 @@
 // 配置存储 —— M4 雏形。工作副本（草稿）与已发布版本的唯一出入口。
-// 画布读写副本；引擎只读已发布。发布 = 校验 + 写版本文件 + 升版本（git revert 语义，历史链不断）。
+// 画布读写副本；引擎只读已发布。已发布配置与版本链存共享元库（onto_version，按 workspace_id 隔离）；
+// 发布 = 校验 + 插入新版行（git revert 语义，历史链不断）。摆位存 onto_workspace.layout。
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dump, load } from "js-yaml";
 import { configSchema, objectTypeSchema, type OntologyConfig } from "../schema/config";
@@ -9,41 +10,20 @@ import type { DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
 import { findLink } from "./individual";
 import { validateSemantics } from "./validate";
-import { DEFAULT_WS, ensureWorkspace, wsDir } from "./workspace";
+import { DEFAULT_WS } from "./workspace";
 
-// 路径按空间现算：lib/config/workspaces/<ws>/ 一套；cwd 也不在模块顶层冻结（测试会切换工作目录）。
-const seedFile = (ws: string) => join(ensureWorkspace(ws), "ontology.yaml");
-const versionsDir = (ws: string) => join(wsDir(ws), "versions");
-const layoutFile = (ws: string) => join(wsDir(ws), "canvas-layout.json");
+/** 种子模板（lib/config/ontology.yaml）：新建空间的 v1 内容。cwd 现算，测试切目录不冻结。 */
+function seedYaml(): string {
+  return readFileSync(join(process.cwd(), "lib/config/ontology.yaml"), "utf8");
+}
 
 /* ---------- 已发布 ---------- */
-
-function latestVersionFile(ws: string): { version: number; file: string } {
-  if (!existsSync(versionsDir(ws))) return { version: 1, file: seedFile(ws) };
-  const versions = readdirSync(versionsDir(ws))
-    .map((f) => /^v(\d+)\.yaml$/.exec(f)?.[1])
-    .filter((v): v is string => Boolean(v))
-    .map(Number)
-    .sort((a, b) => a - b);
-  if (versions.length === 0) return { version: 1, file: seedFile(ws) };
-  const v = versions[versions.length - 1];
-  return { version: v, file: join(versionsDir(ws), `v${v}.yaml`) };
-}
-
-function loadPublished(ws: string): { config: OntologyConfig; version: number } {
-  const { version, file } = latestVersionFile(ws);
-  const config = configSchema.parse(load(readFileSync(file, "utf8")));
-  validateSemantics(config);
-  return { config, version };
-}
-
-/* ---------- 工作副本 ---------- */
 
 export interface DraftState {
   draft: OntologyConfig;
   baseVersion: number; // 基于哪个已发布版本
   dirty: boolean; // 与已发布是否有差异（按结构比较，每次操作后重算）
-  layout: Record<string, { x: number; y: number }>; // 画布摆位（随草稿走，落 layout.json）
+  layout: Record<string, { x: number; y: number }>; // 画布摆位（存 onto_workspace.layout）
 }
 
 interface Store {
@@ -62,26 +42,25 @@ function storeOf(ws: string): Store {
   return s;
 }
 
-export function getPublished(ws: string = DEFAULT_WS): { config: OntologyConfig; version: number } {
+async function loadPublished(ws: string): Promise<{ config: OntologyConfig; version: number }> {
+  const { version, yaml } = await metaStore().latestVersion(ws, seedYaml());
+  const config = configSchema.parse(load(yaml));
+  validateSemantics(config);
+  return { config, version };
+}
+
+export async function getPublished(ws: string = DEFAULT_WS): Promise<{ config: OntologyConfig; version: number }> {
   const store = storeOf(ws);
-  if (!store.published) store.published = loadPublished(ws);
+  if (!store.published) store.published = await loadPublished(ws);
   return store.published;
 }
 
-function loadLayout(ws: string): Record<string, { x: number; y: number }> {
-  try {
-    if (existsSync(layoutFile(ws))) return JSON.parse(readFileSync(layoutFile(ws), "utf8"));
-  } catch {
-    // 摆位文件损坏不致命：忽略，重排即可
-  }
-  return {};
-}
-
-export function getDraft(ws: string = DEFAULT_WS): DraftState {
+export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
   const store = storeOf(ws);
   if (!store.draft) {
-    const { config, version } = getPublished(ws);
-    store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: loadLayout(ws) };
+    const { config, version } = await getPublished(ws);
+    const layout = await metaStore().getLayout(ws);
+    store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout };
   }
   return store.draft;
 }
@@ -90,8 +69,8 @@ export function getDraft(ws: string = DEFAULT_WS): DraftState {
 
 export class DraftReject extends Error {} // 操作不合法：名字重了、对象不存在等
 
-export function applyOp(input: DraftOp, ws: string = DEFAULT_WS): DraftState {
-  const state = getDraft(ws);
+export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<DraftState> {
+  const state = await getDraft(ws);
   const backup = structuredClone(state.draft);
   const d = state.draft;
   switch (input.op) {
@@ -140,7 +119,7 @@ export function applyOp(input: DraftOp, ws: string = DEFAULT_WS): DraftState {
     }
     case "save_layout": {
       state.layout = { ...state.layout, ...input.positions };
-      writeFileSync(layoutFile(ws), JSON.stringify(state.layout), "utf8"); // 摆位落小文件，重启不丢
+      await metaStore().setLayout(ws, state.layout); // 摆位入库（onto_workspace.layout），重启不丢
       return state; // 摆位不算本体改动，不碰 dirty
     }
     case "create_link": {
@@ -192,10 +171,10 @@ export function applyOp(input: DraftOp, ws: string = DEFAULT_WS): DraftState {
   // 校验过了再动摆位：被删对象的摆位随内容一起清（校验失败回退时摆位不丢）
   if (input.op === "delete_object" && state.layout[input.name]) {
     delete state.layout[input.name];
-    if (existsSync(layoutFile(ws))) writeFileSync(layoutFile(ws), JSON.stringify(state.layout), "utf8");
+    await metaStore().setLayout(ws, state.layout);
   }
   // 每次操作后按结构重算：改出去又改回来，dirty 要能收回来
-  state.dirty = !sameConfig(state.draft, getPublished(ws).config);
+  state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
   return state;
 }
 
@@ -398,8 +377,9 @@ function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] 
 }
 
 /** 直接改草稿（裁决应用等成组改动走这里）：改完立即校验，不合法就回退并抛 DraftReject——不让坏草稿攒到发布一刻才炸。 */
-export function mutateDraft(fn: (draft: OntologyConfig) => void, ws: string = DEFAULT_WS): DraftState {
-  const state = getDraft(ws);
+/** 直接改草稿（裁决应用等成组改动走这里）：改完立即校验，不合法就回退并抛 DraftReject——不让坏草稿攒到发布一刻才炸。 */
+export async function mutateDraft(fn: (draft: OntologyConfig) => void, ws: string = DEFAULT_WS): Promise<DraftState> {
+  const state = await getDraft(ws);
   const backup = structuredClone(state.draft);
   try {
     fn(state.draft);
@@ -409,7 +389,7 @@ export function mutateDraft(fn: (draft: OntologyConfig) => void, ws: string = DE
     state.draft = backup; // 回退
     throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
-  // 被撤的类顺手清摆位（裁决的 dropClass 不走 delete_object），canvas-layout.json 不留死键
+  // 被撤的类顺手清摆位（裁决的 dropClass 不走 delete_object），摆位表不留死键
   let layoutChanged = false;
   for (const name of Object.keys(state.layout)) {
     if (!state.draft.object_types[name]) {
@@ -417,15 +397,15 @@ export function mutateDraft(fn: (draft: OntologyConfig) => void, ws: string = DE
       layoutChanged = true;
     }
   }
-  if (layoutChanged && existsSync(layoutFile(ws))) writeFileSync(layoutFile(ws), JSON.stringify(state.layout), "utf8");
-  state.dirty = !sameConfig(state.draft, getPublished(ws).config);
+  if (layoutChanged) await metaStore().setLayout(ws, state.layout);
+  state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
   return state;
 }
 
 /* ---------- 发布与放弃 ---------- */
 
-export function publishDraft(ws: string = DEFAULT_WS): { version: number } {
-  const state = getDraft(ws);
+export async function publishDraft(ws: string = DEFAULT_WS): Promise<{ version: number }> {
+  const state = await getDraft(ws);
   if (!state.dirty) return { version: state.baseVersion }; // 无改动不产空版本
   const config = configSchema.parse(structuredClone(state.draft)); // 结构校验
   try {
@@ -433,22 +413,19 @@ export function publishDraft(ws: string = DEFAULT_WS): { version: number } {
   } catch (e) {
     throw new DraftReject(e instanceof Error ? e.message : String(e)); // 归一到类型，路由不用嗅探文案
   }
-  const version = latestVersionFile(ws).version + 1; // 版本号以磁盘链为准，防残留覆盖
-  mkdirSync(versionsDir(ws), { recursive: true });
-  const target = join(versionsDir(ws), `v${version}.yaml`);
-  writeFileSync(`${target}.tmp`, dump(config, { lineWidth: 120, noRefs: true }), "utf8"); // 先写临时文件再改名，防半截文件
-  renameSync(`${target}.tmp`, target);
+  const version = (await metaStore().latestVersion(ws, seedYaml())).version + 1; // 版本号以库里的链为准
+  await metaStore().insertVersion(ws, version, dump(config, { lineWidth: 120, noRefs: true }), "publish");
   storeOf(ws).published = { config, version }; // 换掉已发布快照：引擎下一次 getPublished 即读新版
   state.baseVersion = version;
   state.dirty = false;
-  fillDecisionVersions(version, ws); // 裁决留痕的生效版本随发布回填
+  await fillDecisionVersions(version, ws); // 裁决留痕的生效版本随发布回填
   return { version };
 }
 
-export function discardDraft(ws: string = DEFAULT_WS): void {
-  storeOf(ws).draft = undefined; // 回到已发布快照；摆位存在独立小文件里，不随草稿丢
+export async function discardDraft(ws: string = DEFAULT_WS): Promise<void> {
+  storeOf(ws).draft = undefined; // 回到已发布快照；摆位在库里，不随草稿丢
   try {
-    metaStore(ws).abandonPendingDecisions(); // 草稿里裁过又没发布的留痕标记「已放弃」，不挂到无关的下一次发布上
+    await metaStore().abandonPendingDecisions(ws); // 草稿里裁过又没发布的留痕标记「已放弃」，不挂到无关的下一次发布上
   } catch {
     // 留痕是附属，不挡放弃
   }
@@ -456,43 +433,27 @@ export function discardDraft(ws: string = DEFAULT_WS): void {
 
 /* ---------- 版本历史与回滚 ---------- */
 
-export function listVersions(ws: string = DEFAULT_WS): { version: number; file: string; createdAt: string }[] {
-  const seed = seedFile(ws);
-  const out = [{ version: 1, file: seed, createdAt: existsSync(seed) ? statSync(seed).mtime.toISOString() : "" }];
-  if (existsSync(versionsDir(ws))) {
-    const versions = readdirSync(versionsDir(ws))
-      .map((f) => /^v(\d+)\.yaml$/.exec(f)?.[1])
-      .filter((v): v is string => Boolean(v))
-      .map(Number)
-      .sort((a, b) => a - b);
-    for (const v of versions) {
-      const file = join(versionsDir(ws), `v${v}.yaml`);
-      out.push({ version: v, file, createdAt: statSync(file).mtime.toISOString() });
-    }
-  }
-  return out;
+export function listVersions(ws: string = DEFAULT_WS): Promise<{ version: number; createdAt: string; origin: string }[]> {
+  return metaStore().listVersions(ws);
 }
 
-/** 回滚 = Git revert 语义：把旧版本内容作为新版本发布，历史链不断。草稿有未发布改动时拒绝，先发布或放弃。 */
-export function rollbackTo(version: number, ws: string = DEFAULT_WS): { version: number } {
-  if (getDraft(ws).dirty) throw new DraftReject("有未发布的改动，先发布或放弃再回滚");
-  const entry = listVersions(ws).find((v) => v.version === version);
-  if (!entry) throw new DraftReject(`版本不存在：v${version}`);
+/** 回滚 = Git revert 语义：把旧版本内容作为新版本插入，历史链不断。草稿有未发布改动时拒绝，先发布或放弃。 */
+export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Promise<{ version: number }> {
+  if ((await getDraft(ws)).dirty) throw new DraftReject("有未发布的改动，先发布或放弃再回滚");
+  const yaml = await metaStore().versionYaml(ws, version);
+  if (yaml === undefined) throw new DraftReject(`版本不存在：v${version}`);
   let config: OntologyConfig;
   try {
-    config = configSchema.parse(load(readFileSync(entry.file, "utf8")));
+    config = configSchema.parse(load(yaml));
     validateSemantics(config);
   } catch (e) {
     throw new DraftReject(`配置不合法：v${version} 的内容读不回来（${e instanceof Error ? e.message : String(e)}）`); // 归一前缀，路由按 422 分层
   }
-  const newVersion = latestVersionFile(ws).version + 1;
-  mkdirSync(versionsDir(ws), { recursive: true });
-  const target = join(versionsDir(ws), `v${newVersion}.yaml`);
-  writeFileSync(`${target}.tmp`, dump(config, { lineWidth: 120, noRefs: true }), "utf8");
-  renameSync(`${target}.tmp`, target);
+  const newVersion = (await metaStore().latestVersion(ws, seedYaml())).version + 1;
+  await metaStore().insertVersion(ws, newVersion, dump(config, { lineWidth: 120, noRefs: true }), "rollback", version);
   storeOf(ws).published = { config, version: newVersion };
-  storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: loadLayout(ws) };
-  fillDecisionVersions(newVersion, ws); // 回滚也是一次发布：未绑版本的裁决挂到它
+  storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: await metaStore().getLayout(ws) };
+  await fillDecisionVersions(newVersion, ws); // 回滚也是一次发布：未绑版本的裁决挂到它
   return { version: newVersion };
 }
 
@@ -503,9 +464,9 @@ export function resetStore(ws?: string): void {
 }
 
 /** 发布成功后回填：把还没绑版本的裁决留痕挂上这个版本。回填失败不影响发布。 */
-function fillDecisionVersions(version: number, ws: string): void {
+async function fillDecisionVersions(version: number, ws: string): Promise<void> {
   try {
-    metaStore(ws).backfillDecisionVersions(version);
+    await metaStore().backfillDecisionVersions(ws, version);
   } catch {
     // 留痕是附属，不挡发布
   }

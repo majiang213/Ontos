@@ -20,7 +20,7 @@ export interface OverlapResult {
 }
 
 /** 同一规则归一化后算交集。每源只读一次：前 20 条挑规则，全量进集合；值集合算完即弃。 */
-export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls, meta?: MetaStore): Promise<OverlapResult> {
+export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls, meta?: MetaStore, ws = "default"): Promise<OverlapResult> {
   const readRaw = async (cls: Cls): Promise<string[][]> => {
     const out: string[][] = [];
     for (const [, entry] of sourcesOf(cls)) {
@@ -49,7 +49,7 @@ export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls,
     rate: Math.max(a.size, b.size) === 0 ? 0 : hit / Math.max(a.size, b.size),
   };
   try {
-    meta?.recordOverlap(result); // 只落计数与比率；值集合随函数返回即弃
+    await meta?.recordOverlap(ws, result); // 只落计数与比率；值集合随函数返回即弃
   } catch {
     // 留痕失败不挡返回——交集已经算出来了
   }

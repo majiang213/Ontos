@@ -7,7 +7,7 @@ import { internalError, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {
   try {
-    const registry = getDriverRegistry(wsOf(req));
+    const registry = await getDriverRegistry(wsOf(req));
     const sources = [];
     for (const connection of registry.connectionNames()) {
       try {

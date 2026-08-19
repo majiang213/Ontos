@@ -66,7 +66,7 @@ export async function runAction(
   config: OntologyConfig,
   driver: SourceDriver,
   req: ActionRequest,
-  opts?: { nextSequence?: (key: string, start?: number) => number } // 路由层注入元数据库发号器；缺省用内存版
+  opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number> } // 路由层注入元数据库发号器（异步）；缺省用内存版
 ): Promise<ActionResult> {
   if (!config.object_types[req.object]) return reject("pre", `配置中没有类：${req.object}`);
   const cls = mustCls(config, req.object);
@@ -331,7 +331,8 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
   if (p.kind === "create") {
     const vals: Record<string, unknown> = {};
     for (const [prop, spec] of Object.entries(p.propSpec)) {
-      vals[prop] = resolveValue(spec, prop, ctx, () => generateValue(p.cls.name, prop, p.cls.def.properties[prop], ctx));
+      // generateValue 现在异步（发号器落库）：Promise.resolve 统一解包，非 generated 的取值不受影响
+      vals[prop] = await Promise.resolve(resolveValue(spec, prop, ctx, () => generateValue(p.cls.name, prop, p.cls.def.properties[prop], ctx)));
     }
     const targets = sourcesOf(p.cls).filter(([, entry]) => Object.keys(p.propSpec).every((prop) => entry.fields[prop]));
     if (targets.length === 0) throw new Error(`没有源能承接 ${p.cls.name} 的全部所赋属性`);

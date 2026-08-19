@@ -20,11 +20,11 @@ export async function POST(req: Request) {
     ws = wsOf(req);
     const query = queryRequestSchema.parse(await bodyJson(req));
     queryJson = JSON.stringify(query);
-    const { rows, path } = await runQuery(getPublished(ws).config, getDriverRegistry(ws), query);
-    safeLog(() => metaStore(ws).logQuery({ version: getPublished(ws).version, query_json: queryJson, row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
+    const { rows, path } = await runQuery((await getPublished(ws)).config, await getDriverRegistry(ws), query);
+    safeLog(async () => metaStore().logQuery(ws, { version: (await getPublished(ws)).version, query_json: queryJson, row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
     return NextResponse.json({ rows, path });
   } catch (e) {
-    safeLog(() => metaStore(ws).logQuery({ version: getPublished(ws).version, query_json: queryJson, ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
+    safeLog(async () => metaStore().logQuery(ws, { version: (await getPublished(ws)).version, query_json: queryJson, ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
     if (e instanceof ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 }); // 引擎拒绝，不猜

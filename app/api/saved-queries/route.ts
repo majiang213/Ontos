@@ -9,7 +9,7 @@ import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/a
 
 export async function GET(req: Request) {
   try {
-    return NextResponse.json({ apis: metaStore(wsOf(req)).listQueryApis() });
+    return NextResponse.json({ apis: await metaStore().listQueryApis(wsOf(req)) });
   } catch (e) {
     return internalError(e);
   }
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
   }
   try {
     const query = queryRequestSchema.parse(body.query);
-    metaStore(wsOf(req)).saveQueryApi(body.name, body.question, JSON.stringify(query));
+    await metaStore().saveQueryApi(wsOf(req), body.name, body.question, JSON.stringify(query));
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "查询形状不合法", issues: e.issues }, { status: 400 }); // 形状问题一律 400，与其它路由同层
@@ -39,7 +39,7 @@ export async function DELETE(req: Request) {
   if (denied) return denied;
   try {
     const { id } = z.object({ id: z.number() }).parse(await bodyJson(req));
-    metaStore(wsOf(req)).deleteQueryApi(id);
+    await metaStore().deleteQueryApi(wsOf(req), id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });

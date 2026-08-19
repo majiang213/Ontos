@@ -15,10 +15,10 @@ export async function bodyJson(req: Request): Promise<unknown> {
   }
 }
 
-/** 留痕尽力而为：500 的根因若正是元库故障，catch 里再抛就成非 JSON 响应。 */
-export function safeLog(fn: () => void): void {
+/** 留痕尽力而为（可同步可异步）：500 的根因若正是元库故障，catch 里再抛就成非 JSON 响应。 */
+export function safeLog(fn: () => void | Promise<void>): void {
   try {
-    fn();
+    void Promise.resolve(fn()).catch(() => {});
   } catch {
     // 留痕失败不挡响应
   }

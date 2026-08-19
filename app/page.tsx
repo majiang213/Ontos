@@ -16,9 +16,12 @@ export default function Home() {
   }, []);
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <nav className="nav-float">
+      {/* 左上角：品牌 + 空间切换器（全局）；页面切换留在中栏 */}
+      <div style={{ position: "fixed", top: 14, left: 16, zIndex: 30, display: "flex", gap: 8, alignItems: "center" }}>
         <span className="nav-brand">Ontos</span>
         <WsSwitcher ws={ws} onChange={switchWs} />
+      </div>
+      <nav className="nav-float">
         {(
           [
             ["build", "本体构建"],

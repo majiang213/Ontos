@@ -20,8 +20,8 @@ export async function POST(req: Request) {
   let ws = "default";
   /** 留痕的公共部分：成功/失败两支只补差异字段。 */
   const log = (outcome: { ok: boolean; error?: string; projections?: unknown }) =>
-    safeLog(() => action && metaStore(ws).logAction({
-      version: getPublished(ws).version,
+    safeLog(async () => action && metaStore().logAction(ws, {
+      version: (await getPublished(ws)).version,
       action: action.action,
       object_type: action.object,
       subject: String(action.identity),
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     const parsed = actionRequestSchema.parse(await bodyJson(req));
     action = parsed;
     // 发号器落元数据库：重启不复位，补偿重发撞上幂等查重才成立
-    const result = await runAction(getPublished(ws).config, getDriverRegistry(ws), parsed, { nextSequence: (k, s) => metaStore(ws).nextSeq(k, s) });
+    const result = await runAction((await getPublished(ws)).config, await getDriverRegistry(ws), parsed, { nextSequence: (k, s) => metaStore().nextSeq(ws, k, s) });
     log({ ok: result.ok, error: result.error, projections: result.projections });
     // 领域内的失败（前置、公理、投影失败）装在结果里返回 422；抛出来的才是引擎故障
     return NextResponse.json(result, { status: result.ok ? 200 : 422 });

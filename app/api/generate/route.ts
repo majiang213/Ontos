@@ -20,11 +20,11 @@ export async function POST(req: Request) {
   try {
     const ws = wsOf(req);
     const { tables } = bodySchema.parse(await bodyJson(req));
-    const registry = getDriverRegistry(ws);
+    const registry = await getDriverRegistry(ws);
     // 按连接分组内省 + 逐表定位：引擎共享实现（mcp 同款）
     const infos = await resolveTableInfos(registry, tables, (m) => new DraftReject(m));
     const objects = await getSlot().draftObjects(infos);
-    applyOp({ op: "import_objects", objects }, ws);
+    await applyOp({ op: "import_objects", objects }, ws);
     return NextResponse.json({ ok: true, created: Object.keys(objects) });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });

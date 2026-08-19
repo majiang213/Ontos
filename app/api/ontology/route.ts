@@ -9,8 +9,8 @@ import { internalError, wsOf } from "@/app/api/_shared";
 export async function GET(req: Request) {
   try {
     const ws = wsOf(req);
-    const state = getDraft(ws);
-    const published = getPublished(ws).config;
+    const state = await getDraft(ws);
+    const published = (await getPublished(ws)).config;
     const states: Record<string, "new" | "modified" | "same"> = {};
     for (const [name, t] of Object.entries(state.draft.object_types)) {
       const pub = published.object_types[name];

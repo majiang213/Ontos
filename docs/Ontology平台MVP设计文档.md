@@ -392,26 +392,26 @@ CREATE INDEX idx_action_subject ON log_action (ontology_id, object_type, subject
 
 **概念。** 工作空间是隔离单位：一个空间一套完整的「本体配置 + 版本链 + 平台元数据 + 画布摆位 + 对话历史」。空间之间不共享任何运行时状态；切换空间等于整套换掉。典型用法：一个空间演示设备域、另一个空间演 HR 域，或一个空间做正式、一个空间做试验。
 
-**结构：目录隔离，不建新表。** 空间的隔离边界落在文件系统上：
+**结构：共享元库 + `workspace_id`，一张注册表。** 隔离边界不再落在文件系统上，而是落在共享平台元数据库的 `workspace_id` 列上——这是接入外部 MySQL/PG 时的形态：一个实例管全部空间，跨空间统一管理成为合法需求。共享库的存在也让注册表有了宿主（文件制下「注册表没地方放」的自指问题在共享库下不成立）：
 
+```sql
+CREATE TABLE onto_workspace (                  -- 工作空间注册表
+  id         BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name       VARCHAR(128) NOT NULL UNIQUE,     -- 空间名（小写字母/数字/中划线/下划线）
+  seed_from  VARCHAR(128),                     -- 起步来源：模板名或 clone 来源空间
+  layout     JSON,                             -- 画布摆位（对象名 → {x, y}）
+  created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
-lib/config/
-  ontology.yaml                 -- 种子模板（只用来初始化新空间，不被任何空间直接读写）
-  workspaces/
-    <空间名>/
-      ontology.yaml             -- 该空间的已发布配置（v1 起步）
-      versions/v2.yaml …        -- 该空间的版本链
-      ontos-meta.db             -- 该空间的元数据库（9 张表，结构与本章 DDL 完全相同）
-      canvas-layout.json        -- 该空间的画布摆位
-```
 
-- **配置与版本是文件，元数据是库**——这个既有哲学在空间维度原样延伸：每空间一个目录、每空间一个 SQLite 文件。9 张元数据表零改动、零迁移。
-- **空间台账就是目录。** 空间列表由 `listWorkspaces()` 读 `workspaces/` 目录得出，不建 `onto_workspace` 注册表：注册表的宿主只能是「所有空间共享的某处」，而那处自己也要被隔离，自指无解；目录天然就是注册表，删空间 = 删目录。因此原 `onto_ontology` 注册表在文件制下也不需要——它和 `onto_workspace` 是同一个被目录取代的东西。
-- **被否决的方案：单库 + `workspace_id`。** 它要求 9 张表全部加列加索引、每条查询带过滤、隔离全靠纪律；而配置文件（ontology/versions/layout）躲不开目录拆分，两头都要动。目录隔离一处改动都不进表结构，且备份、删除、移交一个空间就是打包一个目录。
+- **本体配置与版本链入库**：`onto_version` 增加 `workspace_id`，YAML 全量快照按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`，回滚照旧是 revert 语义（旧内容作为新版本插入）。摆位挂在 `onto_workspace.layout`。
+- **其余 9 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、ont_query_api、log_query、log_action、meta_seq）全部增加 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列；`meta_seq` 主键改 `(workspace_id, name)`。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。
+- **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 即本章 MySQL 8 方言。PG 同理（方言注记见上节）。
+- **配置模板仍是文件**：`lib/config/ontology.yaml` 只当种子模板——新建空间把它插成该空间的 `onto_version` v1 行，此后不再被读。
 
-**语义。** 默认空间 `default`，首次访问时若不存在，自动从种子模板复制出 `ontology.yaml`（其余文件随用随建）。新建空间同样从种子模板起步，不复制任何已有空间的配置——试验从干净画布开始。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；存储单例（已发布快照、工作副本、元库、驱动注册表）按空间名键控，互不串。对话历史存在浏览器 localStorage，按 `ontos-chat-sessions:<空间名>` 分键，切空间互不可见。`?ws=` 传不存在的空间名时按 `ensureWorkspace` 语义从模板自动初始化——和「新建」同一条路，无第二条路径。
+**语义。** 默认空间 `default`，首次访问时若注册表里没有，自动建行并把种子模板插成 v1。新建空间同一条路（`ensureWorkspace`），从模板起步、干净画布。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。对话历史存在浏览器 localStorage，按 `ontos-chat-sessions:<空间名>` 分键。
 
-**迁移。** 现有单空间文件（`lib/config/ontology.yaml`、`versions/`、`ontos-meta.db`、`canvas-layout.json`）在首次启动时归入 `workspaces/default/`；仓库根的 `ontology.yaml` 此后只当种子模板。
+**迁移。** 文件制（`workspaces/<name>/` 目录 + 每空间 SQLite 文件）被本方案取代；迁移是把每个空间的最新 YAML 与版本链插入共享库对应 `workspace_id` 的行，元数据各行补写 `workspace_id`。
 
 ## 7. 四周计划与验收
 

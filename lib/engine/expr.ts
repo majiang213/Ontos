@@ -11,7 +11,7 @@ export interface EvalContext {
   request?: Record<string, unknown>; // 请求参数
   current?: Record<string, unknown>; // 本条过滤或 update 正在谈的个体的源列属性值
   currentDerived?: (prop: string) => unknown | Promise<unknown>; // 点名的属性是派生属性时，按需现算（异步：可能要查源）
-  nextSequence?: (key: string, start?: number) => number; // generate 的计数器
+  nextSequence?: (key: string, start?: number) => number | Promise<number>; // generate 的计数器（元库版是异步）
   allowPreKeys?: boolean; // true 才许用 $request / $exists（它们只属于前置，见 §5.2）
 }
 
@@ -164,20 +164,34 @@ function uuidV7(): string {
   return `${h.slice(0, 4).join("")}-${h.slice(4, 6).join("")}-${h.slice(6, 8).join("")}-${h.slice(8, 10).join("")}-${h.slice(10, 16).join("")}`;
 }
 
-export function generateValue(cls: string, prop: string, def: PropertyDef, ctx: EvalContext): string {
+export async function generateValue(cls: string, prop: string, def: PropertyDef, ctx: EvalContext): Promise<string> {
   if (!def.generate) throw new Error(`${cls}.${prop} 没有 generate`);
-  const parts = def.generate.map((item) => {
-    if (typeof item === "string") return item;
+  const parts: string[] = [];
+  for (const item of def.generate) {
+    if (typeof item === "string") {
+      parts.push(item);
+      continue;
+    }
     const rec = item as Record<string, unknown>;
-    if (rec.from || rec.property) return String(resolveValue(item as ValueSource, prop, ctx)); // 整项交给 resolveValue，不拆键
-    if (rec.date) return formatUtc(evalDateExpr(String(rec.date)), String(rec.format ?? "yyyyMMdd"));
+    if (rec.from || rec.property) {
+      parts.push(String(resolveValue(item as ValueSource, prop, ctx))); // 整项交给 resolveValue，不拆键
+      continue;
+    }
+    if (rec.date) {
+      parts.push(formatUtc(evalDateExpr(String(rec.date)), String(rec.format ?? "yyyyMMdd")));
+      continue;
+    }
     if (rec.sequence) {
       if (!ctx.nextSequence) throw new Error("没有计数器，不能发号");
       const seq = rec.sequence as { start?: number; width?: number };
-      return pad(ctx.nextSequence(`${cls}.${prop}`, seq.start ?? 1), seq.width ?? 4);
+      parts.push(pad(await ctx.nextSequence(`${cls}.${prop}`, seq.start ?? 1), seq.width ?? 4));
+      continue;
     }
-    if (rec.uuid === "v7") return uuidV7();
+    if (rec.uuid === "v7") {
+      parts.push(uuidV7());
+      continue;
+    }
     throw new Error(`无法识别的 generate 项：${JSON.stringify(item)}`);
-  });
+  }
   return parts.join("");
 }

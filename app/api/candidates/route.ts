@@ -11,9 +11,9 @@ import { internalError, wsOf } from "@/app/api/_shared";
 export async function GET(req: Request) {
   try {
     const ws = wsOf(req);
-    const d = getDraft(ws).draft;
+    const d = (await getDraft(ws)).draft;
     // version=-1 是「已放弃」的裁决（草稿被丢弃）——不算定案，候选对可以再出现
-    const decided = new Set(metaStore(ws).listDecisions().filter((r) => r.version !== -1).map((r) => [r.class_a, r.class_b].sort().join("|")));
+    const decided = new Set((await metaStore().listDecisions(ws)).filter((r) => r.version !== -1).map((r) => [r.class_a, r.class_b].sort().join("|")));
     const classes = Object.entries(d.object_types)
       .filter(([, t]) => Object.keys(t.sources ?? {}).length > 0) // 无源对象不进裁决
       .map(([name, t]) => ({

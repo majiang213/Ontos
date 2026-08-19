@@ -320,11 +320,21 @@ export default function ChatPage() {
           }}
         >
           <div className="bezel-core" style={{ padding: "12px 14px 8px" }}>
-            <input
+            <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="问数：在役设备及其所属部门…"
-              style={{ width: "100%", border: "none", outline: "none", background: "transparent", fontSize: 14, color: "var(--ink)", padding: "2px 0 10px" }}
+              rows={3}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault(); // 回车发送，Shift+回车换行
+                  if (input.trim() && !busy) {
+                    ask(input.trim());
+                    setInput("");
+                  }
+                }
+              }}
+              style={{ width: "100%", border: "none", outline: "none", background: "transparent", fontSize: 14, color: "var(--ink)", padding: "2px 0 10px", resize: "vertical", lineHeight: 1.7, fontFamily: "inherit" }}
             />
             <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>
               <button type="button" className="chip" onClick={() => setActOpen((v) => !v)}>

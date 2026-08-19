@@ -1,66 +1,150 @@
-// 元数据库 —— 平台元数据的唯一持久化（SQLite，文件库，重启不丢）。
-// 表结构对应《Ontology平台MVP设计文档.md》§6 的 DDL（MySQL 方言）的 SQLite 适配：
-// TEXT 代 VARCHAR/MEDIUMTEXT，datetime('now') 代 TIMESTAMP DEFAULT，JSON 列存 TEXT。
-// 业务行永远不进这里；交集只存计数，标识值集合不落盘；日志不存结果集。
+// 平台元数据库 —— 共享库 + workspace_id（B 方案）。后端可换：
+//   离线开发：单文件 SQLite（ONTOS_META_DSN 不设，即开即用；隔离在列上不在文件上）
+//   生产：ONTOS_META_DSN=mysql://user:pass@host:port/db（DDL 即设计文档 MySQL 8 方言）
+// workspace_id 的过滤纪律收在这一处：方法第一个参数就是空间名，调用方不碰 SQL。
 
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { ensureWorkspace, wsDir } from "../engine/workspace";
+import mysql from "mysql2/promise";
 
-const DDL = `
-CREATE TABLE IF NOT EXISTS conn_source (
+/* ---------- 后端 ---------- */
+
+interface MetaBackend {
+  readonly dialect: "sqlite" | "mysql";
+  all(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+  get(sql: string, params?: unknown[]): Promise<Record<string, unknown> | undefined>;
+  run(sql: string, params?: unknown[]): Promise<void>;
+  close(): Promise<void>;
+}
+
+class SqliteBackend implements MetaBackend {
+  readonly dialect = "sqlite" as const;
+  private db: DatabaseSync;
+  constructor(file: string) {
+    this.db = new DatabaseSync(file);
+    this.db.exec(SQLITE_DDL);
+  }
+  async all(sql: string, params: unknown[] = []) {
+    return this.db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
+  }
+  async get(sql: string, params: unknown[] = []) {
+    return this.db.prepare(sql).get(...(params as never[])) as Record<string, unknown> | undefined;
+  }
+  async run(sql: string, params: unknown[] = []) {
+    this.db.prepare(sql).run(...(params as never[]));
+  }
+  async close() {
+    this.db.close();
+  }
+}
+
+class MysqlBackend implements MetaBackend {
+  readonly dialect = "mysql" as const;
+  private pool: mysql.Pool;
+  constructor(dsn: string) {
+    this.pool = mysql.createPool({ uri: dsn, connectionLimit: 4, namedPlaceholders: false });
+    this.ready = this.pool.query(MYSQL_DDL).then(() => undefined);
+  }
+  private ready: Promise<void>;
+  async all(sql: string, params: unknown[] = []) {
+    await this.ready;
+    const [rows] = await this.pool.query(sql, params);
+    return rows as Record<string, unknown>[];
+  }
+  async get(sql: string, params: unknown[] = []) {
+    return (await this.all(sql, params))[0];
+  }
+  async run(sql: string, params: unknown[] = []) {
+    await this.ready;
+    await this.pool.query(sql, params);
+  }
+  async close() {
+    await this.pool.end();
+  }
+}
+
+/* ---------- DDL（两个方言，同一张结构） ---------- */
+
+const SQLITE_DDL = `
+CREATE TABLE IF NOT EXISTS onto_workspace (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
-  type TEXT NOT NULL,                 -- mysql | pg | sqlite（fixture）
-  host TEXT, port INTEGER, db_name TEXT,
-  ro_user TEXT, ro_pass TEXT,         -- 演示期明文；生产须加密（KMS）
-  rw_user TEXT, rw_pass TEXT,
-  options TEXT,                       -- JSON：ssl、超时等方言项
+  seed_from TEXT,
+  layout TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS onto_version (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
+  version INTEGER NOT NULL,
+  yaml TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'publish',   -- publish | rollback
+  revert_of INTEGER,
+  note TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  UNIQUE (workspace_id, version)
+);
+CREATE TABLE IF NOT EXISTS conn_source (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  host TEXT, port INTEGER, db_name TEXT,
+  ro_user TEXT, ro_pass TEXT,
+  rw_user TEXT, rw_pass TEXT,
+  options TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (workspace_id, name)
 );
 CREATE TABLE IF NOT EXISTS adj_decision (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  version INTEGER,                    -- 结论生效的已发布版本，发布时回填
+  workspace_id INTEGER NOT NULL,
+  version INTEGER,
   class_a TEXT NOT NULL, class_b TEXT NOT NULL,
   source_a TEXT NOT NULL, source_b TEXT NOT NULL,
-  llm_advice TEXT,                    -- 模型建议与依据
-  rate REAL,                          -- 裁决时看到的交集率
-  evidence TEXT,                      -- JSON 证据快照：归一化规则、样本量、交集数
-  verdict TEXT NOT NULL,              -- 同一 | 部分重叠 | 阶段 | 仅名称相似 | 跳过
+  llm_advice TEXT,
+  rate REAL,
+  evidence TEXT,
+  verdict TEXT NOT NULL,
   decided_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS adj_overlap (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
   class_a TEXT NOT NULL, class_b TEXT NOT NULL,
-  norm_rule TEXT,                     -- 归一化规则
+  norm_rule TEXT,
   count_a INTEGER NOT NULL, count_b INTEGER NOT NULL, count_hit INTEGER NOT NULL,
   rate REAL NOT NULL,
-  computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS ont_question (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
   version INTEGER,
   question TEXT NOT NULL,
   expected TEXT,
-  status TEXT NOT NULL DEFAULT '未跑'  -- 通过 | 失败 | 未跑
+  status TEXT NOT NULL DEFAULT '未跑'
 );
 CREATE TABLE IF NOT EXISTS ont_query_api (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,          -- 问数 API 名（台账）
-  question TEXT NOT NULL,             -- 原始自然语言
-  query_json TEXT NOT NULL,           -- 编译出的结构化查询
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  workspace_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  question TEXT NOT NULL,
+  query_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (workspace_id, name)
 );
 CREATE TABLE IF NOT EXISTS log_query (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
   version INTEGER,
   session_id TEXT,
   model TEXT,
   question TEXT,
   query_json TEXT,
-  row_count INTEGER,                  -- 当时返回的行数；不是结果集
+  row_count INTEGER,
   error TEXT,
   duration_ms INTEGER,
   ok INTEGER NOT NULL,
@@ -68,22 +152,30 @@ CREATE TABLE IF NOT EXISTS log_query (
 );
 CREATE TABLE IF NOT EXISTS log_action (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
   version INTEGER,
   action TEXT NOT NULL,
   object_type TEXT NOT NULL,
   subject TEXT NOT NULL,
   request_json TEXT,
-  projections TEXT,                   -- JSON：各条投影的成败
+  projections TEXT,
   error TEXT,
   duration_ms INTEGER,
   ok INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS meta_seq (
-  name TEXT PRIMARY KEY,              -- 发号器名（如 appointment.appt_no）
-  value INTEGER NOT NULL              -- 已发出的最大序号
+  workspace_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  value INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, name)
 );
 `;
+
+const MYSQL_DDL = SQLITE_DDL.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, "BIGINT PRIMARY KEY AUTO_INCREMENT")
+  .replace(/PRIMARY KEY \(workspace_id, name\)/g, "PRIMARY KEY (workspace_id, name)")
+  .replace(/datetime\('now'\)/g, "CURRENT_TIMESTAMP")
+  .replace(/REAL/g, "DOUBLE") + ";";
 
 /* ---------- 记录类型 ---------- */
 
@@ -123,21 +215,6 @@ export interface OverlapRec {
   rate: number;
 }
 
-export interface QuestionRec {
-  id: number;
-  version?: number;
-  question: string;
-  expected?: string;
-  status: string;
-}
-
-export interface QueryApiRec {
-  id: number;
-  name: string;
-  question: string;
-  query_json: string;
-}
-
 export interface QueryLogRec {
   version?: number;
   session_id?: string;
@@ -165,32 +242,100 @@ export interface ActionLogRec {
 /* ---------- 存储 ---------- */
 
 export class MetaStore {
-  private db: DatabaseSync;
+  constructor(private backend: MetaBackend) {}
 
-  constructor(path: string) {
-    this.db = new DatabaseSync(path);
-    this.db.exec(DDL);
+  async close() {
+    await this.backend.close();
   }
 
-  close() {
-    this.db.close();
+  /* 工作空间（注册表） */
+
+  async listWorkspaces(): Promise<string[]> {
+    const rows = await this.backend.all(`SELECT name FROM onto_workspace ORDER BY name`);
+    const names = rows.map((r) => r.name as string);
+    return names.includes("default") ? names : ["default", ...names];
+  }
+
+  /** 注册（若不存在）并插入 v1 快照。返回该空间的 id。 */
+  async ensureWorkspace(name: string, seedYaml: string, seedFrom = "template"): Promise<number> {
+    const existing = await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [name]);
+    if (existing) return existing.id as number;
+    await this.backend.run(`INSERT INTO onto_workspace (name, seed_from) VALUES (?, ?)`, [name, seedFrom]);
+    const row = await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [name]);
+    const id = row!.id as number;
+    await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]);
+    return id;
+  }
+
+  /** 空间 id；未注册的先注册。版本行由 latestVersion 播种——元数据写（留痕/连接/问题集）可能先于配置访问碰到新空间。 */
+  private async wsId(ws: string): Promise<number> {
+    const row = await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [ws]);
+    if (row) return row.id as number;
+    await this.backend.run(`INSERT INTO onto_workspace (name, seed_from) VALUES (?, ?)`, [ws, "lazy"]);
+    return (await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [ws]))!.id as number;
+  }
+
+  /* 版本链（YAML 全量快照入库） */
+
+  async latestVersion(ws: string, seedYaml: string): Promise<{ version: number; yaml: string }> {
+    const id = await this.wsId(ws);
+    const row = await this.backend.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? ORDER BY version DESC LIMIT 1`, [id]);
+    if (row) return { version: row.version as number, yaml: row.yaml as string };
+    await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]); // 被元数据写抢注的空间：种子补成 v1
+    return { version: 1, yaml: seedYaml };
+  }
+
+  async insertVersion(ws: string, version: number, yaml: string, origin: "publish" | "rollback", revertOf?: number): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, origin, revert_of) VALUES (?, ?, ?, ?, ?)`, [id, version, yaml, origin, revertOf ?? null]);
+  }
+
+  async listVersions(ws: string): Promise<{ version: number; createdAt: string; origin: string }[]> {
+    const id = await this.wsId(ws);
+    const rows = await this.backend.all(`SELECT version, origin, created_at FROM onto_version WHERE workspace_id = ? ORDER BY version`, [id]);
+    return rows.map((r) => ({ version: r.version as number, origin: String(r.origin), createdAt: String(r.created_at) }));
+  }
+
+  async versionYaml(ws: string, version: number): Promise<string | undefined> {
+    const id = await this.wsId(ws);
+    const row = await this.backend.get(`SELECT yaml FROM onto_version WHERE workspace_id = ? AND version = ?`, [id, version]);
+    return row?.yaml as string | undefined;
+  }
+
+  /* 摆位 */
+
+  async getLayout(ws: string): Promise<Record<string, { x: number; y: number }>> {
+    const id = await this.wsId(ws);
+    const row = await this.backend.get(`SELECT layout FROM onto_workspace WHERE id = ?`, [id]);
+    if (!row?.layout) return {};
+    try {
+      return JSON.parse(String(row.layout));
+    } catch {
+      return {};
+    }
+  }
+
+  async setLayout(ws: string, layout: Record<string, { x: number; y: number }>): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`UPDATE onto_workspace SET layout = ? WHERE id = ?`, [JSON.stringify(layout), id]);
   }
 
   /* 连接 */
-  saveConnection(c: ConnectionRec): void {
-    this.db
-      .prepare(
-        `INSERT INTO conn_source (name, type, host, port, db_name, ro_user, ro_pass, rw_user, rw_pass, options)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(name) DO UPDATE SET type=excluded.type, host=excluded.host, port=excluded.port, db_name=excluded.db_name,
-           ro_user=excluded.ro_user, ro_pass=excluded.ro_pass, rw_user=excluded.rw_user, rw_pass=excluded.rw_pass,
-           options=excluded.options, updated_at=datetime('now')`
-      )
-      .run(c.name, c.type, c.host ?? null, c.port ?? null, c.db_name ?? null, c.ro_user ?? null, c.ro_pass ?? null, c.rw_user ?? null, c.rw_pass ?? null, c.options ? JSON.stringify(c.options) : null);
+
+  async saveConnection(ws: string, c: ConnectionRec): Promise<void> {
+    const id = await this.wsId(ws);
+    const cols = `(workspace_id, name, type, host, port, db_name, ro_user, ro_pass, rw_user, rw_pass, options)`;
+    const vals = [id, c.name, c.type, c.host ?? null, c.port ?? null, c.db_name ?? null, c.ro_user ?? null, c.ro_pass ?? null, c.rw_user ?? null, c.rw_pass ?? null, c.options ? JSON.stringify(c.options) : null];
+    const upsert =
+      this.backend.dialect === "mysql"
+        ? `ON DUPLICATE KEY UPDATE type=VALUES(type), host=VALUES(host), port=VALUES(port), db_name=VALUES(db_name), ro_user=VALUES(ro_user), ro_pass=VALUES(ro_pass), rw_user=VALUES(rw_user), rw_pass=VALUES(rw_pass), options=VALUES(options), updated_at=CURRENT_TIMESTAMP`
+        : `ON CONFLICT(workspace_id, name) DO UPDATE SET type=excluded.type, host=excluded.host, port=excluded.port, db_name=excluded.db_name, ro_user=excluded.ro_user, ro_pass=excluded.ro_pass, rw_user=excluded.rw_user, rw_pass=excluded.rw_pass, options=excluded.options, updated_at=datetime('now')`;
+    await this.backend.run(`INSERT INTO conn_source ${cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ${upsert}`, vals);
   }
 
-  listConnections(): ConnectionRec[] {
-    const rows = this.db.prepare(`SELECT * FROM conn_source ORDER BY name`).all() as Record<string, unknown>[];
+  async listConnections(ws: string): Promise<ConnectionRec[]> {
+    const id = await this.wsId(ws);
+    const rows = await this.backend.all(`SELECT * FROM conn_source WHERE workspace_id = ? ORDER BY name`, [id]);
     return rows.map((r) => ({
       name: r.name as string,
       type: r.type as ConnectionRec["type"],
@@ -201,136 +346,165 @@ export class MetaStore {
       ro_pass: (r.ro_pass ?? undefined) as string | undefined,
       rw_user: (r.rw_user ?? undefined) as string | undefined,
       rw_pass: (r.rw_pass ?? undefined) as string | undefined,
-      options: r.options ? JSON.parse(r.options as string) : undefined,
+      options: r.options ? JSON.parse(String(r.options)) : undefined,
     }));
   }
 
-  deleteConnection(name: string): void {
-    this.db.prepare(`DELETE FROM conn_source WHERE name = ?`).run(name);
+  async deleteConnection(ws: string, name: string): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`DELETE FROM conn_source WHERE workspace_id = ? AND name = ?`, [id, name]);
   }
 
   /* 裁决与交集 */
-  recordDecision(d: DecisionRec): void {
-    this.db
-      .prepare(
-        `INSERT INTO adj_decision (version, class_a, class_b, source_a, source_b, llm_advice, rate, evidence, verdict, decided_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(d.version ?? null, d.class_a, d.class_b, d.source_a, d.source_b, d.llm_advice ?? null, d.rate ?? null, d.evidence ? JSON.stringify(d.evidence) : null, d.verdict, d.decided_by);
+
+  async recordDecision(ws: string, d: DecisionRec): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(
+      `INSERT INTO adj_decision (workspace_id, version, class_a, class_b, source_a, source_b, llm_advice, rate, evidence, verdict, decided_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, d.version ?? null, d.class_a, d.class_b, d.source_a, d.source_b, d.llm_advice ?? null, d.rate ?? null, d.evidence ? JSON.stringify(d.evidence) : null, d.verdict, d.decided_by]
+    );
   }
 
-  listDecisions(): (DecisionRec & { id: number; created_at: string })[] {
-    const rows = this.db.prepare(`SELECT * FROM adj_decision ORDER BY id DESC`).all() as Record<string, unknown>[];
-    return rows.map((r) => ({ ...r, evidence: r.evidence ? JSON.parse(r.evidence as string) : undefined })) as never[];
+  async listDecisions(ws: string): Promise<(DecisionRec & { id: number; created_at: string })[]> {
+    const id = await this.wsId(ws);
+    const rows = await this.backend.all(`SELECT * FROM adj_decision WHERE workspace_id = ? ORDER BY id DESC`, [id]);
+    return rows.map((r) => ({ ...r, evidence: r.evidence ? JSON.parse(String(r.evidence)) : undefined })) as never[];
   }
 
   /** 发布时回填：把还没绑版本的裁决挂上这个版本。 */
-  backfillDecisionVersions(version: number): void {
-    this.db.prepare(`UPDATE adj_decision SET version = ? WHERE version IS NULL`).run(version);
+  async backfillDecisionVersions(ws: string, version: number): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`UPDATE adj_decision SET version = ? WHERE workspace_id = ? AND version IS NULL`, [version, id]);
   }
 
   /** 放弃草稿时：未绑版本的裁决标成 -1（已放弃），不再随下一次发布回填。 */
-  abandonPendingDecisions(): void {
-    this.db.prepare(`UPDATE adj_decision SET version = -1 WHERE version IS NULL`).run();
-  }
-
-  /** 发号器：进程重启不复位（动作 generate 的 sequence 走这里）。原子自增并返回新值。 */
-  nextSeq(name: string, start = 1): number {
-    const row = this.db
-      .prepare(
-        `INSERT INTO meta_seq (name, value) VALUES (?, ?)
-         ON CONFLICT(name) DO UPDATE SET value = MAX(value + 1, excluded.value)
-         RETURNING value`
-      )
-      .get(name, start) as { value: number };
-    return row.value;
+  async abandonPendingDecisions(ws: string): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`UPDATE adj_decision SET version = -1 WHERE workspace_id = ? AND version IS NULL`, [id]);
   }
 
   /** 交集按对更新（同一对重复计算只留最新计数）。 */
-  recordOverlap(o: OverlapRec): void {
-    this.db.prepare(`DELETE FROM adj_overlap WHERE class_a = ? AND class_b = ?`).run(o.class_a, o.class_b);
-    this.db
-      .prepare(`INSERT INTO adj_overlap (class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate);
+  async recordOverlap(ws: string, o: OverlapRec): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`DELETE FROM adj_overlap WHERE workspace_id = ? AND class_a = ? AND class_b = ?`, [id, o.class_a, o.class_b]);
+    await this.backend.run(
+      `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate]
+    );
   }
 
-  listOverlaps(): (OverlapRec & { id: number; created_at: string })[] {
-    return this.db.prepare(`SELECT * FROM adj_overlap ORDER BY id DESC`).all() as never[];
+  async listOverlaps(ws: string): Promise<(OverlapRec & { id: number; created_at: string })[]> {
+    const id = await this.wsId(ws);
+    return (await this.backend.all(`SELECT * FROM adj_overlap WHERE workspace_id = ? ORDER BY id DESC`, [id])) as never[];
   }
 
   /* 验收问题集 */
-  listQuestions(): QuestionRec[] {
-    return this.db.prepare(`SELECT * FROM ont_question ORDER BY id`).all() as never[];
+
+  async listQuestions(ws: string): Promise<{ id: number; question: string; expected?: string; status: string; version?: number }[]> {
+    const id = await this.wsId(ws);
+    return (await this.backend.all(`SELECT * FROM ont_question WHERE workspace_id = ? ORDER BY id`, [id])) as never[];
   }
-  addQuestion(question: string, expected?: string): void {
-    this.db.prepare(`INSERT INTO ont_question (question, expected) VALUES (?, ?)`).run(question, expected ?? null);
+
+  async addQuestion(ws: string, question: string, expected?: string): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`INSERT INTO ont_question (workspace_id, question, expected) VALUES (?, ?, ?)`, [id, question, expected ?? null]);
   }
-  removeQuestion(id: number): void {
-    this.db.prepare(`DELETE FROM ont_question WHERE id = ?`).run(id);
+
+  async removeQuestion(ws: string, qid: number): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`DELETE FROM ont_question WHERE workspace_id = ? AND id = ?`, [id, qid]);
   }
-  setQuestionStatus(id: number, status: string, version?: number): void {
-    this.db.prepare(`UPDATE ont_question SET status = ?, version = COALESCE(?, version) WHERE id = ?`).run(status, version ?? null, id);
+
+  async setQuestionStatus(ws: string, qid: number, status: string, version?: number): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`UPDATE ont_question SET status = ?, version = COALESCE(?, version) WHERE workspace_id = ? AND id = ?`, [status, version ?? null, id, qid]);
   }
 
   /* 问数 API 台账 */
-  saveQueryApi(name: string, question: string, queryJson: string): void {
-    this.db
-      .prepare(`INSERT INTO ont_query_api (name, question, query_json) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET question=excluded.question, query_json=excluded.query_json`)
-      .run(name, question, queryJson);
+
+  async saveQueryApi(ws: string, name: string, question: string, queryJson: string): Promise<void> {
+    const id = await this.wsId(ws);
+    const upsert =
+      this.backend.dialect === "mysql"
+        ? `ON DUPLICATE KEY UPDATE question=VALUES(question), query_json=VALUES(query_json)`
+        : `ON CONFLICT(workspace_id, name) DO UPDATE SET question=excluded.question, query_json=excluded.query_json`;
+    await this.backend.run(`INSERT INTO ont_query_api (workspace_id, name, question, query_json) VALUES (?, ?, ?, ?) ${upsert}`, [id, name, question, queryJson]);
   }
-  listQueryApis(): QueryApiRec[] {
-    return this.db.prepare(`SELECT * FROM ont_query_api ORDER BY id`).all() as never[];
+
+  async listQueryApis(ws: string): Promise<{ id: number; name: string; question: string; query_json: string; created_at: string }[]> {
+    const id = await this.wsId(ws);
+    return (await this.backend.all(`SELECT * FROM ont_query_api WHERE workspace_id = ? ORDER BY id`, [id])) as never[];
   }
-  deleteQueryApi(id: number): void {
-    this.db.prepare(`DELETE FROM ont_query_api WHERE id = ?`).run(id);
+
+  async deleteQueryApi(ws: string, qid: number): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`DELETE FROM ont_query_api WHERE workspace_id = ? AND id = ?`, [id, qid]);
   }
 
   /* 日志（不存结果集） */
-  logQuery(l: QueryLogRec): void {
-    this.db
-      .prepare(`INSERT INTO log_query (version, session_id, model, question, query_json, row_count, error, duration_ms, ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(l.version ?? null, l.session_id ?? null, l.model ?? null, l.question ?? null, l.query_json ?? null, l.row_count ?? null, l.error ?? null, l.duration_ms ?? null, l.ok ? 1 : 0);
+
+  async logQuery(ws: string, l: QueryLogRec): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(
+      `INSERT INTO log_query (workspace_id, version, session_id, model, question, query_json, row_count, error, duration_ms, ok)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, l.version ?? null, l.session_id ?? null, l.model ?? null, l.question ?? null, l.query_json ?? null, l.row_count ?? null, l.error ?? null, l.duration_ms ?? null, l.ok ? 1 : 0]
+    );
   }
-  logAction(l: ActionLogRec): void {
-    this.db
-      .prepare(`INSERT INTO log_action (version, action, object_type, subject, request_json, projections, error, duration_ms, ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(l.version ?? null, l.action, l.object_type, l.subject, l.request_json ?? null, l.projections ? JSON.stringify(l.projections) : null, l.error ?? null, l.duration_ms ?? null, l.ok ? 1 : 0);
+
+  async logAction(ws: string, l: ActionLogRec): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(
+      `INSERT INTO log_action (workspace_id, version, action, object_type, subject, request_json, projections, error, duration_ms, ok)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, l.version ?? null, l.action, l.object_type, l.subject, l.request_json ?? null, l.projections ? JSON.stringify(l.projections) : null, l.error ?? null, l.duration_ms ?? null, l.ok ? 1 : 0]
+    );
   }
-  listQueryLogs(limit = 50): Record<string, unknown>[] {
-    return this.db.prepare(`SELECT * FROM log_query ORDER BY id DESC LIMIT ?`).all(limit) as never[];
+
+  async listQueryLogs(ws: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const id = await this.wsId(ws);
+    return this.backend.all(`SELECT * FROM log_query WHERE workspace_id = ? ORDER BY id DESC LIMIT ?`, [id, limit]);
   }
-  listActionLogs(limit = 50): Record<string, unknown>[] {
-    return this.db.prepare(`SELECT * FROM log_action ORDER BY id DESC LIMIT ?`).all(limit) as never[];
+
+  async listActionLogs(ws: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const id = await this.wsId(ws);
+    return this.backend.all(`SELECT * FROM log_action WHERE workspace_id = ? ORDER BY id DESC LIMIT ?`, [id, limit]);
+  }
+
+  /** 发号器：进程重启不复位（动作 generate 的 sequence 走这里）。原子自增并返回新值。 */
+  async nextSeq(ws: string, name: string, start = 1): Promise<number> {
+    const id = await this.wsId(ws);
+    const upsert =
+      this.backend.dialect === "mysql"
+        ? `ON DUPLICATE KEY UPDATE value = GREATEST(value + 1, VALUES(value))`
+        : `ON CONFLICT(workspace_id, name) DO UPDATE SET value = MAX(value + 1, excluded.value)`;
+    await this.backend.run(`INSERT INTO meta_seq (workspace_id, name, value) VALUES (?, ?, ?) ${upsert}`, [id, name, start]);
+    const row = await this.backend.get(`SELECT value FROM meta_seq WHERE workspace_id = ? AND name = ?`, [id, name]);
+    return row!.value as number;
   }
 }
 
-/* ---------- 单例（globalThis，Next dev 多路由包共享；按工作空间键控） ---------- */
+/* ---------- 单例（globalThis；一个共享后端，不按空间分实例） ---------- */
 
-const g = globalThis as unknown as { __ontosMeta?: Map<string, MetaStore> };
-const stores: Map<string, MetaStore> = g.__ontosMeta ?? (g.__ontosMeta = new Map());
+const g = globalThis as unknown as { __ontosMeta?: MetaStore };
 
-/** 每个工作空间一个元库文件（workspaces/<ws>/ontos-meta.db）。 */
-export function metaStore(ws = "default"): MetaStore {
-  let s = stores.get(ws);
-  if (!s) {
-    s = new MetaStore(join(ensureWorkspace(ws), "ontos-meta.db")); // ensure 建目录，元库才有处可放
-    stores.set(ws, s);
+/** 共享元库入口。ONTOS_META_DSN=mysql://… 走 MySQL，否则离线单文件 SQLite。 */
+export function metaStore(): MetaStore {
+  if (!g.__ontosMeta) {
+    const dsn = process.env.ONTOS_META_DSN;
+    g.__ontosMeta = new MetaStore(dsn ? new MysqlBackend(dsn) : new SqliteBackend(join(process.cwd(), "lib/config/ontos-meta.db")));
   }
-  return s;
+  return g.__ontosMeta;
 }
 
-/** 测试用：独立临时库。 */
+/** 测试用：独立临时库（SQLite 后端）。 */
 export function freshMetaStore(path: string): MetaStore {
-  return new MetaStore(path);
+  return new MetaStore(new SqliteBackend(path));
 }
 
-/** 测试用：关掉并清掉单例。单例的文件句柄绑死创建时的目录，换目录前必须清；不传 ws 清全部。 */
-export function resetMetaStore(ws?: string): void {
-  if (ws) {
-    stores.get(ws)?.close();
-    stores.delete(ws);
-  } else {
-    for (const s of stores.values()) s.close();
-    stores.clear();
-  }
+/** 测试用：关掉并清掉单例。 */
+export function resetMetaStore(): void {
+  void g.__ontosMeta?.close();
+  g.__ontosMeta = undefined;
 }

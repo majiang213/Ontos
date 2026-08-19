@@ -68,17 +68,17 @@ export async function POST(req: Request) {
     if (!name) return rpcErr(id, -32602, "tools/call 缺 params.name");
     const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
     const ws = wsOf(req);
-    const config = getPublished(ws).config;
-    const driver = getDriverRegistry(ws);
+    const config = (await getPublished(ws)).config;
+    const driver = await getDriverRegistry(ws);
 
     if (name === "query") {
       const query = queryRequestSchema.parse(args.query);
       try {
         const { rows, path } = await runQuery(config, driver, query);
-        safeLog(() => metaStore(ws).logQuery({ version: getPublished(ws).version, query_json: JSON.stringify(query), row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
+        safeLog(async () => metaStore().logQuery(ws, { version: (await getPublished(ws)).version, query_json: JSON.stringify(query), row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
         return rpcOk(id, toolResult({ rows, path }));
       } catch (e) {
-        safeLog(() => metaStore(ws).logQuery({ version: getPublished(ws).version, query_json: JSON.stringify(query), ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
+        safeLog(async () => metaStore().logQuery(ws, { version: (await getPublished(ws)).version, query_json: JSON.stringify(query), ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
         throw e;
       }
     }
@@ -88,8 +88,8 @@ export async function POST(req: Request) {
       const action = actionRequestSchema.parse(args);
       // 留痕的公共部分：成功/失败两支只补差异字段
       const log = (outcome: { ok: boolean; error?: string; projections?: unknown }) =>
-        safeLog(() => metaStore(ws).logAction({
-          version: getPublished(ws).version,
+        safeLog(async () => metaStore().logAction(ws, {
+          version: (await getPublished(ws)).version,
           action: action.action,
           object_type: action.object,
           subject: String(action.identity),
@@ -98,7 +98,7 @@ export async function POST(req: Request) {
           duration_ms: Date.now() - started,
         }));
       try {
-        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore(ws).nextSeq(k, s) });
+        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore().nextSeq(ws, k, s) });
         log({ ok: result.ok, error: result.error, projections: result.projections });
         // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
         return rpcOk(id, toolResult(result, !result.ok));

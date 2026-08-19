@@ -58,11 +58,11 @@ describe("交集率", () => {
     expect(result.count_hit).toBe(40);
     expect(result.rate).toBeCloseTo(40 / 121, 2);
     // 「只落计数」读回验证：adj_overlap 有且仅有计数列，没有值集合
-    const rows = meta.listOverlaps();
+    const rows = await meta.listOverlaps("default");
     expect(rows.length).toBe(1);
     expect(rows[0]).toMatchObject({ class_a: "purchase_item", class_b: "device_view", count_a: 121, count_b: 100, count_hit: 40 });
     expect(Object.keys(rows[0]).every((k) => !/value|set|ids/i.test(k))).toBe(true);
-    meta.close();
+    await meta.close();
   });
 });
 

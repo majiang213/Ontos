@@ -58,7 +58,7 @@ describe("错误分层：400 / 422 / 500", () => {
     expect((await post("query", JSON.stringify({ object: "ghost" }))).status).toBe(422);
     // 注入一个必炸的驱动顶替 purchase_sys：引擎故障落 500，不是 422
     const { getDriverRegistry } = await import("../lib/engine/load");
-    getDriverRegistry().register("purchase_sys", {
+    (await getDriverRegistry()).register("purchase_sys", {
       select: async () => { throw new Error("库炸了"); },
       insert: async () => {},
       update: async () => 0,
@@ -84,7 +84,7 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   it("「同一」合并两个跨源类，留痕带证据；草稿可直接发布", async () => {
     const s = await import("../lib/engine/configStore");
     // 造一对跨源候选：采购视角的 po_a × 设备视角的 po_b（不同名识别字段）
-    s.applyOp({ op: "import_objects", objects: {
+    await s.applyOp({ op: "import_objects", objects: {
       po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
       po_b: { kind: "thing", identity: "serial_no", properties: { serial_no: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { serial_no: "serial_no" } } } },
     } });
@@ -93,23 +93,23 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
       evidence: { norm_rule: "serial", count_a: 121, count_b: 100, count_hit: 40, rate: 0.33 },
     }));
     expect(r.status).toBe(200);
-    const d = s.getDraft().draft;
+    const d = (await s.getDraft()).draft;
     expect(d.object_types.po_b).toBeUndefined();
     expect(d.object_types.po_a.sources!.sb.fields.sn).toBe("serial_no"); // 识别字段键改写
     // 留痕落库：结论 + 证据快照 + 未绑版本（发布时回填）
     const meta = (await import("../lib/meta/store")).metaStore();
-    const dec = meta.listDecisions()[0];
+    const dec = (await meta.listDecisions("default"))[0];
     expect(dec.verdict).toBe("同一");
     expect(dec.evidence?.count_hit).toBe(40);
     expect(dec.version).toBeNull();
     // 发布后回填版本
-    s.publishDraft();
-    expect(meta.listDecisions()[0].version).toBe(2);
+    await s.publishDraft();
+    expect((await meta.listDecisions("default"))[0].version).toBe(2);
   });
 
   it("裁决被校验闸回退时不留幻影记录", async () => {
     const s = await import("../lib/engine/configStore");
-    s.applyOp({ op: "import_objects", objects: {
+    await s.applyOp({ op: "import_objects", objects: {
       po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, status: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", status: "sn" } } } },
       po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no" } } } },
     } });
@@ -117,18 +117,18 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
     const r = await post("decisions", JSON.stringify({ class_a: "po_a", class_b: "po_b", verdict: "阶段", stage_names: { from: "在途", to: "在役" } }));
     expect(r.status).toBe(422);
     const meta = (await import("../lib/meta/store")).metaStore();
-    expect(meta.listDecisions().length).toBe(0);
-    expect(s.getDraft().draft.object_types.po_b).toBeDefined(); // 草稿回退，类还在
+    expect((await meta.listDecisions("default")).length).toBe(0);
+    expect((await s.getDraft()).draft.object_types.po_b).toBeDefined(); // 草稿回退，类还在
   });
 
   it("「跳过」不动草稿但留痕", async () => {
     const s = await import("../lib/engine/configStore");
-    const before = JSON.stringify(s.getDraft().draft);
+    const before = JSON.stringify((await s.getDraft()).draft);
     const r = await post("decisions", JSON.stringify({ class_a: "equipment", class_b: "person", verdict: "跳过" }));
     expect(r.status).toBe(200);
-    expect(JSON.stringify(s.getDraft().draft)).toBe(before);
-    expect(s.getDraft().dirty).toBe(false);
+    expect(JSON.stringify((await s.getDraft()).draft)).toBe(before);
+    expect((await s.getDraft()).dirty).toBe(false);
     const meta = (await import("../lib/meta/store")).metaStore();
-    expect(meta.listDecisions()[0].verdict).toBe("跳过");
+    expect((await meta.listDecisions("default"))[0].verdict).toBe("跳过");
   });
 });

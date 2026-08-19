@@ -25,14 +25,14 @@ describe("版本历史与回滚", () => {
   it("回滚是 revert 语义：v1 内容发成 v3，历史链不断", async () => {
     const s = await import("../lib/engine/configStore");
     s.resetStore();
-    s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
-    s.publishDraft(); // v2 含 vendor
-    expect(s.getPublished().version).toBe(2);
-    const { version } = s.rollbackTo(1); // 回到 v1 内容
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
+    await s.publishDraft(); // v2 含 vendor
+    expect((await s.getPublished()).version).toBe(2);
+    const { version } = await s.rollbackTo(1); // 回到 v1 内容
     expect(version).toBe(3); // 不是回到 v1，是新发一版
-    expect(s.getPublished().config.object_types.vendor).toBeUndefined();
-    expect(s.listVersions().map((v) => v.version)).toEqual([1, 2, 3]);
-    expect(s.getDraft().dirty).toBe(false); // 回滚后草稿与已发布一致
+    expect((await s.getPublished()).config.object_types.vendor).toBeUndefined();
+    expect((await s.listVersions()).map((v) => v.version)).toEqual([1, 2, 3]);
+    expect((await s.getDraft()).dirty).toBe(false); // 回滚后草稿与已发布一致
   });
 });
 
@@ -61,8 +61,8 @@ describe("验收问题集跑批（真路由）", () => {
   it("期望行数对上记通过、对不上记失败；失败带明细，版本落上", async () => {
     const meta = (await import("../lib/meta/store")).metaStore();
     const { POST } = await import("../app/api/questions/route");
-    meta.addQuestion("在役设备及其所属部门", "97"); // 种子恰有 97 台在役
-    meta.addQuestion("还有多少在途设备", "1"); // 故意答错（实际 81）
+    await meta.addQuestion("default", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
+    await meta.addQuestion("default", "还有多少在途设备", "1"); // 故意答错（实际 81）
     const res = await POST(new Request("http://x/api/questions?run=1", { method: "POST" }) as never);
     const data = await res.json();
     const pass = data.results.find((r: { question: string }) => r.question === "在役设备及其所属部门");
@@ -71,7 +71,7 @@ describe("验收问题集跑批（真路由）", () => {
     expect(fail.status).toBe("失败");
     expect(fail.detail).toContain("期望 1 行");
     // 状态与版本落库
-    const stored = meta.listQuestions();
+    const stored = await meta.listQuestions("default");
     expect(stored.find((q) => q.question === "在役设备及其所属部门")?.status).toBe("通过");
     expect(stored.every((q) => q.version === 1)).toBe(true);
   });
