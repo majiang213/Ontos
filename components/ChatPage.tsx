@@ -228,8 +228,9 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* 主区：消息流 + 底部输入卡 */}
+      {/* 主区：消息流 + 底部输入卡（内容居中成阅读列，不通栏） */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, padding: "78px 24px 12px" }}>
+        <div style={{ width: "100%", maxWidth: 820, margin: "0 auto", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div ref={listRef} style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
           {msgs.length === 0 && (
             /* 空态 = 引导：一句话说明 + 四个示例问题卡（点了直接问） */
@@ -240,14 +241,25 @@ export default function ChatPage() {
                 {SUGGESTED.map((s) => (
                   <button
                     key={s}
-                    className="bezel"
-                    style={{ border: "none", cursor: "pointer", textAlign: "left", padding: 0, boxShadow: "0 0 0 1px var(--hairline-strong), var(--shadow-soft)" }}
+                    style={{
+                      border: "none",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      background: "var(--panel)",
+                      boxShadow: "0 0 0 1px var(--hairline-strong)",
+                      fontSize: 13,
+                      color: "var(--ink-2)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
                     onClick={() => !busy && ask(s)}
                   >
-                    <div className="bezel-core" style={{ padding: "12px 14px", fontSize: 13, color: "var(--ink-2)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      {s}
-                      <ArrowUpRight size={14} weight="light" />
-                    </div>
+                    {s}
+                    <ArrowUpRight size={14} weight="light" />
                   </button>
                 ))}
               </div>
@@ -324,6 +336,7 @@ export default function ChatPage() {
             </div>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );
