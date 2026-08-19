@@ -308,9 +308,8 @@ input { font-family: inherit; outline: none; }
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 960px;
   margin: 0 auto;
-  padding: 84px 20px 16px;
+  padding: 84px 32px 16px;
 }
 .msg-user {
   align-self: flex-end;
@@ -322,7 +321,7 @@ input { font-family: inherit; outline: none; }
   color: var(--ink);
   animation: rise-in 420ms var(--ease-out) both;
 }
-.msg-agent { align-self: flex-start; max-width: 92%; animation: rise-in 480ms var(--ease-out) both; }
+.msg-agent { align-self: flex-start; max-width: 100%; animation: rise-in 480ms var(--ease-out) both; }
 .answer-head { font-size: 14px; line-height: 1.6; margin-bottom: 8px; }
 .answer-table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .answer-table th {

@@ -254,7 +254,7 @@ export default function ChatPage() {
             m.role === "user" ? (
               <div key={`${curId}-${i}`} className="msg-user">{m.text}</div>
             ) : (
-              <div key={`${curId}-${i}`} className="msg-agent">
+              <div key={`${curId}-${i}`} className="msg-agent" style={m.answer || m.actionResult ? { width: "100%" } : undefined}>
                 {m.text && (
                   <div className="bezel"><div className="bezel-core" style={{ padding: "10px 14px", fontSize: 14 }}>{m.text}</div></div>
                 )}
