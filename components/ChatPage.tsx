@@ -45,6 +45,14 @@ export default function ChatPage() {
   const listRef = useRef<HTMLDivElement>(null);
   const curIdRef = useRef<string | null>(null); // 闭包外读当前会话：删光再开时动作与复查不落两个会话
 
+  // 诊断信标（临时）：上报一次渲染环境，排查显示差异
+  useEffect(() => {
+    try {
+      navigator.sendBeacon("/api/debug", JSON.stringify({ dpr: window.devicePixelRatio, w: window.innerWidth, h: window.innerHeight, ua: navigator.userAgent }));
+    } catch {
+      // 不挡页面
+    }
+  }, []);
   // 会话从 localStorage 读回（刷新不丢）
   useEffect(() => {
     try {
@@ -380,7 +388,7 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
           {a.question && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{a.question}</div>}
         </div>
         {cols.length > 0 && (
-          <div style={{ maxHeight: 320, overflow: "auto", borderRadius: 8, border: "1px solid var(--hairline-strong)" }}>
+          <div style={{ maxHeight: 320, overflow: "auto", borderRadius: 8, border: "2px solid var(--hairline-strong)" }}>
             <table className="answer-table" style={{ width: "100%" }}>
               <thead style={{ position: "sticky", top: 0, background: "var(--panel)" }}>
                 <tr>{cols.concat(expandCols).map((c) => <th key={c}>{c}</th>)}</tr>
