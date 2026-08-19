@@ -94,23 +94,26 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
       <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "10px 0 4px" }}>是同一批现实对象吗？选一个结论：</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {options.map((o) => (
-          <div key={o.v} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+          <div key={o.v} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12 }}>
             <button
               className="chip"
-              style={{ minWidth: 76, textAlign: "center" }}
+              style={{ minWidth: 76, textAlign: "center", flexShrink: 0 }}
               disabled={busy || (o.v === "阶段" && (!stage.from || !stage.to))}
               onClick={() => decide(o.v)}
             >
               {o.v}
             </button>
-            <span style={{ color: "var(--ink-3)" }}>{o.hint}</span>
-            {o.v === "阶段" && (
-              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                <input placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 110, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
-                <span style={{ color: "var(--ink-3)" }}>→</span>
-                <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 110, fontSize: 12, padding: "3px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
-              </span>
-            )}
+            {/* 说明拿满剩余宽度，换行不受挤；阶段的两个输入框落到说明下一行 */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5, paddingTop: 3 }}>
+              <span style={{ color: "var(--ink-3)" }}>{o.hint}</span>
+              {o.v === "阶段" && (
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                  <input placeholder="前阶段，如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 120, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                  <span style={{ color: "var(--ink-3)" }}>→</span>
+                  <input placeholder="后阶段，如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 120, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }} />
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>

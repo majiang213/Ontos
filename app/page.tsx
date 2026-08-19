@@ -1,8 +1,9 @@
 // Ontos —— 两个页面，不是两个会话：构建 = 纯画布页；对话 = 纯对话页。
-// 顶栏左侧是工作空间切换器：空间 = 一套独立配置与历史（lib/config/workspaces/<name>/）。
+// 左上角是工作空间切换器：空间 = 共享元库里按 workspace_id 隔开的一整套配置与历史。
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CaretDown, Check, Plus } from "@phosphor-icons/react";
 import CanvasPage from "@/components/CanvasPage";
 import ChatPage from "@/components/ChatPage";
 import { setWs } from "@/components/wsClient";
@@ -44,63 +45,90 @@ export default function Home() {
   );
 }
 
-/** 空间切换器：下拉选空间；＋ 展开小表单新建（从种子模板起步）。 */
+/** 空间切换器：触发器 + 下拉面板。面板里列空间（当前打勾）、底部「新建工作空间」行内展开输入。 */
 function WsSwitcher({ ws, onChange }: { ws: string; onChange: (w: string) => void }) {
   const [list, setList] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    const r = await fetch("/api/workspaces");
-    const data = await r.json();
-    setList(data.workspaces ?? []);
-  }, []);
   useEffect(() => {
-    void load();
-  }, [load]);
+    void (async () => {
+      const r = await fetch("/api/workspaces");
+      const data = await r.json();
+      setList(data.workspaces ?? []);
+    })();
+  }, []);
+  const close = () => {
+    setOpen(false);
+    setCreating(false);
+    setName("");
+    setError(null);
+  };
+  const create = async () => {
+    if (!name.trim()) return;
+    const r = await fetch("/api/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }) });
+    const data = await r.json();
+    if (!r.ok) {
+      setError(data.error ?? "建不了");
+      return;
+    }
+    const created = name.trim();
+    setList(data.workspaces ?? []);
+    close();
+    onChange(created);
+  };
   return (
-    <span style={{ display: "inline-flex", gap: 4, alignItems: "center", fontSize: 12 }}>
-      <select
-        value={ws}
-        onChange={(e) => onChange(e.target.value)}
-        title="工作空间"
-        style={{ fontSize: 12, padding: "3px 8px", borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline-strong)", background: "var(--panel)", color: "var(--ink-2)" }}
-      >
-        {list.map((w) => (
-          <option key={w} value={w}>{w}</option>
-        ))}
-      </select>
-      {creating ? (
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!name.trim()) return;
-            const r = await fetch("/api/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }) });
-            const data = await r.json();
-            if (!r.ok) {
-              setError(data.error ?? "建不了");
-              return;
-            }
-            setList(data.workspaces ?? []);
-            setCreating(false);
-            setError(null);
-            onChange(name.trim());
-            setName("");
-          }}
-          style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-        >
-          <input
-            autoFocus
-            placeholder="空间名"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => !name.trim() && setCreating(false)}
-            style={{ width: 90, fontSize: 12, padding: "3px 8px", borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline-strong)", background: "var(--panel)" }}
-          />
-          {error && <span style={{ fontSize: 11, color: "var(--danger)" }}>{error}</span>}
-        </form>
-      ) : (
-        <button className="chip" style={{ padding: "2px 8px" }} title="新建工作空间" onClick={() => setCreating(true)}>＋</button>
+    <span style={{ position: "relative" }}>
+      <button className="ws-trigger" title="工作空间" onClick={() => (open ? close() : setOpen(true))}>
+        {ws}
+        <CaretDown size={12} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform var(--t-fast)" }} />
+      </button>
+      {open && (
+        <>
+          {/* 透明幕布：点面板外任意处收口 */}
+          <div style={{ position: "fixed", inset: 0, zIndex: 39 }} onClick={close} />
+          <div className="ws-menu">
+            {list.map((w) => (
+              <button
+                key={w}
+                className="ws-row"
+                onClick={() => {
+                  onChange(w);
+                  close();
+                }}
+              >
+                <span style={{ flex: 1 }}>{w}</span>
+                {w === ws && <Check size={12} style={{ color: "var(--accent)" }} />}
+              </button>
+            ))}
+            <div style={{ height: 1, background: "var(--hairline)", margin: "3px 4px" }} />
+            {creating ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void create();
+                }}
+                style={{ padding: "2px 4px" }}
+              >
+                <input
+                  autoFocus
+                  placeholder="空间名"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && close()}
+                  style={{ width: "100%", fontSize: 12, padding: "5px 8px", borderRadius: 8, border: "none", boxShadow: "inset 0 0 0 1px var(--hairline-strong)", background: "var(--panel-2)" }}
+                />
+                {error && <div style={{ fontSize: 11, color: "var(--danger)", padding: "3px 4px 1px" }}>{error}</div>}
+              </form>
+            ) : (
+              <button className="ws-row" onClick={() => setCreating(true)}>
+                <Plus size={12} />
+                新建工作空间
+              </button>
+            )}
+          </div>
+        </>
       )}
     </span>
   );
