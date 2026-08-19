@@ -78,7 +78,6 @@ export default function OntologyCanvas(props: {
   onSelectLink?: (name: string) => void;
   onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
-  onToggleMaximize?: () => void;
 }) {
   return (
     <ReactFlowProvider>
@@ -96,7 +95,6 @@ function Flow({
   onSelectLink,
   onConnectRequest,
   onLayoutChange,
-  onToggleMaximize,
 }: {
   objects: CanvasObject[];
   links: CanvasLink[];
@@ -106,7 +104,6 @@ function Flow({
   onSelectLink?: (name: string) => void;
   onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
-  onToggleMaximize?: () => void;
 }) {
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = layoutObjects(objects, links);
@@ -205,7 +202,6 @@ function Flow({
       <Background gap={20} color="rgba(32,29,24,0.06)" />
       <Controls showInteractive={false} />
       <Panel position="top-right" style={{ display: "flex", gap: 8 }}>
-        {onToggleMaximize && <button className="btn" onClick={onToggleMaximize}>最大化</button>}
         <button className="btn" onClick={tidy}>整理布局</button>
       </Panel>
     </ReactFlow>

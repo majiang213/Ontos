@@ -189,15 +189,15 @@ export function AddProperty({ onAdd }: { onAdd: (name: string, type: (typeof PRO
         e.preventDefault();
         if (name.trim() && (await onAdd(name.trim(), type))) setName("");
       }}
-      style={{ display: "flex", gap: 6, marginTop: 6 }}
+      style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}
     >
-      <input className="text-in" style={{ flex: 1, fontSize: 12, padding: "6px 10px" }} placeholder="新字段名" value={name} onChange={(e) => setName(e.target.value)} />
-      <select value={type} onChange={(e) => setType(e.target.value as (typeof PROP_TYPES)[number])} style={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" }}>
+      <input className="ctl" style={{ flex: 1, minWidth: 0 }} placeholder="新字段名" value={name} onChange={(e) => setName(e.target.value)} />
+      <select className="ctl" value={type} onChange={(e) => setType(e.target.value as (typeof PROP_TYPES)[number])}>
         {PROP_TYPES.map((t) => (
           <option key={t} value={t}>{t}</option>
         ))}
       </select>
-      <button type="submit" className="btn" style={{ fontSize: 12, padding: "6px 12px" }}>加字段</button>
+      <button type="submit" className="btn" style={{ fontSize: 12, padding: "0 14px", height: 30, flexShrink: 0, whiteSpace: "nowrap" }}>加字段</button>
     </form>
   );
 }

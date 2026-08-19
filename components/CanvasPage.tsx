@@ -42,7 +42,6 @@ export default function CanvasPage() {
   const [generating, setGenerating] = useState(false);
   const [linkDraft, setLinkDraft] = useState<{ from: string; to: string } | null>(null); // 拖线落地后等待取名的半成品
   const [selectedLink, setSelectedLink] = useState<string | null>(null); // 点中的边
-  const [maximized, setMaximized] = useState(false); // 画布最大化：藏起全部浮卡，Esc 退出
   const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -131,12 +130,11 @@ export default function CanvasPage() {
     }
   };
 
-  // Esc 关一切浮卡；最大化时先退出最大化。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉
+  // Esc 关一切浮卡。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
-      if (maximized) setMaximized(false);
       setLinkDraft(null);
       setSelectedLink(null);
       setSelected(null);
@@ -149,7 +147,7 @@ export default function CanvasPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [maximized]);
+  }, []);
 
   /** 左上四张卡互斥：开一个关其余。 */
   const openTl = (which: "versions" | "create" | "connect" | "questions") => {
@@ -260,11 +258,10 @@ export default function CanvasPage() {
         }}
         onConnectRequest={(from, to) => setLinkDraft({ from, to })}
         onLayoutChange={saveLayout}
-        onToggleMaximize={() => setMaximized((v) => !v)}
       />
 
-      {/* 左上：发布状态 + 入口（最大化时藏起） */}
-      {!maximized && (
+      {/* 左上：发布状态 + 入口 */}
+      {(
         <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", maxWidth: "calc(100vw - 32px)" }}>
           <button
             className="eyebrow"
@@ -322,7 +319,7 @@ export default function CanvasPage() {
       )}
 
       {/* 版本历史卡（点版本号展开；回滚 = 旧内容作为新版本发布） */}
-      {!maximized && versions && (
+      {versions && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14 }}>
@@ -369,10 +366,10 @@ export default function CanvasPage() {
       )}
 
       {/* 验收问题集卡 */}
-      {!maximized && questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
+      {questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
 
       {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
-      {!maximized && panelOpen && (
+      {panelOpen && (
         <div className="float-card float-bc" style={{ width: 760, maxHeight: "78%" }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "72vh" }}>
@@ -398,8 +395,8 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底中：发布条（有未发布改动时；裁决面板打开时让位；最大化时藏起） */}
-      {ont?.dirty && !panelOpen && !maximized && (
+      {/* 底中：发布条（有未发布改动时；裁决面板打开时让位） */}
+      {ont?.dirty && !panelOpen && (
         <div className="float-card float-bc">
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 8, display: "flex", gap: 8, alignItems: "center" }}>
@@ -415,17 +412,10 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 左下：表结构抽屉开关（常驻，不被发布条挤掉；最大化时藏起） */}
-      {!maximized && (
+      {/* 左下：表结构抽屉开关（常驻，不被发布条挤掉） */}
+      {(
         <div className="float-card" style={{ bottom: 18, left: 16 }}>
           <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
-        </div>
-      )}
-
-      {/* 最大化时的出口（Esc 同效） */}
-      {maximized && (
-        <div className="float-card" style={{ top: 16, right: 16 }}>
-          <button className="btn" onClick={() => setMaximized(false)}>退出最大化（Esc）</button>
         </div>
       )}
 
@@ -437,7 +427,7 @@ export default function CanvasPage() {
       )}
 
       {/* 连接数据源卡（左上） */}
-      {!maximized && connecting && (
+      {connecting && (
         <div className="float-card float-tl" style={{ top: 120, width: 320 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14 }}>
@@ -462,7 +452,7 @@ export default function CanvasPage() {
       )}
 
       {/* 新建对象卡（左上） */}
-      {!maximized && creating && (
+      {creating && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 14 }}>
@@ -484,7 +474,7 @@ export default function CanvasPage() {
       )}
 
       {/* 右侧：连线表单卡（从节点拖线落地后弹出） */}
-      {!maximized && linkDraft && (
+      {linkDraft && (
         <div className="float-card float-tr" style={{ width: 340 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16 }}>
@@ -515,7 +505,7 @@ export default function CanvasPage() {
       )}
 
       {/* 右侧：关系详情卡（点边弹出） */}
-      {!maximized && selectedLink && ont?.link_types?.[selectedLink] && !linkDraft && (
+      {selectedLink && ont?.link_types?.[selectedLink] && !linkDraft && (
         <div className="float-card float-tr" style={{ width: 320 }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16 }}>
@@ -554,8 +544,8 @@ export default function CanvasPage() {
       )}
 
       {/* 右侧：对象编辑卡 */}
-      {!maximized && sel && !creating && !linkDraft && !selectedLink && (
-        <div className="float-card float-tr" style={{ width: 340, maxHeight: "calc(100% - 110px)" }}>
+      {sel && !creating && !linkDraft && !selectedLink && (
+        <div className="float-card float-tr" style={{ width: 360, maxHeight: "calc(100% - 110px)" }}>
           <div className="bezel">
             <div className="bezel-core" style={{ padding: 16, overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -568,9 +558,10 @@ export default function CanvasPage() {
               <Section title="描述">
                 <textarea
                   key={selected} /* 切换对象时强制重挂，否则旧描述会写进新对象 */
+                  className="ctl"
                   defaultValue={sel.description ?? ""}
                   rows={2}
-                  style={{ width: "100%", fontSize: 12, padding: 8, borderRadius: 10, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel-2)", resize: "vertical" }}
+                  style={{ width: "100%" }}
                   onBlur={(e) => {
                     // 跟挂载时的值比（defaultValue），不跟实时 sel 比——编辑期间的别处 refresh 不换基准
                     if (e.target.value !== e.target.defaultValue) void op({ op: "update_object", name: selected, description: e.target.value });
@@ -579,9 +570,9 @@ export default function CanvasPage() {
               </Section>
               <Section title={`识别字段（跨源认人靠它）`}>
                 <select
+                  className="ctl"
                   value={sel.identity ?? ""}
                   onChange={(e) => void op({ op: "set_identity", object: selected, name: e.target.value })}
-                  style={{ fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "none", boxShadow: "0 0 0 1px var(--hairline)", background: "var(--panel)" }}
                 >
                   <option value="">未设置</option>
                   {Object.entries(sel.properties).filter(([, d]: [string, any]) => !d.derived).map(([p]) => (
@@ -591,12 +582,12 @@ export default function CanvasPage() {
               </Section>
               <Section title="字段">
                 {Object.entries(sel.properties).map(([p, d]: [string, any]) => (
-                  <div key={p} style={{ fontSize: 12, lineHeight: 2, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <div key={p} style={{ fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "4px 0" }}>
                     <span>
                       <code>{p}</code> <span style={{ color: "var(--ink-3)" }}>{d.type}{d.derived ? " · 派生" : ""}</span>
                     </span>
                     <button
-                      className="chip"
+                      className="x-btn"
                       title={sel.identity === p ? "识别字段不能直接删" : "删除字段"}
                       onClick={() => void op({ op: "remove_property", object: selected, name: p })}
                     >
@@ -634,8 +625,8 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象；最大化时藏起） */}
-      {!maximized && drawerOpen && (
+      {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象） */}
+      {drawerOpen && (
         <div className="drawer">
           {selectedTables.size > 0 && (
             <div style={{ position: "sticky", top: 0, zIndex: 5, paddingBottom: 10, background: "var(--bg-deep)" }}>
