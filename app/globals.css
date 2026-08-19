@@ -387,7 +387,7 @@ input { font-family: inherit; outline: none; }
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--hairline-strong);
 }
-.answer-table td { border-bottom: 1px solid var(--hairline); padding: 6px 10px; }
+.answer-table td { border-bottom: 1px solid var(--hairline-strong); padding: 6px 10px; }
 details.fold { margin-top: 10px; }
 details.fold summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }
 details.fold summary:hover { color: var(--ink); }
