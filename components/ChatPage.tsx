@@ -235,8 +235,8 @@ export default function ChatPage() {
         <div style={{ width: "100%", maxWidth: 820, margin: "0 auto", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div ref={listRef} style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
           {msgs.length === 0 && (
-            /* 空态 = 引导：一句话说明 + 四个示例问题卡（点了直接问） */
-            <div style={{ margin: "10vh auto 0", maxWidth: 520, textAlign: "center" }}>
+            /* 空态 = 引导：一句话说明 + 四个示例问题卡（点了直接问）。在消息区里上下居中，不吊在顶上 */
+            <div style={{ margin: "auto", maxWidth: 520, textAlign: "center" }}>
               <div style={{ fontFamily: "var(--font-serif)", fontSize: 24, color: "var(--ink)", marginBottom: 8 }}>问数据，或对设备发起动作</div>
               <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 24 }}>回答永远是源库里的真数据，附取数路径。</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
