@@ -36,6 +36,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [sn, setSn] = useState("SN-40217");
+  const [actOpen, setActOpen] = useState(false); // 动作区默认收起：演示剧本不抢主视觉
   const [apis, setApis] = useState<SavedApi[]>([]);
   const lastQuestion = useRef<string | null>(null); // 动作成功后的复查用，不从消息列表反推
   const listRef = useRef<HTMLDivElement>(null);
@@ -228,10 +229,25 @@ export default function ChatPage() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
         <div ref={listRef} style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
           {msgs.length === 0 && (
-            <div className="hint">
-              问点什么，或对一台设备发起动作。
-              <br />
-              {SUGGESTED.join("；")}
+            /* 空态 = 引导：一句话说明 + 四个示例问题卡（点了直接问） */
+            <div style={{ margin: "8vh auto 0", maxWidth: 520, textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, color: "var(--ink)", marginBottom: 8 }}>问数据，或对设备发起动作</div>
+              <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 20 }}>回答永远是源库里的真数据，附取数路径。</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {SUGGESTED.map((s) => (
+                  <button
+                    key={s}
+                    className="bezel"
+                    style={{ border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}
+                    onClick={() => !busy && ask(s)}
+                  >
+                    <div className="bezel-core" style={{ padding: "12px 14px", fontSize: 13, color: "var(--ink-2)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      {s}
+                      <ArrowUpRight size={14} weight="light" />
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {msgs.map((m, i) =>
@@ -247,15 +263,26 @@ export default function ChatPage() {
               </div>
             )
           )}
-          {busy && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>…</div>}
+          {busy && <div style={{ color: "var(--ink-3)", fontSize: 13 }}>查着呢…</div>}
         </div>
 
-        {/* 动作条：三个按钮绑的是种子本体的演示剧本（convert/transfer/scrap + SN-40217）；通用形态是外部 Agent 经 MCP 发动作 */}
-        <div className="action-bar">
-          <input className="text-in" style={{ flex: "0 0 150px", padding: "8px 14px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="序列号" />
-          <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
-          <button className="btn" onClick={() => act("transfer", "equipment", sn, { dept: "D07" })} disabled={busy}>调拨到 D07</button>
-          <button className="btn" onClick={() => act("scrap", "equipment", sn)} disabled={busy}>报废</button>
+        {/* 动作区：默认收起，点开才是序列号 + 三个动作。绑的是种子本体的演示剧本；通用形态是外部 Agent 经 MCP 发动作 */}
+        <div>
+          {actOpen ? (
+            <div className="bezel">
+              <div className="bezel-core" style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>对序列号</span>
+                <input className="text-in" style={{ width: 140, padding: "6px 12px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="SN-40217" />
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>发起动作：</span>
+                <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
+                <button className="btn" onClick={() => act("transfer", "equipment", sn, { dept: "D07" })} disabled={busy}>调拨到 D07</button>
+                <button className="btn" onClick={() => act("scrap", "equipment", sn)} disabled={busy}>报废</button>
+                <button className="chip" aria-label="收起" style={{ marginLeft: "auto" }} onClick={() => setActOpen(false)}>收起</button>
+              </div>
+            </div>
+          ) : (
+            <button className="chip" style={{ alignSelf: "flex-start" }} onClick={() => setActOpen(true)}>⚡ 对设备发起动作（验收/调拨/报废）</button>
+          )}
         </div>
 
         {/* 输入条 */}
@@ -275,9 +302,10 @@ export default function ChatPage() {
             <span className="ico"><ArrowUpRight size={14} weight="light" /></span>
           </button>
         </form>
-        {/* 问数 API 台账：已保存的查询，点了直接重跑 */}
+        {/* 问数 API 台账：已保存的查询，点了直接重跑；有对话内容后才有必要出现 */}
         {apis.length > 0 && (
-          <div className="chips">
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>问数 API：</span>
             {apis.map((a) => (
               <button key={a.id} className="chip" title={a.question} onClick={() => !busy && runApi(a)}>
                 {a.name}
@@ -285,13 +313,6 @@ export default function ChatPage() {
             ))}
           </div>
         )}
-        <div className="chips">
-          {SUGGESTED.map((s) => (
-            <button key={s} className="chip" onClick={() => !busy && ask(s)}>
-              {s}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -308,25 +329,30 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
   return (
     <div className="bezel">
       <div className="bezel-core" style={{ padding: 14 }}>
-        <div className="answer-head">共 {a.total ?? a.rows.length} 条</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+          <div className="answer-head" style={{ marginBottom: 0 }}>共 {a.total ?? a.rows.length} 条</div>
+          {a.question && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{a.question}</div>}
+        </div>
         {cols.length > 0 && (
-          <table className="answer-table">
-            <thead>
-              <tr>{cols.concat(expandCols).map((c) => <th key={c}>{c}</th>)}</tr>
-            </thead>
-            <tbody>
-              {a.rows.slice(0, 20).map((r, i) => (
-                <tr key={i}>
-                  {cols.map((c) => <td key={c}>{String(r[c] ?? "—")}</td>)}
-                  {expandCols.map((c) => (
-                    <td key={c} style={{ color: "var(--ink-2)" }}>
-                      {((r[c] as Record<string, unknown>[] | undefined) ?? []).map((x) => Object.values(x).join(" · ")).join("、") || "—"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div style={{ maxHeight: 320, overflow: "auto", borderRadius: 8, boxShadow: "0 0 0 1px var(--hairline)" }}>
+            <table className="answer-table" style={{ width: "100%" }}>
+              <thead style={{ position: "sticky", top: 0, background: "var(--panel)" }}>
+                <tr>{cols.concat(expandCols).map((c) => <th key={c}>{c}</th>)}</tr>
+              </thead>
+              <tbody>
+                {a.rows.slice(0, 20).map((r, i) => (
+                  <tr key={i}>
+                    {cols.map((c) => <td key={c}>{String(r[c] ?? "—")}</td>)}
+                    {expandCols.map((c) => (
+                      <td key={c} style={{ color: "var(--ink-2)" }}>
+                        {((r[c] as Record<string, unknown>[] | undefined) ?? []).map((x) => Object.values(x).join(" · ")).join("、") || "—"}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {a.rows.length > 20 && <div style={{ color: "var(--ink-3)", marginTop: 6, fontSize: 12 }}>只列前 20 条</div>}
         <details className="fold">
