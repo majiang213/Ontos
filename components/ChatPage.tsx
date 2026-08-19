@@ -346,7 +346,7 @@ export default function ChatPage() {
             m.role === "user" ? (
               <div key={`${curId}-${i}`} className="msg-user">{m.text}</div>
             ) : (
-              <div key={`${curId}-${i}`} className="msg-agent" style={m.answer || m.actionResult ? { width: "100%" } : undefined}>
+              <div key={`${curId}-${i}`} className="msg-agent" style={m.answer || m.actionResult ? { width: "100%", minWidth: 0 } : undefined}>
                 {m.text && <div style={{ fontSize: 14, lineHeight: 1.8, color: "var(--ink-2)", padding: "2px 4px" }}>{m.text}</div>}
                 {m.answer && <AnswerCard a={m.answer} onSaved={loadApis} />}
                 {m.actionResult && <ActionCard r={m.actionResult} />}
