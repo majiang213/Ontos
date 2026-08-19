@@ -193,8 +193,8 @@ export default function ChatPage() {
 
   return (
     <div className="chat-wrap" style={{ position: "relative" }}>
-      {/* 左侧会话栏：浮在左缘不占主区宽度——消息列与顶部页签共用视口中轴，两条轴线不打架 */}
-      <aside style={{ position: "absolute", left: 16, top: 78, bottom: 12, width: 200, zIndex: 10, display: "flex", flexDirection: "column" }}>
+      {/* 左侧会话栏：浮在左缘不占主区宽度（消息列与顶部页签共用视口中轴），右缘发丝线与主区分开 */}
+      <aside style={{ position: "absolute", left: 16, top: 78, bottom: 12, width: 200, zIndex: 10, display: "flex", flexDirection: "column", borderRight: "1px solid var(--hairline)", paddingRight: 10 }}>
         <button className="btn" style={{ justifyContent: "center", marginBottom: 12 }} onClick={newSession}>＋ 新建会话</button>
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
           {sessions.map((s) => (
