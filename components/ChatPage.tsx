@@ -1,6 +1,7 @@
 // 对话页 —— 纯对话页。问数走 /api/ask（罐头槽位，LLM 就位后替换）；
 // 动作走 /api/action；取数路径融合在答案卡里。动作成功后自动再问一次，看状态变化。
-// 侧栏有会话列表（可新建），会话存 localStorage，切页不丢。
+// 会话模型同 Claude：「新建会话」只开一页待写的空白，发出第一条消息才自动落成会话进列表；
+// 空会话不落库。会话存 localStorage，切页不丢。
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -66,11 +67,13 @@ export default function ChatPage() {
   useEffect(() => {
     if (!loaded) return;
     try {
-      // 结果集不长久留存（数据边界）：答案卡只留前 20 行做回看，完整数据永远在源库现查
-      const trimmed = sessions.map((s) => ({
-        ...s,
-        msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, total: m.answer.total ?? m.answer.rows.length, rows: m.answer.rows.slice(0, 20) } } : m)),
-      }));
+      // 空会话不落库（没说过话的会话不是会话）；结果集不长久留存（数据边界）：答案卡只留前 20 行做回看，完整数据永远在源库现查
+      const trimmed = sessions
+        .filter((s) => s.msgs.length > 0)
+        .map((s) => ({
+          ...s,
+          msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, total: m.answer.total ?? m.answer.rows.length, rows: m.answer.rows.slice(0, 20) } } : m)),
+        }));
       localStorage.setItem(storeKey(), JSON.stringify(trimmed));
     } catch {
       // 配额满了不挡对话
@@ -110,10 +113,10 @@ export default function ChatPage() {
   const append = (sid: string, m: Msg) => {
     setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, msgs: [...s.msgs, m] } : s)));
   };
+  /** 新建会话 = 开一页待写的空白（不落列表）；发出第一条消息时 ensureSession 自动落成会话。 */
   const newSession = () => {
-    const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    setSessions((ss) => [{ id, title: "新会话", msgs: [] }, ...ss]);
-    setCurId(id);
+    setCurId(null);
+    curIdRef.current = null;
   };
   const removeSession = (sid: string) => {
     setSessions((ss) => {
