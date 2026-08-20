@@ -2,6 +2,7 @@
 // 每用例一个临时目录 + 全新运行态（helpers.ts），与仓库运行态隔离。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { join } from "node:path";
 import { cleanupRuntime, setupRuntime } from "./helpers";
 
 let tmp: string;
@@ -63,6 +64,23 @@ describe("错误分层：400 / 422 / 500", () => {
 
   it("overlap：自配对 400", async () => {
     expect((await post("overlap", JSON.stringify({ class_a: "equipment", class_b: "equipment" }))).status).toBe(400);
+  });
+
+  it("overlap：无源类 422（幻影 rate 不产）；同源对 422（不全列扫）", async () => {
+    const s = await import("../server/engine/configStore");
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }); // 手工对象，无源
+    expect((await post("overlap", JSON.stringify({ class_a: "equipment", class_b: "vendor" }))).status).toBe(422);
+    // repair 与 assignment 都来自 device_sys：同源不算疑似重复
+    expect((await post("overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }))).status).toBe(422);
+  });
+
+  it("connections：相对路径 sqlite 按运行态 cwd 解析（不读 process.cwd）", async () => {
+    // 文件放在 tmp（运行态 cwd）里：若路由绕过 runtime 读进程 cwd，会解析到真实仓库而 400
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(tmp, "rel_demo.db"), "");
+    const r = await post("connections", JSON.stringify({ name: "rel_db", type: "sqlite", db_name: "rel_demo.db", test: false }));
+    expect(r.status).toBe(200);
+    expect(r.data.saved).toBe(true);
   });
 });
 

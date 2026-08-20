@@ -3,6 +3,7 @@
 "use client";
 
 import { BaseEdge, EdgeLabelRenderer, getStraightPath, useInternalNode, type EdgeProps } from "@xyflow/react";
+import { NODE_W } from "./layout";
 
 interface Pt {
   x: number;
@@ -24,7 +25,7 @@ function rectOf(node: { internals: { positionAbsolute: { x: number; y: number } 
   return {
     x: node.internals.positionAbsolute.x,
     y: node.internals.positionAbsolute.y,
-    w: node.measured.width ?? 300,
+    w: node.measured.width ?? NODE_W, // 宽度与布局计算同一常量（layout.ts）
     h: node.measured.height ?? 160,
   };
 }

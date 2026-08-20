@@ -20,10 +20,10 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { layoutObjects, type CanvasLink, type CanvasObject } from "../server/layout";
+import { layoutObjects, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
 
-// CanvasObject/CanvasLink 定义在 lib/layout.ts（布局是唯一下游定义点）；这里再导出，老调用方不用改
+// CanvasObject/CanvasLink 定义在同目录 layout.ts（布局是唯一下游定义点）；这里再导出，老调用方不用改
 export type { CanvasLink, CanvasObject };
 
 function ObjectNode({ data }: { data: ObjNodeData }) {
@@ -69,7 +69,8 @@ type ObjNodeData = Record<string, unknown> & CanvasObject & { label: string };
 const nodeTypes = { obj: ObjectNode };
 const edgeTypes = { floating: FloatingEdge };
 
-export default function OntologyCanvas(props: {
+/** 画布 props（唯一一份）：外层 Provider 包装与内部 Flow 共用。 */
+export interface CanvasProps {
   objects: CanvasObject[];
   links: CanvasLink[];
   layout?: Record<string, { x: number; y: number }>;
@@ -78,7 +79,9 @@ export default function OntologyCanvas(props: {
   onSelectLink?: (name: string) => void;
   onConnectRequest?: (from: string, to: string) => void;
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
-}) {
+}
+
+export default function OntologyCanvas(props: CanvasProps) {
   return (
     <ReactFlowProvider>
       <Flow {...props} />
@@ -86,25 +89,19 @@ export default function OntologyCanvas(props: {
   );
 }
 
-function Flow({
-  objects,
-  links,
-  layout,
-  selectedLink,
-  onSelect,
-  onSelectLink,
-  onConnectRequest,
-  onLayoutChange,
-}: {
-  objects: CanvasObject[];
-  links: CanvasLink[];
-  layout?: Record<string, { x: number; y: number }>;
-  selectedLink?: string | null;
-  onSelect: (name: string) => void;
-  onSelectLink?: (name: string) => void;
-  onConnectRequest?: (from: string, to: string) => void;
-  onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
-}) {
+/** 边色一处判：点中 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn 同值——SVG marker 不吃 CSS var，故常量单源）。 */
+const EDGE_ACCENT = "#3b36b0"; // = var(--accent)
+const EDGE_WARN = "#8a5f0b"; // = var(--warn)
+function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["style"]; markerEnd: Edge["markerEnd"] } {
+  const selected = l.name === selectedLink;
+  const transition = l.kind === "transition";
+  return {
+    style: selected ? { stroke: "var(--accent)", strokeWidth: 2.5 } : transition ? { strokeDasharray: "6 4", stroke: "var(--warn)" } : undefined,
+    markerEnd: { type: MarkerType.ArrowClosed, color: selected ? EDGE_ACCENT : transition ? EDGE_WARN : undefined },
+  };
+}
+
+function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, onConnectRequest, onLayoutChange }: CanvasProps) {
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = layoutObjects(objects, links);
     return objects.map((o) => ({
@@ -159,13 +156,7 @@ function Flow({
         source: l.from,
         target: l.to,
         label: l.inverse ? `${l.name} / ${l.inverse}` : l.name,
-        style: l.name === selectedLink
-          ? { stroke: "var(--accent)", strokeWidth: 2.5 } // 点中的边高亮
-          : l.kind === "transition"
-            ? { strokeDasharray: "6 4", stroke: "var(--warn)" }
-            : undefined,
-        // 箭头跟着边色走，高亮时不拖灰箭头
-        markerEnd: { type: MarkerType.ArrowClosed, color: l.name === selectedLink ? "#3b36b0" : l.kind === "transition" ? "#8a5f0b" : undefined },
+        ...edgeTone(l, selectedLink), // 边色与箭头一处判定
         interactionWidth: 20, // 线的点击热区放宽，细线也好点
       })),
     [links, selectedLink]

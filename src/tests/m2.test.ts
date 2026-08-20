@@ -112,10 +112,10 @@ describe("LLM 槽位离线回退", () => {
 
   it("候选对建议：跨源且字段重合才成对，同源不成对", async () => {
     const pairs = await slot.suggestPairs([
-      { name: "a", source: "s1", fields: ["sn", "name"] },
-      { name: "b", source: "s2", fields: ["sn", "name", "status"] },
-      { name: "c", source: "s1", fields: ["sn", "name"] }, // 与 a 同源
-      { name: "d", source: "s2", fields: ["xyz"] },
+      { name: "a", sources: ["s1"], fields: ["sn", "name"] },
+      { name: "b", sources: ["s2"], fields: ["sn", "name", "status"] },
+      { name: "c", sources: ["s1"], fields: ["sn", "name"] }, // 与 a 同源
+      { name: "d", sources: ["s2"], fields: ["xyz"] },
     ]);
     // a-b 与 b-c：跨源且字段重合过半；a-c 同源不成对；d 字段对不上
     expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "b-c"]);

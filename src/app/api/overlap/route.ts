@@ -4,11 +4,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDraft } from "@/server/engine/configStore";
+import { connectionsOf, hasSources, isCrossSource } from "@/server/engine/eligibility";
 import { getDriverRegistry } from "@/server/engine/load";
-import { EngineReject, mustCls } from "@/server/engine/individual";
+import { mustCls } from "@/server/engine/individual";
 import { computeOverlap } from "@/server/engine/overlap";
 import { metaStore } from "@/server/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z
   .object({ class_a: z.string(), class_b: z.string() })
@@ -17,21 +18,24 @@ const bodySchema = z
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req); // 触发两列全量扫 + 写计数，口径与写端点对齐
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const ws = wsOf(req);
     const { class_a, class_b } = bodySchema.parse(await bodyJson(req));
     const d = (await getDraft(ws)).draft;
     const a = mustCls(d, class_a);
     const b = mustCls(d, class_b);
+    // 资格闸走 eligibility 同一套谓词（不收 decided 闸——证据允许重算）：
+    // 无源类算出的是幻影 rate 0（空集当零交集），同源对的白扫两列全量
+    if (!hasSources(a.def) || !hasSources(b.def)) {
+      return NextResponse.json({ error: "无源对象不算疑似重复（先给它挂来源）" }, { status: 422 });
+    }
+    if (!isCrossSource(a.def, b.def)) {
+      const shared = [...connectionsOf(a.def)].filter((c) => connectionsOf(b.def).has(c));
+      return NextResponse.json({ error: `这两个对象有共同来源（${shared.join("、")}），不算疑似重复` }, { status: 422 });
+    }
     if (!a.def.identity || !b.def.identity) {
       return NextResponse.json({ error: "两边对不上号：有类没设识别字段" }, { status: 422 });
     }
-    const result = await computeOverlap(await getDriverRegistry(ws), a, b, metaStore(), ws);
-    return NextResponse.json(result);
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    if (e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    return internalError(e);
-  }
+    return computeOverlap(await getDriverRegistry(ws), a, b, metaStore(), ws);
+  });
 }

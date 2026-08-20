@@ -55,8 +55,12 @@ function WsSwitcher({ ws, onChange }: { ws: string; onChange: (w: string) => voi
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     void (async () => {
-      const data = await apiGet<{ workspaces?: string[] }>("/api/workspaces");
-      setList(data.workspaces ?? []);
+      try {
+        const data = await apiGet<{ workspaces?: string[] }>("/api/workspaces");
+        setList(data.workspaces ?? []);
+      } catch {
+        setError("空间列表读不出来——检查后端后重新打开"); // 失败也要说：不再 unhandled rejection + 静默空列表
+      }
     })();
   }, []);
   const close = () => {

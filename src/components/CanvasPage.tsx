@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OntologyCanvas, { type CanvasLink, type CanvasObject } from "./OntologyCanvas";
 import PairCard from "./PairCard";
+import Bezel from "./Bezel";
 import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";
 import QuestionsCard from "./QuestionsCard";
 import { AddProperty, ConnectForm, CreateForm, LinkForm, Section } from "./forms";
@@ -26,22 +27,30 @@ interface IntrospectResp {
   }[];
 }
 
+/** 浮卡（「同一时间只浮一张卡」的类型表达）：开一张 = 收其余，互斥由联合类型保证，不再手工维护。
+ *  左上组（版本/新建/连接/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
+ *  例外：底中裁决面板与底部表结构抽屉是独立区域，不进联合。 */
+type Card =
+  | { kind: "versions" }
+  | { kind: "create" }
+  | { kind: "connect" }
+  | { kind: "questions" }
+  | { kind: "link"; from: string; to: string } // 拖线落地后等待取名的半成品
+  | { kind: "linkDetail"; name: string } // 点中的边
+  | { kind: "object"; name: string } // 对象编辑卡
+  | null;
+
 export default function CanvasPage() {
   const [ont, setOnt] = useState<OntologyResp | null>(null);
   const [schema, setSchema] = useState<IntrospectResp | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [card, setCard] = useState<Card>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [connecting, setConnecting] = useState(false);
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [pairs, setPairs] = useState<PairAdvice[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [versions, setVersions] = useState<{ version: number; createdAt: string }[] | null>(null);
-  const [questionsOpen, setQuestionsOpen] = useState(false);
+  const [versionsData, setVersionsData] = useState<{ version: number; createdAt: string }[] | null>(null); // null = 读着呢
   const [publishing, setPublishing] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [linkDraft, setLinkDraft] = useState<{ from: string; to: string } | null>(null); // 拖线落地后等待取名的半成品
-  const [selectedLink, setSelectedLink] = useState<string | null>(null); // 点中的边
   const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -110,7 +119,7 @@ export default function CanvasPage() {
     try {
       await apiDel("/api/publish");
       showToast("已放弃改动，回到已发布快照");
-      setSelected(null);
+      setCard(null);
       await refresh();
     } catch (e) {
       failToast(e);
@@ -124,31 +133,13 @@ export default function CanvasPage() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
-      setLinkDraft(null);
-      setSelectedLink(null);
-      setSelected(null);
-      setVersions(null);
-      setCreating(false);
-      setConnecting(false);
-      setQuestionsOpen(false);
+      setCard(null);
       setPanelOpen(false);
       setDrawerOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  /** 左上四张卡互斥：开一个关其余。 */
-  const openTl = (which: "versions" | "create" | "connect" | "questions") => {
-    setCreating(false);
-    setConnecting(false);
-    setQuestionsOpen(false);
-    setVersions(null);
-    if (which === "create") setCreating(true);
-    if (which === "connect") setConnecting(true);
-    if (which === "questions") setQuestionsOpen(true);
-    // versions 的数据在调用方拉
-  };
 
   /** 多选表 → 生成对象 → 直接上画布并收起抽屉。 */
   const generateFromTables = async () => {
@@ -219,7 +210,7 @@ export default function CanvasPage() {
     return "未映射";
   };
 
-  const sel = selected ? (ont?.object_types?.[selected] as any) : null;
+  const sel = card?.kind === "object" ? (ont?.object_types?.[card.name] as any) : null;
 
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
@@ -227,37 +218,29 @@ export default function CanvasPage() {
         objects={objects}
         links={links}
         layout={ont?.layout}
-        selectedLink={selectedLink}
-        onSelect={(name) => {
-          setSelected(name);
-          setSelectedLink(null);
-        }}
-        onSelectLink={(name) => {
-          setSelectedLink(name);
-          setSelected(null);
-        }}
-        onConnectRequest={(from, to) => setLinkDraft({ from, to })}
+        selectedLink={card?.kind === "linkDetail" ? card.name : null}
+        onSelect={(name) => setCard({ kind: "object", name })}
+        onSelectLink={(name) => setCard({ kind: "linkDetail", name })}
+        onConnectRequest={(from, to) => setCard({ kind: "link", from, to })}
         onLayoutChange={saveLayout}
       />
 
       {/* 左上：发布状态 + 入口 */}
-      {(
-        <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", maxWidth: "calc(100vw - 32px)" }}>
+      <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", maxWidth: "calc(100vw - 32px)" }}>
           <button
             className="eyebrow"
             style={{ cursor: "pointer", border: "none" }}
             title="版本历史"
             onClick={async () => {
-              if (versions) {
-                setVersions(null); // toggle：再点收起
+              if (card?.kind === "versions") {
+                setCard(null); // toggle：再点收起
                 return;
               }
-              openTl("versions");
-              setVersions([]); // 先开卡给 loading 态再填数据——慢网络下不顶掉别人正在填的卡
+              setCard({ kind: "versions" });
+              setVersionsData(null); // 先给「读着呢」态再填数据
               try {
                 const data = await apiGet<{ versions?: { version: number; createdAt: string }[] }>("/api/versions");
-                // 用户可能已去开别的卡（openTl 会把 versions 置 null）：只在本卡还开着时填数
-                setVersions((cur) => (cur === null ? null : (data.versions ?? [])));
+                setVersionsData(data.versions ?? []);
               } catch (e) {
                 netErr(e);
               }
@@ -282,8 +265,8 @@ export default function CanvasPage() {
           ) : (
             <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>
           )}
-          <button className="btn" onClick={() => openTl("create")}>新建对象</button>
-          <button className="btn" onClick={() => openTl("connect")}>连接数据源</button>
+          <button className="btn" onClick={() => setCard({ kind: "create" })}>新建对象</button>
+          <button className="btn" onClick={() => setCard({ kind: "connect" })}>连接数据源</button>
           <button
             className="btn"
             onClick={async () => {
@@ -297,34 +280,30 @@ export default function CanvasPage() {
           >
             疑似重复
           </button>
-          <button className="btn" onClick={() => (questionsOpen ? setQuestionsOpen(false) : openTl("questions"))}>验收问题集</button>
-        </div>
-      )}
+          <button className="btn" onClick={() => (card?.kind === "questions" ? setCard(null) : setCard({ kind: "questions" }))}>验收问题集</button>
+      </div>
 
       {/* 空画布引导：没有任何对象时告诉人两条起步路径 */}
       {ont && objects.length === 0 && (
         <div className="float-card" style={{ top: "40%", left: "50%", translate: "-50% -50%", width: 380 }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 18, fontSize: 13, lineHeight: 2, color: "var(--ink-2)" }}>
-              画布还是空的。两条起步路径：
-              <br />· 点「连接数据源」接入库，再到「表结构」勾选表生成对象
-              <br />· 或点「新建对象」手动建模
-            </div>
-          </div>
+          <Bezel pad={18} coreStyle={{ fontSize: 13, lineHeight: 2, color: "var(--ink-2)" }}>
+            画布还是空的。两条起步路径：
+            <br />· 点「连接数据源」接入库，再到「表结构」勾选表生成对象
+            <br />· 或点「新建对象」手动建模
+          </Bezel>
         </div>
       )}
 
       {/* 版本历史卡（点版本号展开；回滚 = 旧内容作为新版本发布） */}
-      {versions && (
+      {card?.kind === "versions" && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>
-                <button className="chip" aria-label="关闭" onClick={() => setVersions(null)}>✕</button>
+          <Bezel>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>
+                <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
               </div>
-              {versions.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>读着呢…</div>}
-              {versions.map((v) => (
+              {versionsData === null && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>读着呢…</div>}
+              {(versionsData ?? []).map((v) => (
                 <div key={v.version} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
                   <span>
                     <strong>v{v.version}</strong>　<span style={{ color: "var(--ink-3)" }}>{v.createdAt.slice(0, 16).replace("T", " ")}</span>
@@ -339,7 +318,7 @@ export default function CanvasPage() {
                         try {
                           const data = await apiPost<{ version: number }>("/api/versions", { version: v.version });
                           showToast(`已回滚到 v${v.version} 的内容（发布为 v${data.version}）`);
-                          setVersions(null);
+                          setCard(null);
                           await refresh();
                         } catch (e) {
                           failToast(e);
@@ -353,193 +332,178 @@ export default function CanvasPage() {
                   )}
                 </div>
               ))}
-            </div>
-          </div>
+          </Bezel>
         </div>
       )}
 
       {/* 验收问题集卡 */}
-      {questionsOpen && <QuestionsCard onClose={() => setQuestionsOpen(false)} showToast={showToast} />}
+      {card?.kind === "questions" && <QuestionsCard onClose={() => setCard(null)} showToast={showToast} />}
 
       {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
       {panelOpen && (
         <div className="float-card float-bc" style={{ width: 760, maxHeight: "78%" }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 14, overflow: "auto", maxHeight: "72vh" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 处）</span>
-                <button className="chip" aria-label="关闭" onClick={() => setPanelOpen(false)}>✕</button>
-              </div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，两两列出，请你逐条定夺；三个以上重复时会出多条，裁完一条会自动重算。</div>
-              {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
-              {pairs.map((p) => (
-                <PairCard
-                  key={`${p.class_a}|${p.class_b}`}
-                  pair={p}
-                  onDone={(msg) => {
-                    if (msg) showToast(msg); // 空串 = 不动草稿的结论（仅名称相似/跳过），不弹提示
-                    // 重新拉一遍：被合并撤掉的类，挂着它的条目随之消失（三个以上重复时会连环）
-                    void loadPairs().then(() => refresh());
-                  }}
-                />
-              ))}
+          <Bezel coreStyle={{ overflow: "auto", maxHeight: "72vh" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 处）</span>
+              <button className="chip" aria-label="关闭" onClick={() => setPanelOpen(false)}>✕</button>
             </div>
-          </div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，两两列出，请你逐条定夺；三个以上重复时会出多条，裁完一条会自动重算。</div>
+            {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
+            {pairs.map((p) => (
+              <PairCard
+                key={`${p.class_a}|${p.class_b}`}
+                pair={p}
+                onDone={(msg) => {
+                  if (msg) showToast(msg); // 空串 = 不动草稿的结论（仅名称相似/跳过），不弹提示
+                  // 重新拉一遍：被合并撤掉的类，挂着它的条目随之消失（三个以上重复时会连环）
+                  void loadPairs().then(() => refresh());
+                }}
+              />
+            ))}
+          </Bezel>
         </div>
       )}
 
       {/* 左下：表结构抽屉开关（常驻） */}
-      {(
-        <div className="float-card" style={{ bottom: 18, left: 16 }}>
-          <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
-        </div>
-      )}
+      <div className="float-card" style={{ bottom: 18, left: 16 }}>
+        <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
+      </div>
 
       {/* toast：瞬时反馈 */}
       {toast && (
         <div className="float-card" style={{ top: 76, left: "50%", translate: "-50% 0", zIndex: 40 }}>
-          <div className="bezel"><div className="bezel-core" style={{ padding: "8px 16px", fontSize: 13 }}>{toast}</div></div>
+          <Bezel pad="8px 16px" coreStyle={{ fontSize: 13 }}>{toast}</Bezel>
         </div>
       )}
 
       {/* 连接数据源卡（左上） */}
-      {connecting && (
+      {card?.kind === "connect" && (
         <div className="float-card float-tl" style={{ top: 120, width: 320 }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>连接数据源</div>
-              <ConnectForm
-                onCancel={() => setConnecting(false)}
-                onDone={async (msg) => {
-                  setConnecting(false);
-                  showToast(msg);
-                  try {
-                    setSchema(await apiGet<IntrospectResp>("/api/introspect"));
-                    setDrawerOpen(true); // 保存后自动打开表结构抽屉
-                  } catch (e) {
-                    netErr(e); // 连上了但刷表结构失败：连接已存，刷新失败要告诉人
-                  }
-                }}
-              />
-            </div>
-          </div>
+          <Bezel>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>连接数据源</div>
+            <ConnectForm
+              onCancel={() => setCard(null)}
+              onDone={async (msg) => {
+                setCard(null);
+                showToast(msg);
+                try {
+                  setSchema(await apiGet<IntrospectResp>("/api/introspect"));
+                  setDrawerOpen(true); // 保存后自动打开表结构抽屉
+                } catch (e) {
+                  netErr(e); // 连上了但刷表结构失败：连接已存，刷新失败要告诉人
+                }
+              }}
+            />
+          </Bezel>
         </div>
       )}
 
       {/* 新建对象卡（左上） */}
-      {creating && (
+      {card?.kind === "create" && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>新建对象</div>
-              <CreateForm
-                onCancel={() => setCreating(false)}
-                onSubmit={async (name, description, kind) => {
-                  const ok = await op({ op: "create_object", name, description, kind });
-                  if (ok) {
-                    setCreating(false);
-                    setSelected(name);
-                    showToast(`已加入草稿：${name}（发布后生效）`);
-                  }
-                }}
-              />
-            </div>
-          </div>
+          <Bezel>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>新建对象</div>
+            <CreateForm
+              onCancel={() => setCard(null)}
+              onSubmit={async (name, description, kind) => {
+                const ok = await op({ op: "create_object", name, description, kind });
+                if (ok) {
+                  setCard({ kind: "object", name }); // 建成即打开新对象的编辑卡
+                  showToast(`已加入草稿：${name}（发布后生效）`);
+                }
+              }}
+            />
+          </Bezel>
         </div>
       )}
 
       {/* 右侧：连线表单卡（从节点拖线落地后弹出） */}
-      {linkDraft && (
+      {card?.kind === "link" && (
         <div className="float-card float-tr" style={{ width: 340 }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>新建关系</span>
-                <button className="chip" aria-label="关闭" onClick={() => setLinkDraft(null)}>✕</button>
-              </div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px" }}>
-                {linkDraft.from} → {linkDraft.to}。关系得说清靠哪两个字段对上，默认用两边的识别字段。
-              </div>
-              <LinkForm
-                key={`${linkDraft.from}|${linkDraft.to}`}
-                from={linkDraft.from}
-                to={linkDraft.to}
-                objects={ont?.object_types ?? {}}
-                onCancel={() => setLinkDraft(null)}
-                onSubmit={async (body) => {
-                  const ok = await op(body);
-                  if (ok) {
-                    setLinkDraft(null);
-                    showToast("关系已进草稿（发布后生效）");
-                  }
-                }}
-              />
+          <Bezel pad={16}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>新建关系</span>
+              <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
             </div>
-          </div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px" }}>
+              {card.from} → {card.to}。关系得说清靠哪两个字段对上，默认用两边的识别字段。
+            </div>
+            <LinkForm
+              key={`${card.from}|${card.to}`}
+              from={card.from}
+              to={card.to}
+              objects={ont?.object_types ?? {}}
+              onCancel={() => setCard(null)}
+              onSubmit={async (body) => {
+                const ok = await op(body);
+                if (ok) {
+                  setCard(null);
+                  showToast("关系已进草稿（发布后生效）");
+                }
+              }}
+            />
+          </Bezel>
         </div>
       )}
 
       {/* 右侧：关系详情卡（点边弹出） */}
-      {selectedLink && ont?.link_types?.[selectedLink] && !linkDraft && (
+      {card?.kind === "linkDetail" && ont?.link_types?.[card.name] && (
         <div className="float-card float-tr" style={{ width: 320 }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{selectedLink}</span>
-                <button className="chip" aria-label="关闭" onClick={() => setSelectedLink(null)}>✕</button>
-              </div>
-              {(() => {
-                const l = ont.link_types[selectedLink] as any;
-                return (
-                  <div style={{ fontSize: 12, lineHeight: 2.2, color: "var(--ink-2)", margin: "6px 0 10px" }}>
-                    <div>{l.from} → {l.to}{l.inverse ? `（反向名 ${l.inverse}）` : ""}</div>
-                    {l.card && <div>基数 {l.card}</div>}
-                    {l.match && <div>配对字段：{l.match.map((m: any) => `${m.from} → ${m.to}`).join("，")}</div>}
-                    {l.transition && <div>状态转化：{l.transition.property} 从「{l.transition.from}」到「{l.transition.to}」</div>}
-                    {l.description && <div style={{ color: "var(--ink-3)" }}>{l.description}</div>}
-                  </div>
-                );
-              })()}
-              <button
-                className="chip"
-                style={{ color: "var(--danger)" }}
-                onClick={async () => {
-                  const ok = await op({ op: "delete_link", name: selectedLink });
-                  if (ok) {
-                    setSelectedLink(null);
-                    showToast(`已删除关系 ${selectedLink}（进草稿，发布后生效）`);
-                  }
-                }}
-              >
-                删除关系
-              </button>
+          <Bezel pad={16}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
+              <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
             </div>
-          </div>
+            {(() => {
+              const l = ont.link_types[card.name] as any;
+              return (
+                <div style={{ fontSize: 12, lineHeight: 2.2, color: "var(--ink-2)", margin: "6px 0 10px" }}>
+                  <div>{l.from} → {l.to}{l.inverse ? `（反向名 ${l.inverse}）` : ""}</div>
+                  {l.card && <div>基数 {l.card}</div>}
+                  {l.match && <div>配对字段：{l.match.map((m: any) => `${m.from} → ${m.to}`).join("，")}</div>}
+                  {l.transition && <div>状态转化：{l.transition.property} 从「{l.transition.from}」到「{l.transition.to}」</div>}
+                  {l.description && <div style={{ color: "var(--ink-3)" }}>{l.description}</div>}
+                </div>
+              );
+            })()}
+            <button
+              className="chip"
+              style={{ color: "var(--danger)" }}
+              onClick={async () => {
+                const ok = await op({ op: "delete_link", name: card.name });
+                if (ok) {
+                  setCard(null);
+                  showToast(`已删除关系 ${card.name}（进草稿，发布后生效）`);
+                }
+              }}
+            >
+              删除关系
+            </button>
+          </Bezel>
         </div>
       )}
 
       {/* 右侧：对象编辑卡 */}
-      {sel && !creating && !linkDraft && !selectedLink && (
+      {sel && card?.kind === "object" && (
         <div className="float-card float-tr" style={{ width: 360, maxHeight: "calc(100% - 110px)" }}>
-          <div className="bezel">
-            <div className="bezel-core" style={{ padding: 16, overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{selected}</span>
-                <button className="chip" aria-label="关闭" onClick={() => setSelected(null)}>✕</button>
-              </div>
-              <div style={{ color: "var(--ink-3)", fontSize: 11, margin: "2px 0 8px" }}>
-                {ont?.states?.[selected!] === "new" ? "草稿，发布后生效" : ont?.states?.[selected!] === "modified" ? "有未发布改动" : "与已发布一致"}
-              </div>
+          <Bezel pad={16} coreStyle={{ overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
+              <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
+            </div>
+            <div style={{ color: "var(--ink-3)", fontSize: 11, margin: "2px 0 8px" }}>
+              {ont?.states?.[card.name] === "new" ? "草稿，发布后生效" : ont?.states?.[card.name] === "modified" ? "有未发布改动" : "与已发布一致"}
+            </div>
               <Section title="描述">
                 <textarea
-                  key={selected} /* 切换对象时强制重挂，否则旧描述会写进新对象 */
+                  key={card.name} /* 切换对象时强制重挂，否则旧描述会写进新对象 */
                   className="ctl"
                   defaultValue={sel.description ?? ""}
                   rows={2}
                   style={{ width: "100%" }}
                   onBlur={(e) => {
                     // 跟挂载时的值比（defaultValue），不跟实时 sel 比——编辑期间的别处 refresh 不换基准
-                    if (e.target.value !== e.target.defaultValue) void op({ op: "update_object", name: selected, description: e.target.value });
+                    if (e.target.value !== e.target.defaultValue) void op({ op: "update_object", name: card.name, description: e.target.value });
                   }}
                 />
               </Section>
@@ -547,7 +511,7 @@ export default function CanvasPage() {
                 <select
                   className="ctl"
                   value={sel.identity ?? ""}
-                  onChange={(e) => void op({ op: "set_identity", object: selected, name: e.target.value })}
+                  onChange={(e) => void op({ op: "set_identity", object: card.name, name: e.target.value })}
                 >
                   <option value="">未设置</option>
                   {Object.entries(sel.properties).filter(([, d]: [string, any]) => !d.derived).map(([p]) => (
@@ -564,13 +528,13 @@ export default function CanvasPage() {
                     <button
                       className="x-btn"
                       title={sel.identity === p ? "识别字段不能直接删" : "删除字段"}
-                      onClick={() => void op({ op: "remove_property", object: selected, name: p })}
+                      onClick={() => void op({ op: "remove_property", object: card.name, name: p })}
                     >
                       ✕
                     </button>
                   </div>
                 ))}
-                <AddProperty onAdd={(name, type) => op({ op: "add_property", object: selected, name, type })} />
+                <AddProperty onAdd={(name, type) => op({ op: "add_property", object: card.name, name, type })} />
               </Section>
               <Section title="来源">
                 {Object.keys(sel.sources ?? {}).length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>还没有来源——这个对象是手工建的，没挂任何表</div>}
@@ -585,18 +549,17 @@ export default function CanvasPage() {
                   className="btn"
                   style={{ color: "var(--danger)" }}
                   onClick={async () => {
-                    const ok = await op({ op: "delete_object", name: selected });
+                    const ok = await op({ op: "delete_object", name: card.name });
                     if (ok) {
-                      setSelected(null);
-                      showToast(`已删除 ${selected}（发布后生效）`);
+                      setCard(null);
+                      showToast(`已删除 ${card.name}（发布后生效）`);
                     }
                   }}
                 >
                   删除这个对象
                 </button>
               </Section>
-            </div>
-          </div>
+          </Bezel>
         </div>
       )}
 
@@ -619,34 +582,32 @@ export default function CanvasPage() {
                   const key = `${s.connection}.${t.name}`;
                   const checked = selectedTables.has(key);
                   return (
-                    <div key={t.name} className="bezel" style={{ minWidth: 260, outline: checked ? "2px solid var(--accent)" : "none" }}>
-                      <div className="bezel-core" style={{ padding: 12 }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() =>
-                              setSelectedTables((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(key)) next.delete(key);
-                                else next.add(key);
-                                return next;
-                              })
-                            }
-                          />
-                          <code style={{ fontSize: 13 }}>{t.name}</code>
-                        </label>
-                        {t.columns.map((c) => (
-                          <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
-                            <span>
-                              <code>{c.name}</code>
-                              <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
-                            </span>
-                            <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <Bezel key={t.name} pad={12} style={{ minWidth: 260, outline: checked ? "2px solid var(--accent)" : "none" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setSelectedTables((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(key)) next.delete(key);
+                              else next.add(key);
+                              return next;
+                            })
+                          }
+                        />
+                        <code style={{ fontSize: 13 }}>{t.name}</code>
+                      </label>
+                      {t.columns.map((c) => (
+                        <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
+                          <span>
+                            <code>{c.name}</code>
+                            <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
+                          </span>
+                          <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
+                        </div>
+                      ))}
+                    </Bezel>
                   );
                 })}
               </div>

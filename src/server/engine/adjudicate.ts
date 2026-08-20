@@ -2,10 +2,21 @@
 // 同一：合并为一个对象、挂多源。阶段：收成一类 + 派生阶段 + 转化关系 + 转化动作。
 // 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
 
-import type { Filter, OntologyConfig, WhenRule } from "../schema/config";
+import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../schema/config";
 import { dropClass, mutateDraft } from "./configStore";
 
 export type Verdict = "同一" | "部分重叠" | "阶段" | "仅名称相似" | "跳过";
+
+/** 转化动作骨架（唯一构造点）：前置 = 当前在早阶段 ∧ 还没转化过（$link false），效应 = 记一条转化关系。
+ *  「阶段」裁决的产物与 MCP propose_action 的模板都走这里；附录 B 改骨架只动这一个函数。 */
+export function conversionAction(linkName: string, link: LinkType): ActionDef {
+  const t = link.transition!;
+  return {
+    description: `转化为${t.to}`,
+    pre: { [t.property]: t.from, $link: { [linkName]: false } },
+    effect: [{ link: linkName }],
+  };
+}
 
 /** B 的属性并入 A（同名跳过、特有带过来），B 的源映射照搬，B 挂着的关系撤掉。
  *  识别属性不同名时（A.sn × B.serial_no）：B 的识别属性不另立，B 源条目的 fields 键改写为 A 的识别属性——
@@ -98,11 +109,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
         transition: { property: "status", from, to },
       };
       A.actions = A.actions ?? {};
-      A.actions[`convert_to_${to}`] = {
-        description: `转化为${to}`,
-        pre: { status: from, $link: { [`${a}_to_${to}`]: false } } as Filter,
-        effect: [{ link: `${a}_to_${to}` }],
-      };
+      A.actions[`convert_to_${to}`] = conversionAction(`${a}_to_${to}`, d.link_types[`${a}_to_${to}`]);
       break;
     }
     case "部分重叠": {

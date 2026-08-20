@@ -227,9 +227,9 @@ const num = (v: unknown) => typeof v === "number";
  *  查询与动作入口各跑一次，下推与内存共用同一把尺。遍历走 schema 层 walkFilter（结构遍历，不解析关系）。 */
 export function assertFilterShapes(filter: Filter, trail = "过滤"): void {
   walkFilter(null, "", filter, {
-    link: (_cls, ln, _target, sub, depth) => {
+    link: (_cls, _ln, _target, _sub, depth) => {
       if (depth + 1 > 3) throw new EngineReject(`${trail}：$link 嵌套最多三层`);
-      if (sub === true || sub === false) return false; // 存在性写法没有子过滤
+      // 存在性写法（true/false）没有子过滤：walker 对非对象本就不递归
     },
     prop: (_cls, key, v) => {
       if (Array.isArray(v)) throw new EngineReject(`${trail}的 ${key}：等值位不接受数组（数组只能出现在 in 里）`);

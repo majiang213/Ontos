@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { getDriverRegistry, registerSaved } from "@/server/engine/load";
 import { getPublished } from "@/server/engine/configStore";
 import { metaStore } from "@/server/meta/store";
+import { runtime } from "@/server/runtime";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const connectionSchema = z.object({
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
       if (!rec.db_name) return NextResponse.json({ error: "sqlite 连接必须给文件路径（db_name）" }, { status: 400 });
       // 文件必须已存在：不存在就建库等于让请求方在服务器上任意落文件
       // turbopackIgnore：路径来自请求体，本来就不能静态分析；不做追踪免得整个仓被打进产物
-      const p = resolve(/* turbopackIgnore: true */ process.cwd(), rec.db_name);
+      const p = resolve(/* turbopackIgnore: true */ runtime().cwd, rec.db_name); // cwd 只从运行态读（runtime.ts），测试换 tmp 才隔得开
       if (!existsSync(p)) return NextResponse.json({ error: `sqlite 文件不存在：${p}` }, { status: 400 });
       rec.db_name = p;
     } else if (!rec.host || !rec.db_name) {

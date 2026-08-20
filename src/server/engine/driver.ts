@@ -38,6 +38,12 @@ export interface SourceDriver {
 
 /* ---------- 方言 ---------- */
 
+/** 按连接查方言，查不到回退单驱动方言（唯一出处）：注册表多方言与单驱动同一口径。
+ *  undefined = 非 mysql/pg（toColumnValue 按不转换处理，与原内联写法同语义）。 */
+export function dialectFor(driver: SourceDriver, connection: string): Dialect | undefined {
+  return driver.dialectOf?.(connection) ?? driver.dialect;
+}
+
 /** 标识符引号：mysql 反引号，pg/sqlite 双引号。标识符内的引号字符双写转义。 */
 function quoteFor(dialect: "sqlite" | "mysql" | "pg"): (id: string) => string {
   return dialect === "mysql"

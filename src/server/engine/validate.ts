@@ -2,16 +2,9 @@
 // 违反即抛错：identity 缺映射、派生属性进 fields、关系端点不存在、inform 指向未声明的出站等。
 
 import type { OntologyConfig } from "../schema/config";
-import { findLink } from "./individual";
 import { walkFilter } from "../schema/filterWalk";
 
 export function validateSemantics(config: OntologyConfig): void {
-  // 关系解析走引擎同一份实现（findLink）：正向名在 from 侧，反向名在 to 侧；目标类随之确定
-  const linkTo = (clsName: string, ln: string): string | undefined => {
-    const r = findLink(config, clsName, ln);
-    return r ? (r.reversed ? r.link.from : r.link.to) : undefined;
-  };
-  const linkResolves = (clsName: string, ln: string) => linkTo(clsName, ln) !== undefined;
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
   const checkFilterKeys = (clsName: string, f: Record<string, unknown>, trail: string): void => {
     if (!config.object_types[clsName]) return; // 类不存在由效应目标检查报「不存在的类」，这里不抢话
@@ -53,19 +46,22 @@ export function validateSemantics(config: OntologyConfig): void {
           const entry = cls.sources?.[src];
           if (!entry) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则指向不存在的源条目 ${src}`);
           if (cond && typeof cond === "object") {
-            for (const [k, sub] of Object.entries(cond as Record<string, unknown>)) {
-              if (k === "$link") {
-                // $link 的关系名必须能从该类解析；嵌套过滤的键按目标类接着校
-                for (const [ln, nested] of Object.entries(sub as Record<string, unknown>)) {
-                  if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则引用了不存在的关系 ${ln}`);
-                  const target = linkTo(clsName, ln);
-                  if (target && nested && typeof nested === "object") checkFilterKeys(target, nested as Record<string, unknown>, `${clsName}.${prop} 的派生规则`);
+            // 遍历走 schema 层 walkFilter：顶层键查源条目映射；嵌套键按目标类查类属性（与 checkFilterKeys 同口径）
+            walkFilter(config, clsName, cond as Record<string, unknown>, {
+              prop: (c, k, _v, depth) => {
+                if (depth === 0) {
+                  if (!entry.fields[k]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则在 ${src} 上过滤未映射的属性 ${k}`);
+                } else if (!config.object_types[c]?.properties[k]) {
+                  throw new Error(`配置不合法：${clsName}.${prop} 的派生规则过滤了 ${c} 上不存在的属性 ${k}`);
                 }
-                continue;
-              }
-              if (k.startsWith("$")) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则里 ${src} 的过滤不支持 ${k}`);
-              if (!entry.fields[k]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则在 ${src} 上过滤未映射的属性 ${k}`);
-            }
+              },
+              link: (_c, ln, target) => {
+                if (!target) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则引用了不存在的关系 ${ln}`);
+              },
+              special: (_c, k, _v) => {
+                throw new Error(`配置不合法：${clsName}.${prop} 的派生规则里 ${src} 的过滤不支持 ${k}`);
+              },
+            });
           }
         }
       }

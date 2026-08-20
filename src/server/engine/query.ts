@@ -5,7 +5,7 @@ import type { Filter, LinkType, OntologyConfig } from "../schema/config";
 import { FILTER_OPS } from "../schema/config";
 import { walkFilter } from "../schema/filterWalk";
 import type { ExpandNode, QueryRequest } from "../schema/request";
-import { toColumnValue, type Condition, type SourceDriver } from "./driver";
+import { dialectFor, toColumnValue, type Condition, type SourceDriver } from "./driver";
 import type { EvalContext } from "./expr";
 import {
   assertFilterShapes,
@@ -71,20 +71,9 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
         return transitionHolds(cls, ind, link, env, ctx);
       }
       // match 关系：两端属性值相等则成立。空值不连关系。
+      const merged = matchConds(cls, ind, link, reversed, targetFilter as Filter | undefined, (k) => `目标侧过滤 ${k} 与关系 ${linkName} 的配对字段冲突`);
+      if (!merged) return false;
       const targetClsName = reversed ? link.from : link.to;
-      const conds: Filter = {};
-      for (const pair of link.match ?? []) {
-        const myProp = reversed ? pair.to : pair.from;
-        const targetProp = reversed ? pair.from : pair.to;
-        const v = propValue(cls, ind, myProp);
-        if (v == null) return false;
-        conds[targetProp] = v;
-      }
-      const merged: Filter = { ...conds };
-      for (const [k, v] of Object.entries((targetFilter as Filter | undefined) ?? {})) {
-        if (k in conds) throw new EngineReject(`目标侧过滤 ${k} 与关系 ${linkName} 的配对字段冲突`); // 静默覆盖会让配对形同虚设
-        merged[k] = v;
-      }
       return (await selectIndividuals(env, targetClsName, { filter: merged, ctx })).length > 0;
     },
   };
@@ -92,6 +81,25 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
 }
 
 /* ---------- 个体组装：先定列，再下推 ---------- */
+
+/** match 配对 → 目标侧条件（唯一出处）：reversed 换向；配对值为空返回 null（关系不成立，没有目标）。
+ *  目标侧过滤与配对字段冲突即拒绝（静默覆盖会让配对形同虚设），冲突文案由调用方定。 */
+function matchConds(cls: Cls, ind: Individual, link: LinkType, reversed: boolean, targetFilter: Filter | undefined, conflictMsg: (k: string) => string): Filter | null {
+  const conds: Filter = {};
+  for (const pair of link.match ?? []) {
+    const myProp = reversed ? pair.to : pair.from;
+    const targetProp = reversed ? pair.from : pair.to;
+    const v = propValue(cls, ind, myProp);
+    if (v == null) return null; // 空值不连关系
+    conds[targetProp] = v;
+  }
+  const merged: Filter = { ...conds };
+  for (const [k, v] of Object.entries(targetFilter ?? {})) {
+    if (k in conds) throw new EngineReject(conflictMsg(k));
+    merged[k] = v;
+  }
+  return merged;
+}
 
 interface SelectOpts {
   identity?: unknown;
@@ -218,7 +226,7 @@ export async function selectIndividuals(env: Env, clsName: string, opts: SelectO
     const conds: Condition[] = [...(pushed.get(srcName) ?? [])];
     if (opts.identity !== undefined) conds.push({ column: keyCol, op: "eq", value: opts.identity });
     // date 条件的值是 Unix 秒：下推活体库前按连接方言归一（读侧与写回同一规则）
-    const dialect = env.driver.dialectOf?.(entry.connection) ?? env.driver.dialect;
+    const dialect = dialectFor(env.driver, entry.connection);
     const bound = conds.map((c) => {
       if (!c.dateLike || c.value === undefined) return c;
       const v = Array.isArray(c.value) ? c.value.map((x) => toColumnValue(x, "date", dialect)) : toColumnValue(c.value, "date", dialect);
@@ -357,19 +365,8 @@ async function expandItem(
     return [item.relation, (await transitionHolds(cls, ind, link, env, ctx)) ? [await project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
-  const conds: Filter = {};
-  for (const pair of link.match ?? []) {
-    const myProp = reversed ? pair.to : pair.from;
-    const targetProp = reversed ? pair.from : pair.to;
-    const v = propValue(cls, ind, myProp);
-    if (v == null) return [item.relation, []]; // 配对值为空：关系不成立，没有目标——与 linkHolds 同语义
-    conds[targetProp] = v;
-  }
-  const merged: Filter = { ...conds };
-  for (const [k, v] of Object.entries(item.filter ?? {})) {
-    if (k in conds) throw new EngineReject(`展开 ${item.relation} 的目标侧过滤 ${k} 与配对字段冲突`);
-    merged[k] = v;
-  }
+  const merged = matchConds(cls, ind, link, reversed, item.filter, (k) => `展开 ${item.relation} 的目标侧过滤 ${k} 与配对字段冲突`);
+  if (!merged) return [item.relation, []]; // 配对值为空：关系不成立，没有目标——与 linkHolds 同语义
   const targetCls = mustCls(env.config, targetClsName);
   const sub = await selectIndividuals(env, targetClsName, {
     filter: merged,

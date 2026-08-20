@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { adjudicate } from "@/server/engine/adjudicate";
 import { getDraft } from "@/server/engine/configStore";
+import { connectionsOf, hasSources, isCrossSource, SAME_SOURCE_OK_VERDICTS } from "@/server/engine/eligibility";
 import { metaStore } from "@/server/meta/store";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
@@ -44,14 +45,12 @@ export async function POST(req: Request) {
     const clsA = d.object_types[body.class_a];
     const clsB = d.object_types[body.class_b];
     if (!clsA || !clsB) return NextResponse.json({ error: "类不存在，先刷新画布" }, { status: 422 });
-    // 与候选对入口同口径：两边都得有源（无源的手工对象不进裁决）
-    if (Object.keys(clsA.sources ?? {}).length === 0 || Object.keys(clsB.sources ?? {}).length === 0) {
+    // 资格闸走 engine 同一套谓词（eligibility.ts）：两边有源；同源对只放行不动配置的结论
+    if (!hasSources(clsA) || !hasSources(clsB)) {
       return NextResponse.json({ error: "无源对象不进裁决（先给它挂来源）" }, { status: 422 });
     }
-    // 裁决只对跨源候选有意义：同源两个类不在这条流程里（候选对入口本就只列跨源）
-    const connsOf = (t: typeof clsA) => new Set(Object.values(t.sources ?? {}).map((s) => s.connection));
-    const shared = [...connsOf(clsA)].filter((c) => connsOf(clsB).has(c));
-    if (shared.length > 0 && body.verdict !== "仅名称相似" && body.verdict !== "跳过") {
+    if (!isCrossSource(clsA, clsB) && !SAME_SOURCE_OK_VERDICTS.has(body.verdict)) {
+      const shared = [...connectionsOf(clsA)].filter((c) => connectionsOf(clsB).has(c));
       return NextResponse.json({ error: `这两个对象有共同来源（${shared.join("、")}），不算疑似重复` }, { status: 422 });
     }
     const sourceOf = (name: string) => Object.keys(d.object_types[name]?.sources ?? {})[0] ?? "";

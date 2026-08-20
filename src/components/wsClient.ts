@@ -44,12 +44,12 @@ export function apiGet<T = Record<string, unknown>>(path: string): Promise<T> {
   return request<T>(path);
 }
 
-/** POST JSON：body 给对象（内部序列化）或现成的 JSON 串；省略 body 发空对象。 */
+/** POST JSON：body 给对象（内部序列化）；省略 body 发空对象。只收 object——调用方在 seam 处把字符串归一成 object。 */
 export function apiPost<T = Record<string, unknown>>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: typeof body === "string" ? body : JSON.stringify(body ?? {}),
+    body: JSON.stringify(body ?? {}),
   });
 }
 

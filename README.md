@@ -61,21 +61,26 @@ src/
 │                           questions / saved-queries、mcp（外部 Agent 入口）
 ├── components/             CanvasPage（构建页）、ChatPage（对话页）、
 │                           OntologyCanvas（画布）、PairCard（裁决面板）、
-│                           QuestionsCard、forms（连接/新建对象表单）、wsClient
-├── server/                 后端：引擎、校验、元库、种子配置
-│   ├── engine/             引擎，17 个文件各管一段：
-│   │                       driver（源驱动接口）、fixture / sqlDriver（两种实现）、
+│                           QuestionsCard、forms（连接/新建对象表单）、Bezel（卡面壳）、
+│                           sessionStore（会话模型）、shapeAnswerRows（答案卡塑形）、
+│                           layout.ts（dagre 自动分层布局）、wsClient（API 适配器）
+├── server/                 后端：引擎、校验、元库、运行态、种子配置
+│   ├── engine/             引擎：
+│   │                       driver（源驱动接口 + 方言）、fixture / sqlDriver（两种实现）、
 │   │                       registry / load（驱动注册表）、query（问数执行）、
 │   │                       action（动作执行）、individual（个体组装与派生）、
-│   │                       adjudicate（裁决落地）、overlap / normalize（交集率与归一化）、
+│   │                       adjudicate（裁决落地 + 转化骨架）、overlap / normalize（交集率与归一化）、
 │   │                       configStore（工作副本与已发布的唯一出入口）、
+│   │                       refs（删除前的引用扫描）、eligibility（候选对资格谓词）、
 │   │                       workspace（工作空间）、llmSlot（模型槽位 + 离线回退）、
-│   │                       expr（表达式）、validate（语义校验）、views（配置三视图）
+│   │                       logging（问数/动作留痕编排）、expr（表达式）、
+│   │                       validate（语义校验）、views（配置三视图）
 │   ├── schema/             Zod 形状：config（本体配置）、request（问数/动作请求）、ops（编辑操作）
+│   │                       filterWalk（$link 过滤树的唯一遍历入口与关系解析）
 │   ├── meta/store.ts       平台元数据库（默认单文件 SQLite，ONTOS_META_DSN 可换 MySQL）
-│   ├── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
-│   └── layout.ts           dagre 自动分层布局
-└── tests/                  9 个 vitest 文件；引擎行为约定钉在测试里
+│   ├── runtime.ts          运行态（元库/注册表/配置存储的进程级单例，测试可整套换掉）
+│   └── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
+└── tests/                  12 个 vitest 文件、159 个用例；引擎行为约定钉在测试里
 ```
 
 四条主线：
@@ -93,7 +98,7 @@ src/
 2. `src/server/engine/driver.ts`：引擎与源库之间的唯一接口。再看 `fixture.ts`（内存实现，演示与测试都靠它）和 `sqlDriver.ts`（MySQL/PG 实现）。
 3. `src/server/engine/query.ts` 配 `individual.ts`：读的路径——下推、对齐、派生。
 4. `src/server/engine/action.ts`：写的路径——前置、效应、投影、留痕。
-5. `src/server/engine/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。
+5. `src/server/engine/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。引用扫描在 `refs.ts`（纯函数），资格谓词在 `eligibility.ts`，进程级单例收口在 `runtime.ts`。
 6. `src/app/api/ask/route.ts` 到 `src/components/ChatPage.tsx`：一条请求从路由到界面的完整走法。
 7. `src/tests/engine.test.ts`：引擎的行为约定。改引擎先跑 `npm test`，全绿再谈别的。
 
@@ -108,7 +113,7 @@ src/
 | 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llmSlot` 的三个槽位出现；不设 key 走离线确定性回退 |
 | 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；演示 fixture 与平台元库走 node:sqlite |
 | 状态 | React 自带 useState / useRef | 无状态库；对话会话按工作空间存 localStorage |
-| 测试 | vitest 4（pool: forks） | 引擎 golden 测试，127 个用例 |
+| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema/会话契约测试，159 个用例 |
 | 图标 | @phosphor-icons/react | |
 
 ## 运行

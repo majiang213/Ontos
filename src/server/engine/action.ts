@@ -4,7 +4,7 @@
 
 import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../schema/config";
 import type { ActionRequest } from "../schema/request";
-import { toColumnValue, type SourceDriver } from "./driver";
+import { dialectFor, toColumnValue, type SourceDriver } from "./driver";
 import {
   assertFilterShapes,
   currentView,
@@ -251,10 +251,6 @@ function rejectIfDerived(cls: Cls, prop: string) {
 
 const err = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function dialectOfConn(driver: SourceDriver, connection: string): string | undefined {
-  return driver.dialectOf?.(connection) ?? driver.dialect;
-}
-
 async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Promise<ProjectionRecord[]> {
   const driver = env.driver;
   const out: ProjectionRecord[] = [];
@@ -283,7 +279,7 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
         if (!changed.every((prop) => entry.fields[prop])) continue; // 只改映射了全部所改属性的源
         handled++; // 有源承接才计数；尝试后失败按各源条目记
         try {
-          const dialect = dialectOfConn(driver, entry.connection);
+          const dialect = dialectFor(driver, entry.connection);
           const set: Record<string, unknown> = {};
           for (const prop of changed) set[entry.fields[prop]] = toColumnValue(setVals[prop], p.cls.def.properties[prop]?.type, dialect);
           // 条件更新：识别列 = 读到的键，且要改的列仍等于读到的值
@@ -350,7 +346,7 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
           }
         }
         const row: Record<string, unknown> = {};
-        const dialect = dialectOfConn(driver, entry.connection);
+        const dialect = dialectFor(driver, entry.connection);
         for (const [prop, col] of Object.entries(entry.fields)) {
           if (vals[prop] !== undefined) row[col] = toColumnValue(vals[prop], p.cls.def.properties[prop]?.type, dialect);
         }
@@ -373,7 +369,7 @@ async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContex
       if (!idProp || !entry.fields[idProp]) continue;
       try {
         const row: Record<string, unknown> = {};
-        const dialect = dialectOfConn(driver, entry.connection);
+        const dialect = dialectFor(driver, entry.connection);
         for (const [prop, col] of Object.entries(entry.fields)) {
           const v = prop === idProp ? req.identity : propValue(cls, subject, prop);
           if (v !== undefined && v !== null) row[col] = toColumnValue(v, cls.def.properties[prop]?.type, dialect);

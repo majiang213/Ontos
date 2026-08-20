@@ -17,8 +17,8 @@ export interface LlmSlot {
   nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest>;
   /** 表结构 → 本体草稿（逆向建模槽位） */
   draftObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>>;
-  /** 跨源类两两比对 → 候选对与倾向（整合槽位） */
-  suggestPairs(classes: { name: string; source: string; fields: string[] }[]): Promise<PairAdvice[]>;
+  /** 跨源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合（跨源判定在实现里做）。 */
+  suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
 }
 
 export interface PairAdvice {
@@ -98,13 +98,13 @@ export class CannedSlot implements LlmSlot {
     return out;
   }
 
-  async suggestPairs(classes: { name: string; source: string; fields: string[] }[]): Promise<PairAdvice[]> {
+  async suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
     const pairs: PairAdvice[] = [];
     for (let i = 0; i < classes.length; i++) {
       for (let j = i + 1; j < classes.length; j++) {
         const a = classes[i];
         const b = classes[j];
-        if (a.source === b.source) continue; // 同源不成对
+        if (a.sources.some((s) => b.sources.includes(s))) continue; // 有共同连接不成对
         const shared = a.fields.filter((f) => b.fields.includes(f));
         const ratio = shared.length / Math.max(a.fields.length, b.fields.length, 1);
         const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
@@ -186,12 +186,12 @@ properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 
     return draftSchema.parse(object).object_types;
   }
 
-  async suggestPairs(classes: { name: string; source: string; fields: string[] }[]): Promise<PairAdvice[]> {
+  async suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
     const { object } = await this.gen({
       model: this.model,
       schema: pairsSchema,
-      prompt: `你是本体平台的整合顾问。下面是来自不同源的对象（名字、来源连接、字段名）。
-找出跨源疑似同义的对，每对给倾向（同一/部分重叠/阶段/仅名称相似）与一句依据。同源不成对；字段和名字都不像的不进候选。
+      prompt: `你是本体平台的整合顾问。下面是来自不同源的对象（名字、来源连接集合、字段名）。
+找出跨源疑似同义的对，每对给倾向（同一/部分重叠/阶段/仅名称相似）与一句依据。有共同连接的不成对；字段和名字都不像的不进候选。
 对象：${JSON.stringify(classes)}`,
     });
     return pairsSchema.parse(object).pairs;

@@ -8,6 +8,7 @@ import { actionRequestSchema, queryRequestSchema } from "@/server/schema/request
 import { runQuery } from "@/server/engine/query";
 import { runAction } from "@/server/engine/action";
 import { EngineReject } from "@/server/engine/individual";
+import { conversionAction } from "@/server/engine/adjudicate";
 import { getSlot } from "@/server/engine/llmSlot";
 import { listClasses, readClass, search } from "@/server/engine/views";
 import { getDriverRegistry, resolveTableInfos } from "@/server/engine/load";
@@ -98,11 +99,7 @@ export async function POST(req: Request) {
       // 有转化关系就给转化模板，否则给改属性模板；都是草稿，不发布
       const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
       const draft = transition
-        ? {
-            description: `转化为${transition[1].transition!.to}`,
-            pre: { [transition[1].transition!.property]: transition[1].transition!.from, $link: { [transition[0]]: false } },
-            effect: [{ link: transition[0] }],
-          }
+        ? conversionAction(transition[0], transition[1]) // 转化骨架唯一构造点（adjudicate.ts）
         : {
             description: "更新属性（模板，请改属性名与前置）",
             pre: {},

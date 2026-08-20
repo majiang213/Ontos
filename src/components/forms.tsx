@@ -30,7 +30,7 @@ export function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, de
     >
       <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="对象名（小写，如 vendor）" value={name} onChange={(e) => setName(e.target.value)} />
       <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="一句话说明（可选）" value={description} onChange={(e) => setDescription(e.target.value)} />
-      <select value={kind} onChange={(e) => setKind(e.target.value as "thing" | "event")} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)" }}>
+      <select className="ctl" value={kind} onChange={(e) => setKind(e.target.value as "thing" | "event")} style={{ fontSize: 13 }}>
         <option value="thing">事物（可持续存在）</option>
         <option value="event">事件（发生过即确定）</option>
       </select>
@@ -143,7 +143,7 @@ export function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => voi
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
       <input className="text-in" style={inputStyle} placeholder="连接名（小写，如 purchase_sys）" value={name} onChange={(e) => setName(e.target.value)} />
-      <select value={type} onChange={(e) => setType(e.target.value as "sqlite" | "mysql" | "pg")} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)" }}>
+      <select className="ctl" value={type} onChange={(e) => setType(e.target.value as "sqlite" | "mysql" | "pg")} style={{ fontSize: 13 }}>
         <option value="sqlite">SQLite 文件（演示）</option>
         <option value="mysql">MySQL</option>
         <option value="pg">PostgreSQL</option>

@@ -22,7 +22,8 @@ export interface CanvasLink {
   kind: "match" | "transition";
 }
 
-const NODE_W = 300;
+/** 节点在布局计算里的宽度（唯一出处）：dagre 分层与 FloatingEdge 的未测量回退共用。 */
+export const NODE_W = 300;
 
 /** 节点高度按内容估算：题头 + 属性行 + 标签行。 */
 function estimateHeight(o: CanvasObject): number {

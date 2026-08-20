@@ -18,15 +18,35 @@ export interface Session {
 
 const TRIM_ROWS = 20;
 
+/** 持久化后端的最小形状：浏览器是 localStorage，测试传内存 stub。 */
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
 export class SessionStore {
   private sessions: Session[] = [];
   private curId: string | null = null;
-  private inited = false; // 读回完成前不落库（localStorage 只有客户端有，init 只能晚到）
+  private inited = false; // 读回完成前不落库（init 只能晚到：浏览器里 localStorage 挂载后才读）
   private listeners = new Set<() => void>();
-  /** 动作成功后的复查问题：跨调用的流程状态，不从消息列表反推。 */
-  lastQuestion: string | null = null;
+  /** 动作成功后的复查问题：跨调用的流程状态，不从消息列表反推。
+   *  显式不持久化（内存态）：它是「这次坐在这里」的流程上下文，刷新即丢是设计，不是遗漏。 */
+  private lastQ: string | null = null;
 
-  constructor(private ws: string) {}
+  /** 记一条「上一条问题」（问数与台账重跑都算）。 */
+  noteQuestion(q: string): void {
+    this.lastQ = q;
+  }
+
+  /** 动作成功后的复查用：取上一条问题（没有则 null）。 */
+  takeFollowup(): string | null {
+    return this.lastQ;
+  }
+
+  constructor(
+    private ws: string,
+    private storage: StorageLike | null = typeof localStorage !== "undefined" ? localStorage : null // 服务端渲染没有 localStorage：空存储，init/persist 空转
+  ) {}
 
   private key(): string {
     return `ontos-chat-sessions:${this.ws}`;
@@ -47,7 +67,7 @@ export class SessionStore {
 
   /* ---------- 持久化（数据边界：裁剪后才写） ---------- */
   private persist(): void {
-    if (!this.inited) return;
+    if (!this.inited || !this.storage) return;
     try {
       const trimmed = this.sessions
         .filter((s) => s.msgs.length > 0) // 空会话不落库（没说过话的会话不是会话）
@@ -55,7 +75,7 @@ export class SessionStore {
           ...s,
           msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, total: m.answer.total ?? m.answer.rows.length, rows: m.answer.rows.slice(0, TRIM_ROWS) } } : m)),
         }));
-      localStorage.setItem(this.key(), JSON.stringify(trimmed));
+      this.storage.setItem(this.key(), JSON.stringify(trimmed));
     } catch {
       // 配额满了不挡对话
     }
@@ -65,8 +85,9 @@ export class SessionStore {
   init = (): void => {
     if (this.inited) return;
     this.inited = true;
+    if (!this.storage) return;
     try {
-      const raw = localStorage.getItem(this.key());
+      const raw = this.storage.getItem(this.key());
       if (raw) {
         const s = (JSON.parse(raw) as unknown[]).filter(
           (x): x is Session => Boolean(x) && typeof (x as Session).id === "string" && Array.isArray((x as Session).msgs)
@@ -106,6 +127,21 @@ export class SessionStore {
   append(sid: string, m: Msg): void {
     this.sessions = this.sessions.map((s) => (s.id === sid ? { ...s, msgs: [...s.msgs, m] } : s));
     this.emit();
+  }
+
+  /** 一次对话往返：开会话（或复用当前）→ 落用户消息 → 跑请求 → 落 agent 消息。
+   *  失败落「出错了」文本并返回 null（调用方据此决定是否续动作）。busy 闸在调用方。 */
+  async runFlow(seed: string, userText: string, call: () => Promise<Msg>): Promise<Msg | null> {
+    const sid = this.ensureSession(seed);
+    this.append(sid, { role: "user", text: userText });
+    try {
+      const msg = await call();
+      this.append(sid, msg);
+      return msg;
+    } catch (e) {
+      this.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
+      return null;
+    }
   }
 
   removeSession(sid: string): void {

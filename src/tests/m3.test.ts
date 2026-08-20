@@ -22,6 +22,35 @@ function assertPublishable(d: OntologyConfig) {
   validateSemantics(configSchema.parse(structuredClone(d)));
 }
 
+describe("语义校验（validateSemantics）", () => {
+  it("when 派生：顶层键必须映射在该源条目上；$link 关系名必须可解析；嵌套键按目标类校", () => {
+    const base = seedConfig();
+    // 顶层键未映射：status 的派生规则在 device 源条目上过滤了它不映射的属性 ghost
+    const bad1 = structuredClone(base);
+    bad1.object_types.equipment.properties.status = {
+      type: "enum",
+      derived: [{ when: { device: { ghost: "x" } }, value: "in_transit" }],
+    };
+    expect(() => validateSemantics(bad1)).toThrow(/未映射的属性 ghost/);
+    // $link 引用了不存在的关系
+    const bad2 = structuredClone(base);
+    bad2.object_types.equipment.properties.status = {
+      type: "enum",
+      derived: [{ when: { device: { $link: { ghost_rel: { name: "x" } } } }, value: "in_transit" }],
+    };
+    expect(() => validateSemantics(bad2)).toThrow(/不存在的关系 ghost_rel/);
+    // 嵌套键按目标类校：belongs_to 的目标 department 上没有 ghost 属性
+    const bad3 = structuredClone(base);
+    bad3.object_types.equipment.properties.status = {
+      type: "enum",
+      derived: [{ when: { device: { $link: { belongs_to: { ghost: "x" } } } }, value: "in_transit" }],
+    };
+    expect(() => validateSemantics(bad3)).toThrow(/department 上不存在的属性 ghost/);
+    // 合法形状放行：status 现状（含 $link 转化）+ in_warranty 布尔派生
+    expect(() => validateSemantics(structuredClone(base))).not.toThrow();
+  });
+});
+
 describe("归一化", () => {
   it("序列号：去横杠统一大写；手机号：去 +86 与分隔符；身份证 X 大写", () => {
     const serial = pickRule(["SN-40217", "SN-40080", "SN-40081"]);

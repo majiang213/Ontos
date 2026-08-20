@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiDel, apiGet, apiPost } from "./wsClient";
+import Bezel from "./Bezel";
 
 export default function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
   const [items, setItems] = useState<{ id: number; question: string; status: string }[]>([]);
@@ -22,12 +23,11 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
   }, [load]);
   return (
     <div className="float-card float-tl" style={{ top: 120, width: 360 }}>
-      <div className="bezel">
-        <div className="bezel-core" style={{ padding: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
-            <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
-          </div>
+      <Bezel>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
+          <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
+        </div>
           {items.map((q) => (
             <div key={q.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
               <span>{q.question}</span>
@@ -95,8 +95,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
           >
             {running ? "跑着…" : "全量跑一遍"}
           </button>
-        </div>
-      </div>
+      </Bezel>
     </div>
   );
 }

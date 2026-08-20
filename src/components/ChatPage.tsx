@@ -6,13 +6,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { apiGet, apiPost, getWs } from "./wsClient";
 import { SessionStore, type Msg } from "./sessionStore";
+import { shapeAnswerRows } from "./shapeAnswerRows";
+import Bezel from "./Bezel";
 import { ArrowUpRight } from "@phosphor-icons/react";
 
 interface SavedApi {
   id: number;
   name: string;
   question: string;
-  query_json: string;
+  query: Record<string, unknown>; // 后端给 query_json 字符串，loadApis 落地即 parse 成 object（seam 处归一，之后全程 object）
 }
 
 const SUGGESTED = ["在役设备及其所属部门", "还有多少在途设备", "哪些设备过保了", "每个部门多少台在役设备"];
@@ -39,8 +41,8 @@ export default function ChatPage() {
 
   const loadApis = useCallback(async () => {
     try {
-      const data = await apiGet<{ apis?: SavedApi[] }>("/api/saved-queries");
-      setApis(data.apis ?? []);
+      const data = await apiGet<{ apis?: { id: number; name: string; question: string; query_json: string }[] }>("/api/saved-queries");
+      setApis((data.apis ?? []).map((a) => ({ id: a.id, name: a.name, question: a.question, query: JSON.parse(a.query_json) })));
     } catch {
       // 台账读不到不挡对话
     }
@@ -49,54 +51,41 @@ export default function ChatPage() {
     void loadApis();
   }, [loadApis]);
 
-  async function ask(question: string) {
-    store.lastQuestion = question;
-    const sid = store.ensureSession(question);
+  /** 对话往返的唯一骨架（store.runFlow）+ busy 闸：三段流程（ask/runApi/act）只写差异。 */
+  const flow = async (seed: string, userText: string, call: () => Promise<Msg>): Promise<Msg | null> => {
     setBusy(true);
-    store.append(sid, { role: "user", text: question });
     try {
-      const data = await apiPost<{ query: Record<string, unknown>; rows: Record<string, unknown>[]; path: string[] }>("/api/ask", { question });
-      store.append(sid, { role: "agent", answer: { query: data.query, rows: data.rows, path: data.path, question } });
-    } catch (e) {
-      store.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
+      return await store.runFlow(seed, userText, call);
     } finally {
       setBusy(false);
     }
+  };
+
+  async function ask(question: string) {
+    store.noteQuestion(question);
+    await flow(question, question, async () => {
+      const data = await apiPost<{ query: Record<string, unknown>; rows: Record<string, unknown>[]; path: string[] }>("/api/ask", { question });
+      return { role: "agent", answer: { query: data.query, rows: data.rows, path: data.path, question } };
+    });
   }
 
   /** 跑台账里的已存 API：直接执行保存的结构化查询，不重新编译。 */
   async function runApi(api: SavedApi) {
-    store.lastQuestion = api.question; // 台账问题也算「上一条问题」，动作后的复查看它
-    const sid = store.ensureSession(api.name);
-    setBusy(true);
-    store.append(sid, { role: "user", text: `运行问数 API：${api.name}` });
-    try {
-      const data = await apiPost<{ rows: Record<string, unknown>[]; path: string[] }>("/api/query", api.query_json);
-      store.append(sid, { role: "agent", answer: { query: JSON.parse(api.query_json), rows: data.rows, path: data.path, question: api.question } });
-    } catch (e) {
-      store.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
-    } finally {
-      setBusy(false);
-    }
+    store.noteQuestion(api.question); // 台账问题也算「上一条问题」，动作后的复查看它
+    await flow(api.name, `运行问数 API：${api.name}`, async () => {
+      const data = await apiPost<{ rows: Record<string, unknown>[]; path: string[] }>("/api/query", api.query);
+      return { role: "agent", answer: { query: api.query, rows: data.rows, path: data.path, question: api.question } };
+    });
   }
 
   async function act(action: string, object: string, identity: string, request?: Record<string, unknown>) {
-    const sid = store.ensureSession(`${action} ${identity}`);
-    setBusy(true);
-    store.append(sid, { role: "user", text: `${action} ${object} ${identity}` });
-    try {
+    const msg = await flow(`${action} ${identity}`, `${action} ${object} ${identity}`, async () => {
       const data = await apiPost<{ ok: boolean; error?: string; projections?: NonNullable<Msg["actionResult"]>["projections"] }>("/api/action", { action, object, identity, request });
-      store.append(sid, {
-        role: "agent",
-        actionResult: { ok: Boolean(data.ok), error: data.error, projections: data.projections ?? [] }, // 兜底空数组，渲染不崩
-      });
-      // 动作成功后自动再问一次（用记下的上一条问题，不从消息列表反推）
-      if (data.ok && store.lastQuestion) await ask(store.lastQuestion);
-    } catch (e) {
-      store.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
-    } finally {
-      setBusy(false);
-    }
+      return { role: "agent", actionResult: { ok: Boolean(data.ok), error: data.error, projections: data.projections ?? [] } }; // 兜底空数组，渲染不崩
+    });
+    // 动作成功后自动再问一次（用记下的上一条问题，不从消息列表反推）
+    const followup = store.takeFollowup();
+    if (msg?.actionResult?.ok && followup) await ask(followup);
   }
 
   /** 输入组合区：动作区 + 问数 API 台账 + 输入卡。空态时收进 hero（对话框在上，同 Claude）；有消息后沉到底部。 */
@@ -104,17 +93,15 @@ export default function ChatPage() {
     <>
       {/* 动作区（点开才展开）；绑的是种子本体的演示剧本，通用形态是外部 Agent 经 MCP 发动作 */}
       {actOpen && (
-        <div className="bezel" style={{ marginBottom: 10 }}>
-          <div className="bezel-core" style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, color: "var(--ink-2)" }}>对序列号</span>
-            <input className="text-in" style={{ width: 140, padding: "6px 12px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="SN-40217" />
-            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>发起动作：</span>
-            <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
-            <button className="btn" onClick={() => act("transfer", "equipment", sn, { dept: "D07" })} disabled={busy}>调拨到 D07</button>
-            <button className="btn" onClick={() => act("scrap", "equipment", sn)} disabled={busy}>报废</button>
-            <button className="chip" aria-label="收起" style={{ marginLeft: "auto" }} onClick={() => setActOpen(false)}>收起</button>
-          </div>
-        </div>
+        <Bezel pad={12} style={{ marginBottom: 10 }} coreStyle={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>对序列号</span>
+          <input className="text-in" style={{ width: 140, padding: "6px 12px", fontSize: 13 }} value={sn} onChange={(e) => setSn(e.target.value)} placeholder="SN-40217" />
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>发起动作：</span>
+          <button className="btn" onClick={() => act("convert", "equipment", sn)} disabled={busy}>验收</button>
+          <button className="btn" onClick={() => act("transfer", "equipment", sn, { dept: "D07" })} disabled={busy}>调拨到 D07</button>
+          <button className="btn" onClick={() => act("scrap", "equipment", sn)} disabled={busy}>报废</button>
+          <button className="chip" aria-label="收起" style={{ marginLeft: "auto" }} onClick={() => setActOpen(false)}>收起</button>
+        </Bezel>
       )}
       {/* 问数 API 台账：已保存的查询，点了直接重跑 */}
       {apis.length > 0 && (
@@ -128,8 +115,9 @@ export default function ChatPage() {
         </div>
       )}
       {/* 输入卡：输入区 + 底部工具条（动作开关在左，发送在右） */}
-      <form
-        className="bezel"
+      <Bezel
+        as="form"
+        pad="12px 14px 8px"
         style={{ flexShrink: 0, borderColor: "var(--line-strong)" }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -139,7 +127,6 @@ export default function ChatPage() {
           }
         }}
       >
-        <div className="bezel-core" style={{ padding: "12px 14px 8px" }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -165,8 +152,7 @@ export default function ChatPage() {
               <span className="ico"><ArrowUpRight size={14} weight="light" /></span>
             </button>
           </div>
-        </div>
-      </form>
+      </Bezel>
     </>
   );
 
@@ -278,15 +264,11 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
   const [saveName, setSaveName] = useState("");
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // 列取所有行的并集：稀疏行不丢列；展开列按「任一行的值是数组」认。
-  // 值全为空的列直接跳过——旧版本答案里可能留着这种键：看不见内容却把表格顶宽
-  const allKeys = [...new Set(a.rows.flatMap((r) => Object.keys(r)))].filter((c) => a.rows.some((r) => r[c] !== undefined && r[c] !== null && r[c] !== ""));
-  const cols = allKeys.filter((c) => !a.rows.some((r) => Array.isArray(r[c])));
-  const expandCols = allKeys.filter((c) => a.rows.some((r) => Array.isArray(r[c])));
+  // 表格塑形是纯函数（shapeAnswerRows.ts）：稀疏行不丢列、全空列跳过、数组值认展开列
+  const { cols, expandCols } = shapeAnswerRows(a.rows);
   return (
-    <div className="bezel">
-      <div className="bezel-core" style={{ padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+    <Bezel>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <div className="answer-head" style={{ marginBottom: 0 }}>共 {a.total ?? a.rows.length} 条</div>
           {a.question && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{a.question}</div>}
         </div>
@@ -352,8 +334,7 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
           </button>
           {saveError && <span style={{ fontSize: 12, color: "var(--danger)" }}>{saveError}</span>}
         </form>
-      </div>
-    </div>
+    </Bezel>
   );
 }
 
@@ -364,11 +345,10 @@ function opLabel(op: string): string {
 
 function ActionCard({ r }: { r: NonNullable<Msg["actionResult"]> }) {
   return (
-    <div className="bezel">
-      <div className="bezel-core" style={{ padding: 14 }}>
-        <div className="answer-head" style={{ color: r.ok ? "var(--ok)" : "var(--danger)" }}>
-          {r.ok ? "完成" : `未完成：${r.error ?? "部分来源没写成"}`}
-        </div>
+    <Bezel>
+      <div className="answer-head" style={{ color: r.ok ? "var(--ok)" : "var(--danger)" }}>
+        {r.ok ? "完成" : `未完成：${r.error ?? "部分来源没写成"}`}
+      </div>
         {r.projections.map((p, i) => (
           <div key={i} style={{ fontSize: 12, lineHeight: 1.9, color: p.ok ? "var(--ink-2)" : "var(--danger)" }}>
             {p.ok ? "✓" : "✗"} {p.source}.{p.table} {opLabel(p.op)}
@@ -376,7 +356,6 @@ function ActionCard({ r }: { r: NonNullable<Msg["actionResult"]> }) {
             {p.error ? `（${p.error}）` : ""}
           </div>
         ))}
-      </div>
-    </div>
+    </Bezel>
   );
 }
