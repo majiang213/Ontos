@@ -4,7 +4,7 @@ node_modules/
 .DS_Store
 *.log
 .idea/
-lib/config/ontos-meta.db
-lib/config/canvas-layout.json
-lib/config/versions/
-lib/config/workspaces/
+src/server/config/ontos-meta.db
+src/server/config/canvas-layout.json
+src/server/config/versions/
+src/server/config/workspaces/

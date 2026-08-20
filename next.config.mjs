@@ -11,6 +11,7 @@ try {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   devIndicators: false,
+  turbopack: { root: import.meta.dirname }, // 锁定仓根：否则向上找到家目录的 package-lock.json 当工作区根
   env: { NEXT_PUBLIC_GIT_SHA: gitSha },
 };
 

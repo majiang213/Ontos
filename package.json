@@ -1,7 +1,8 @@
 {
   "name": "ontos",
   "private": true,
-  "description": "Ontos 平台（Next.js 前后端一体）：引擎 lib/engine/，种子配置 lib/config/ontology.yaml，测试 tests/。",
+  "description": "Ontos 平台（Next.js 前后端一体）：引擎 src/server/engine/，种子配置 src/server/config/ontology.yaml，测试 src/tests/。",
+  "engines": { "node": ">=22.5" },
   "scripts": {
     "dev": "next dev -p 6688",
     "build": "next build",
@@ -17,7 +18,7 @@
     "ai": "^7.0.66",
     "js-yaml": "^5.2.3",
     "mysql2": "^3.23.3",
-    "next": "^15.3.0",
+    "next": "^16.3.1",
     "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -28,7 +29,7 @@
     "@types/pg": "^8.21.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
 }
