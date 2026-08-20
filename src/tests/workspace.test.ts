@@ -2,29 +2,15 @@
 // 互不干扰；台账路由的列表/新建/拒绝。每个用例在独立临时目录里跑，元库文件从无到有。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { cleanupRuntime, setupRuntime } from "./helpers";
 
 let tmp: string;
-let repoRoot: string;
 
 beforeEach(async () => {
-  repoRoot = process.cwd();
-  tmp = mkdtempSync(join(tmpdir(), "ontos-ws-"));
-  mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-  cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml")); // 种子模板
-  process.chdir(tmp);
-  (await import("../server/engine/configStore")).resetStore();
-  (await import("../server/meta/store")).resetMetaStore();
-  (await import("../server/engine/load")).resetRegistry();
+  tmp = await setupRuntime("ontos-ws-");
 });
 afterEach(async () => {
-  (await import("../server/engine/configStore")).resetStore();
-  (await import("../server/meta/store")).resetMetaStore();
-  (await import("../server/engine/load")).resetRegistry();
-  process.chdir(repoRoot);
-  rmSync(tmp, { recursive: true, force: true });
+  await cleanupRuntime(tmp);
 });
 
 describe("空间隔离", () => {

@@ -3,7 +3,7 @@
 "use client";
 
 import { useState } from "react";
-import { apiUrl } from "./wsClient";
+import { apiPost } from "./wsClient";
 
 export const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
 
@@ -123,25 +123,19 @@ export function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => voi
         setBusy(true);
         setError(null);
         try {
-          const r = await fetch(apiUrl("/api/connections"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: name.trim(),
-              type,
-              host: host || undefined,
-              port: port ? Number(port) : undefined,
-              db_name: dbName || undefined,
-              ro_user: user || undefined,
-              ro_pass: pass || undefined,
-              test: true, // 先测连通再保存
-            }),
+          const data = await apiPost<{ warning?: string; tables?: unknown[] }>("/api/connections", {
+            name: name.trim(),
+            type,
+            host: host || undefined,
+            port: port ? Number(port) : undefined,
+            db_name: dbName || undefined,
+            ro_user: user || undefined,
+            ro_pass: pass || undefined,
+            test: true, // 先测连通再保存
           });
-          const data = await r.json();
-          if (!r.ok) setError(data.error ?? "连不上");
-          else onDone(data.warning ?? `已连接 ${name}，读到 ${data.tables?.length ?? 0} 张表`);
+          onDone(data.warning ?? `已连接 ${name}，读到 ${data.tables?.length ?? 0} 张表`);
         } catch (err) {
-          setError(err instanceof Error ? err.message : String(err)); // 网络层失败也留卡内
+          setError(err instanceof Error ? err.message : String(err)); // 拒绝与网络层失败都留卡内
         } finally {
           setBusy(false);
         }

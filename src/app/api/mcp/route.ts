@@ -13,7 +13,8 @@ import { listClasses, readClass, search } from "@/server/engine/views";
 import { getDriverRegistry, resolveTableInfos } from "@/server/engine/load";
 import { getPublished } from "@/server/engine/configStore";
 import { metaStore } from "@/server/meta/store";
-import { BadRequest, requireWriteAuth, safeLog, wsOf } from "@/app/api/_shared";
+import { withActionLog, withQueryLog } from "@/server/engine/logging";
+import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
 const TOOLS = [
   { name: "query", description: "按已发布本体执行结构化查询（只读）。入参：{ query: 查询 JSON }" },
@@ -42,7 +43,6 @@ const requestSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const started = Date.now();
   let id: unknown = null;
   try {
     let raw: unknown;
@@ -73,39 +73,16 @@ export async function POST(req: Request) {
 
     if (name === "query") {
       const query = queryRequestSchema.parse(args.query);
-      try {
-        const { rows, path } = await runQuery(config, driver, query);
-        safeLog(async () => metaStore().logQuery(ws, { version: (await getPublished(ws)).version, query_json: JSON.stringify(query), row_count: rows.length, ok: true, duration_ms: Date.now() - started }));
-        return rpcOk(id, toolResult({ rows, path }));
-      } catch (e) {
-        safeLog(async () => metaStore().logQuery(ws, { version: (await getPublished(ws)).version, query_json: JSON.stringify(query), ok: false, error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - started }));
-        throw e;
-      }
+      const out = await withQueryLog(ws, { query_json: JSON.stringify(query) }, () => runQuery(config, driver, query));
+      return rpcOk(id, toolResult({ rows: out.rows, path: out.path }));
     }
     if (name === "run_action") {
       const denied = requireWriteAuth(req);
       if (denied) return rpcErr(id, -32001, "未授权：写操作需要有效的令牌");
       const action = actionRequestSchema.parse(args);
-      // 留痕的公共部分：成功/失败两支只补差异字段
-      const log = (outcome: { ok: boolean; error?: string; projections?: unknown }) =>
-        safeLog(async () => metaStore().logAction(ws, {
-          version: (await getPublished(ws)).version,
-          action: action.action,
-          object_type: action.object,
-          subject: String(action.identity),
-          request_json: action.request ? JSON.stringify(action.request) : undefined,
-          ...outcome,
-          duration_ms: Date.now() - started,
-        }));
-      try {
-        const result = await runAction(config, driver, action, { nextSequence: (k, s) => metaStore().nextSeq(ws, k, s) });
-        log({ ok: result.ok, error: result.error, projections: result.projections });
-        // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
-        return rpcOk(id, toolResult(result, !result.ok));
-      } catch (e) {
-        log({ ok: false, error: e instanceof Error ? e.message : String(e) });
-        throw e;
-      }
+      const result = await withActionLog(ws, action, () => runAction(config, driver, action, { nextSequence: (k, s) => metaStore().nextSeq(ws, k, s) }));
+      // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
+      return rpcOk(id, toolResult(result, !result.ok));
     }
     if (name === "propose_ontology") {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);

@@ -2,13 +2,11 @@
 // 多选的表 → 内省 → LLM 槽位产草稿（离线回退为确定性规则）→ 导入工作副本。
 // 对象立刻上画布（草稿态），没有预览卡、没有确认草稿卡。
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDriverRegistry, resolveTableInfos } from "@/server/engine/load";
 import { getSlot } from "@/server/engine/llmSlot";
 import { applyOp, DraftReject } from "@/server/engine/configStore";
-import { EngineReject } from "@/server/engine/individual";
-import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z.object({
   tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty(),
@@ -17,7 +15,7 @@ const bodySchema = z.object({
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const ws = wsOf(req);
     const { tables } = bodySchema.parse(await bodyJson(req));
     const registry = await getDriverRegistry(ws);
@@ -25,11 +23,6 @@ export async function POST(req: Request) {
     const infos = await resolveTableInfos(registry, tables, (m) => new DraftReject(m));
     const objects = await getSlot().draftObjects(infos);
     await applyOp({ op: "import_objects", objects }, ws);
-    return NextResponse.json({ ok: true, created: Object.keys(objects) });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    if (e instanceof DraftReject || e instanceof EngineReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    return internalError(e);
-  }
+    return { ok: true, created: Object.keys(objects) };
+  });
 }

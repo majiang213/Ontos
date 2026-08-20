@@ -1,9 +1,10 @@
 // M3 测试：归一化、交集率（真实读源计算）、裁决写草稿的四种结论。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupRuntime, setupRuntime } from "./helpers";
 import { pickRule, normalizeWith, RULES } from "../server/engine/normalize";
 import { computeOverlap } from "../server/engine/overlap";
 import { applyVerdict } from "../server/engine/adjudicate";
@@ -68,17 +69,11 @@ describe("交集率", () => {
 
 describe("裁决写草稿", () => {
   let tmp: string;
-  let repoRoot: string;
-  beforeEach(() => {
-    repoRoot = process.cwd();
-    tmp = mkdtempSync(join(tmpdir(), "ontos-adj-"));
-    mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-    cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
-    process.chdir(tmp);
+  beforeEach(async () => {
+    tmp = await setupRuntime("ontos-adj-");
   });
-  afterEach(() => {
-    process.chdir(repoRoot);
-    rmSync(tmp, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupRuntime(tmp);
   });
 
   function twoClasses(): OntologyConfig {

@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "./wsClient";
+import { apiDel, apiGet, apiPost } from "./wsClient";
 
 export default function QuestionsCard({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
   const [items, setItems] = useState<{ id: number; question: string; status: string }[]>([]);
@@ -11,8 +11,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
   const [acting, setActing] = useState(false); // 增删的防连点
   const load = useCallback(async () => {
     try {
-      const r = await fetch(apiUrl("/api/questions"));
-      const data = await r.json();
+      const data = await apiGet<{ questions?: { id: number; question: string; status: string }[] }>("/api/questions");
       setItems(data.questions ?? []);
     } catch {
       showToast("问题集读不出来");
@@ -41,8 +40,10 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
                   onClick={async () => {
                     setActing(true);
                     try {
-                      await fetch(apiUrl("/api/questions"), { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id }) });
+                      await apiDel("/api/questions", { id: q.id });
                       await load();
+                    } catch {
+                      showToast("没删成"); // 删除失败也要说（旧版连 r.ok 都不看，静默吞）
                     } finally {
                       setActing(false);
                     }
@@ -59,10 +60,11 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
               if (!text.trim() || acting) return;
               setActing(true);
               try {
-                const r = await fetch(apiUrl("/api/questions"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text.trim() }) });
-                if (r.ok) setText("");
-                else showToast("没加上");
+                await apiPost("/api/questions", { question: text.trim() });
+                setText("");
                 await load();
+              } catch {
+                showToast("没加上");
               } finally {
                 setActing(false);
               }
@@ -80,13 +82,12 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
               if (running) return; // 防连点：连跑多遍没意义
               setRunning(true);
               try {
-                const r = await fetch(apiUrl("/api/questions?run=1"), { method: "POST" });
-                const data = await r.json();
-                const failed = (data.results ?? []).filter((x: { status: string }) => x.status === "失败");
+                const data = await apiPost<{ results?: { status: string }[]; version: number }>("/api/questions?run=1");
+                const failed = (data.results ?? []).filter((x) => x.status === "失败");
                 showToast(failed.length ? `${failed.length} 条失败——回画布改对象或来源映射，再跑一遍` : `全部通过（v${data.version}）`);
                 await load();
               } catch (e) {
-                showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`);
+                showToast(e instanceof Error ? e.message : String(e));
               } finally {
                 setRunning(false);
               }

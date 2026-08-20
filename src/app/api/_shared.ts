@@ -1,8 +1,13 @@
-// 路由共用的小件：请求体解析、尽力留痕、统一 500、写端点令牌闸。
+// 路由共用的小件：请求体解析、错误阶梯（respond）、统一 500、写端点令牌闸。
 // 非路由文件（非 route.ts），只被各条 api 路由 import。
 
 import { NextResponse } from "next/server";
-import { DEFAULT_WS, isWsName } from "@/server/engine/workspace";
+import { ZodError } from "zod";
+import { DraftReject } from "@/server/engine/configStore";
+import { EngineReject } from "@/server/engine/individual";
+import { DEFAULT_WS, isWsName, WsReject } from "@/server/engine/workspace";
+
+export { safeLog } from "@/server/engine/logging";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
 export class BadRequest extends Error {}
@@ -15,19 +20,30 @@ export async function bodyJson(req: Request): Promise<unknown> {
   }
 }
 
-/** 留痕尽力而为（可同步可异步）：500 的根因若正是元库故障，catch 里再抛就成非 JSON 响应。 */
-export function safeLog(fn: () => void | Promise<void>): void {
-  try {
-    void Promise.resolve(fn()).catch(() => {});
-  } catch {
-    // 留痕失败不挡响应
-  }
-}
-
 /** 统一的 500 形状：固定文案；detail（内部错误细节）只在非生产环境给，生产不透。 */
 export function internalError(e: unknown): NextResponse {
   const detail = e instanceof Error ? e.message : String(e);
   return NextResponse.json({ error: "内部错误", ...(process.env.NODE_ENV === "production" ? {} : { detail }) }, { status: 500 });
+}
+
+/**
+ * 路由体的唯一包装：错误阶梯独占在这里，路由只剩 parse → 调引擎 → 返回 JSON 体。
+ * fn 返回对象按 200 输出；要自定义状态/形状就在 fn 里自己返回 NextResponse（原样透传）。
+ * zod 默认落 400；opts.zod 可改（如 publish 的配置不合法落 422）。
+ */
+export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status: number; error: string } } = {}): Promise<NextResponse> {
+  try {
+    const out = await fn();
+    return out instanceof NextResponse ? out : NextResponse.json(out);
+  } catch (e) {
+    if (e instanceof ZodError) {
+      const z = opts.zod ?? { status: 400, error: "请求形状不合法" };
+      return NextResponse.json({ error: z.error, issues: e.issues }, { status: z.status });
+    }
+    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof DraftReject || e instanceof EngineReject || e instanceof WsReject) return NextResponse.json({ error: e.message }, { status: 422 });
+    return internalError(e);
+  }
 }
 
 /** 工作空间：?ws= 或 x-ontos-ws 头，缺省 default；名字不合法抛 BadRequest。 */

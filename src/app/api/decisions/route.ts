@@ -3,10 +3,10 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { adjudicate, type Verdict } from "@/server/engine/adjudicate";
-import { DraftReject, getDraft } from "@/server/engine/configStore";
+import { adjudicate } from "@/server/engine/adjudicate";
+import { getDraft } from "@/server/engine/configStore";
 import { metaStore } from "@/server/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z
   .object({
@@ -29,17 +29,13 @@ const bodySchema = z
   .refine((b) => b.class_a !== b.class_b, { message: "class_a 与 class_b 不能是同一个类" });
 
 export async function GET(req: Request) {
-  try {
-    return NextResponse.json({ decisions: await metaStore().listDecisions(wsOf(req)) });
-  } catch (e) {
-    return internalError(e);
-  }
+  return respond(async () => ({ decisions: await metaStore().listDecisions(wsOf(req)) }));
 }
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const ws = wsOf(req);
     const body = bodySchema.parse(await bodyJson(req));
     // 先裁决后留痕：裁决被校验闸回退时不留幻影记录（候选对也不能因此被永久排除）。
@@ -79,11 +75,6 @@ export async function POST(req: Request) {
     } catch {
       recorded = false;
     }
-    return NextResponse.json({ ok: true, recorded });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法", issues: e.issues }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    return internalError(e);
-  }
+    return { ok: true, recorded };
+  });
 }

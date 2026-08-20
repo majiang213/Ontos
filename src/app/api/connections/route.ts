@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { getDriverRegistry, registerSaved } from "@/server/engine/load";
 import { getPublished } from "@/server/engine/configStore";
 import { metaStore } from "@/server/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const connectionSchema = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_]*$/, "连接名必须是小写字母/数字/下划线"),
@@ -25,20 +25,18 @@ const connectionSchema = z.object({
 });
 
 export async function GET(req: Request) {
-  try {
+  return respond(async () => {
     // 密码、options、db_name 不外发（db_name 落库前被 resolve 成服务器绝对路径，路径不出网）
     const connections = (await metaStore().listConnections(wsOf(req)))
       .map(({ ro_pass: _a, rw_pass: _b, options: _c, db_name: _d, ...rest }) => rest);
-    return NextResponse.json({ connections });
-  } catch (e) {
-    return internalError(e);
-  }
+    return { connections };
+  });
 }
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const { test, ...rec } = connectionSchema.parse(await bodyJson(req));
     if (rec.type === "sqlite") {
       if (!rec.db_name) return NextResponse.json({ error: "sqlite 连接必须给文件路径（db_name）" }, { status: 400 });
@@ -73,18 +71,14 @@ export async function POST(req: Request) {
       }
     }
     await metaStore().saveConnection(ws, rec); // 测过才落库
-    return NextResponse.json({ ok: true, saved: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "连接形状不合法", issues: e.issues }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return internalError(e);
-  }
+    return { ok: true, saved: true };
+  }, { zod: { status: 400, error: "连接形状不合法" } });
 }
 
 export async function DELETE(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const ws = wsOf(req);
     const { name } = z.object({ name: z.string().min(1) }).parse(await bodyJson(req));
     // 演示 fixture 连接不在元库：删不了，删了会把演示源从注册表抹掉
@@ -98,10 +92,6 @@ export async function DELETE(req: Request) {
     if (inUse) return NextResponse.json({ error: `连接 ${name} 仍被已发布本体引用，先改本体再删` }, { status: 422 });
     await metaStore().deleteConnection(ws, name);
     (await getDriverRegistry(ws)).unregister(name);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return internalError(e);
-  }
+    return { ok: true };
+  });
 }

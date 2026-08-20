@@ -4,9 +4,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaStore } from "../meta/store";
+import { runtime } from "../runtime";
 
 export const DEFAULT_WS = "default";
 const NAME_RE = /^[a-z][a-z0-9_-]*$/;
+
+/** 工作空间域拒绝（名字不合法、已存在）：路由按 422 处理，与其它域的 Reject 同层。 */
+export class WsReject extends Error {}
 
 export function isWsName(name: string): boolean {
   return NAME_RE.test(name);
@@ -14,7 +18,7 @@ export function isWsName(name: string): boolean {
 
 /** 空间的 v1 种子：default 用演示模板；其余空间空白起步（空本体）——切换空间要看得出是另一套。 */
 export function seedYamlFor(ws: string): string {
-  if (ws === DEFAULT_WS) return readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8");
+  if (ws === DEFAULT_WS) return readFileSync(join(runtime().cwd, "src/server/config/ontology.yaml"), "utf8");
   return "object_types: {}\n";
 }
 
@@ -24,13 +28,13 @@ export function listWorkspaces(): Promise<string[]> {
 
 /** 注册（若不存在）并把种子插成该空间的 v1。 */
 export function ensureWorkspace(ws: string): Promise<number> {
-  if (!isWsName(ws)) throw new Error(`空间名不合法：${ws}`);
+  if (!isWsName(ws)) throw new WsReject(`空间名不合法：${ws}`);
   return metaStore().ensureWorkspace(ws, seedYamlFor(ws));
 }
 
 /** 新建空间（空白起步：空本体、无连接，从连接数据源开始玩）。 */
 export async function createWorkspace(name: string): Promise<void> {
-  if (!isWsName(name)) throw new Error(`空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`);
-  if ((await metaStore().listWorkspaces()).includes(name)) throw new Error(`空间已存在：${name}`);
+  if (!isWsName(name)) throw new WsReject(`空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`);
+  if ((await metaStore().listWorkspaces()).includes(name)) throw new WsReject(`空间已存在：${name}`);
   await metaStore().ensureWorkspace(name, seedYamlFor(name));
 }

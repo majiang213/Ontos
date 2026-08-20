@@ -1,25 +1,12 @@
 // 对话页 —— 纯对话页。问数走 /api/ask（罐头槽位，LLM 就位后替换）；
 // 动作走 /api/action；取数路径融合在答案卡里。动作成功后自动再问一次，看状态变化。
-// 会话模型同 Claude：「新建会话」只开一页待写的空白，发出第一条消息才自动落成会话进列表；
-// 空会话不落库。会话存 localStorage，切页不丢。
+// 会话模型在 sessionStore.ts（React 之外）：本页只订阅与渲染。切空间时本页整体重挂，store 按新空间的键重建。
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { apiUrl, getWs } from "./wsClient";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { apiGet, apiPost, getWs } from "./wsClient";
+import { SessionStore, type Msg } from "./sessionStore";
 import { ArrowUpRight } from "@phosphor-icons/react";
-
-interface Msg {
-  role: "user" | "agent";
-  text?: string;
-  answer?: { query: Record<string, unknown>; rows: Record<string, unknown>[]; path: string[]; question?: string; total?: number }; // total：裁剪持久化前的真实总数
-  actionResult?: { ok: boolean; error?: string; projections: { source: string; table: string; op: string; ok: boolean; error?: string; note?: string }[] };
-}
-
-interface Session {
-  id: string;
-  title: string;
-  msgs: Msg[];
-}
 
 interface SavedApi {
   id: number;
@@ -29,58 +16,20 @@ interface SavedApi {
 }
 
 const SUGGESTED = ["在役设备及其所属部门", "还有多少在途设备", "哪些设备过保了", "每个部门多少台在役设备"];
-// 对话历史按工作空间分键：切空间互不可见（切空间时本页整体重挂，挂载时取的是新空间的键）
-const storeKey = () => `ontos-chat-sessions:${getWs()}`;
 
 export default function ChatPage() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [curId, setCurId] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [store] = useState(() => new SessionStore(getWs()));
+  const sessions = useSyncExternalStore(store.subscribe, store.getSessions, store.getSessions);
+  const curId = useSyncExternalStore(store.subscribe, store.getCurId, store.getCurId);
+  useEffect(() => store.init(), [store]); // 挂载后从 localStorage 读回（只在客户端）
+  const msgs = useMemo(() => sessions.find((s) => s.id === curId)?.msgs ?? [], [sessions, curId]);
+
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [sn, setSn] = useState("SN-40217");
   const [actOpen, setActOpen] = useState(false); // 动作区默认收起：演示剧本不抢主视觉
   const [apis, setApis] = useState<SavedApi[]>([]);
-  const lastQuestion = useRef<string | null>(null); // 动作成功后的复查用，不从消息列表反推
   const listRef = useRef<HTMLDivElement>(null);
-  const curIdRef = useRef<string | null>(null); // 闭包外读当前会话：删光再开时动作与复查不落两个会话
-
-  // 会话从 localStorage 读回（刷新不丢）
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storeKey());
-      if (raw) {
-        const s = (JSON.parse(raw) as unknown[]).filter(
-          (x): x is Session => Boolean(x) && typeof (x as Session).id === "string" && Array.isArray((x as Session).msgs)
-        );
-        setSessions(s);
-        if (s.length) setCurId(s[0].id);
-      }
-    } catch {
-      // 坏数据当没有
-    }
-    setLoaded(true);
-  }, []);
-  useEffect(() => {
-    curIdRef.current = curId;
-  }, [curId]);
-  useEffect(() => {
-    if (!loaded) return;
-    try {
-      // 空会话不落库（没说过话的会话不是会话）；结果集不长久留存（数据边界）：答案卡只留前 20 行做回看，完整数据永远在源库现查
-      const trimmed = sessions
-        .filter((s) => s.msgs.length > 0)
-        .map((s) => ({
-          ...s,
-          msgs: s.msgs.map((m) => (m.answer ? { ...m, answer: { ...m.answer, total: m.answer.total ?? m.answer.rows.length, rows: m.answer.rows.slice(0, 20) } } : m)),
-        }));
-      localStorage.setItem(storeKey(), JSON.stringify(trimmed));
-    } catch {
-      // 配额满了不挡对话
-    }
-  }, [sessions, loaded]);
-
-  const msgs = sessions.find((s) => s.id === curId)?.msgs ?? [];
 
   // 新消息滚到底：答案卡很高，不滚用户以为没响应；切会话也滚
   useEffect(() => {
@@ -90,8 +39,7 @@ export default function ChatPage() {
 
   const loadApis = useCallback(async () => {
     try {
-      const r = await fetch(apiUrl("/api/saved-queries"));
-      const data = await r.json();
+      const data = await apiGet<{ apis?: SavedApi[] }>("/api/saved-queries");
       setApis(data.apis ?? []);
     } catch {
       // 台账读不到不挡对话
@@ -101,47 +49,16 @@ export default function ChatPage() {
     void loadApis();
   }, [loadApis]);
 
-  /** 没有会话就先开一个（标题取第一句问的话）。读 ref 不读闭包——append 是函数式更新，不依赖渲染时序。 */
-  const ensureSession = (titleSeed: string): string => {
-    if (curIdRef.current) return curIdRef.current;
-    const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    setSessions((ss) => [{ id, title: titleSeed.slice(0, 24), msgs: [] }, ...ss]);
-    setCurId(id);
-    curIdRef.current = id;
-    return id;
-  };
-  const append = (sid: string, m: Msg) => {
-    setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, msgs: [...s.msgs, m] } : s)));
-  };
-  /** 新建会话 = 开一页待写的空白（不落列表）；发出第一条消息时 ensureSession 自动落成会话。 */
-  const newSession = () => {
-    setCurId(null);
-    curIdRef.current = null;
-  };
-  const removeSession = (sid: string) => {
-    setSessions((ss) => {
-      const rest = ss.filter((s) => s.id !== sid);
-      if (curId === sid) setCurId(rest[0]?.id ?? null);
-      return rest;
-    });
-  };
-
   async function ask(question: string) {
-    lastQuestion.current = question;
-    const sid = ensureSession(question);
+    store.lastQuestion = question;
+    const sid = store.ensureSession(question);
     setBusy(true);
-    append(sid, { role: "user", text: question });
+    store.append(sid, { role: "user", text: question });
     try {
-      const r = await fetch(apiUrl("/api/ask"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "失败");
-      append(sid, { role: "agent", answer: { query: data.query, rows: data.rows, path: data.path, question } });
+      const data = await apiPost<{ query: Record<string, unknown>; rows: Record<string, unknown>[]; path: string[] }>("/api/ask", { question });
+      store.append(sid, { role: "agent", answer: { query: data.query, rows: data.rows, path: data.path, question } });
     } catch (e) {
-      append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
+      store.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
     } finally {
       setBusy(false);
     }
@@ -149,46 +66,34 @@ export default function ChatPage() {
 
   /** 跑台账里的已存 API：直接执行保存的结构化查询，不重新编译。 */
   async function runApi(api: SavedApi) {
-    lastQuestion.current = api.question; // 台账问题也算「上一条问题」，动作后的复查看它
-    const sid = ensureSession(api.name);
+    store.lastQuestion = api.question; // 台账问题也算「上一条问题」，动作后的复查看它
+    const sid = store.ensureSession(api.name);
     setBusy(true);
-    append(sid, { role: "user", text: `运行问数 API：${api.name}` });
+    store.append(sid, { role: "user", text: `运行问数 API：${api.name}` });
     try {
-      const r = await fetch(apiUrl("/api/query"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: api.query_json,
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "失败");
-      append(sid, { role: "agent", answer: { query: JSON.parse(api.query_json), rows: data.rows, path: data.path, question: api.question } });
+      const data = await apiPost<{ rows: Record<string, unknown>[]; path: string[] }>("/api/query", api.query_json);
+      store.append(sid, { role: "agent", answer: { query: JSON.parse(api.query_json), rows: data.rows, path: data.path, question: api.question } });
     } catch (e) {
-      append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
+      store.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
     } finally {
       setBusy(false);
     }
   }
 
   async function act(action: string, object: string, identity: string, request?: Record<string, unknown>) {
-    const sid = ensureSession(`${action} ${identity}`);
+    const sid = store.ensureSession(`${action} ${identity}`);
     setBusy(true);
-    append(sid, { role: "user", text: `${action} ${object} ${identity}` });
+    store.append(sid, { role: "user", text: `${action} ${object} ${identity}` });
     try {
-      const r = await fetch(apiUrl("/api/action"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, object, identity, request }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? data.detail ?? "失败");
-      append(sid, {
+      const data = await apiPost<{ ok: boolean; error?: string; projections?: NonNullable<Msg["actionResult"]>["projections"] }>("/api/action", { action, object, identity, request });
+      store.append(sid, {
         role: "agent",
         actionResult: { ok: Boolean(data.ok), error: data.error, projections: data.projections ?? [] }, // 兜底空数组，渲染不崩
       });
       // 动作成功后自动再问一次（用记下的上一条问题，不从消息列表反推）
-      if (data.ok && lastQuestion.current) await ask(lastQuestion.current);
+      if (data.ok && store.lastQuestion) await ask(store.lastQuestion);
     } catch (e) {
-      append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
+      store.append(sid, { role: "agent", text: `出错了：${e instanceof Error ? e.message : String(e)}` });
     } finally {
       setBusy(false);
     }
@@ -267,12 +172,12 @@ export default function ChatPage() {
 
   const renderSessionList = () => (
     <>
-      <button className="btn" style={{ justifyContent: "center", marginBottom: 12 }} onClick={newSession}>＋ 新建会话</button>
+      <button className="btn" style={{ justifyContent: "center", marginBottom: 12 }} onClick={() => store.newSession()}>＋ 新建会话</button>
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
         {sessions.map((s) => (
           <div
             key={s.id}
-            onClick={() => setCurId(s.id)}
+            onClick={() => store.select(s.id)}
             style={{
               fontSize: 12,
               padding: "6px 10px",
@@ -292,7 +197,7 @@ export default function ChatPage() {
               style={{ border: "none", background: "none", color: "var(--ink-3)", cursor: "pointer", padding: 0, fontSize: 12 }}
               onClick={(e) => {
                 e.stopPropagation();
-                removeSession(s.id);
+                store.removeSession(s.id);
               }}
             >
               ✕
@@ -426,18 +331,9 @@ function AnswerCard({ a, onSaved }: { a: NonNullable<Msg["answer"]>; onSaved: ()
             if (!saveName.trim()) return;
             setSaveError(null);
             try {
-              const r = await fetch(apiUrl("/api/saved-queries"), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: saveName.trim(), question: a.question ?? "", query: a.query }),
-              });
-              const data = await r.json();
-              if (r.ok) {
-                setSaved(true);
-                onSaved();
-              } else {
-                setSaveError(data.error ?? "保存失败");
-              }
+              await apiPost("/api/saved-queries", { name: saveName.trim(), question: a.question ?? "", query: a.query });
+              setSaved(true);
+              onSaved();
             } catch (err) {
               setSaveError(err instanceof Error ? err.message : String(err));
             }

@@ -3,6 +3,7 @@
 
 import type { OntologyConfig } from "../schema/config";
 import { findLink } from "./individual";
+import { walkFilter } from "../schema/filterWalk";
 
 export function validateSemantics(config: OntologyConfig): void {
   // 关系解析走引擎同一份实现（findLink）：正向名在 from 侧，反向名在 to 侧；目标类随之确定
@@ -11,21 +12,17 @@ export function validateSemantics(config: OntologyConfig): void {
     return r ? (r.reversed ? r.link.from : r.link.to) : undefined;
   };
   const linkResolves = (clsName: string, ln: string) => linkTo(clsName, ln) !== undefined;
-  /** 过滤树走查：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
+  /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
   const checkFilterKeys = (clsName: string, f: Record<string, unknown>, trail: string): void => {
     if (!config.object_types[clsName]) return; // 类不存在由效应目标检查报「不存在的类」，这里不抢话
-    for (const [k, v] of Object.entries(f)) {
-      if (k === "$link") {
-        for (const [ln, sub] of Object.entries(v as Record<string, unknown>)) {
-          if (!linkResolves(clsName, ln)) throw new Error(`配置不合法：${trail} 引用了不存在的关系 ${ln}`);
-          const target = linkTo(clsName, ln);
-          if (target && sub && typeof sub === "object") checkFilterKeys(target, sub as Record<string, unknown>, trail);
-        }
-        continue;
-      }
-      if (k.startsWith("$")) continue;
-      if (!config.object_types[clsName]?.properties[k]) throw new Error(`配置不合法：${trail} 过滤了 ${clsName} 上不存在的属性 ${k}`);
-    }
+    walkFilter(config, clsName, f, {
+      link: (_cls, ln, target) => {
+        if (!target) throw new Error(`配置不合法：${trail} 引用了不存在的关系 ${ln}`);
+      },
+      prop: (cls, k) => {
+        if (!config.object_types[cls]?.properties[k]) throw new Error(`配置不合法：${trail} 过滤了 ${cls} 上不存在的属性 ${k}`);
+      },
+    });
   };
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     if (cls.identity && !cls.properties[cls.identity]) {

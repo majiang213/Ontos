@@ -9,14 +9,17 @@ import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
 import { metaStore } from "../meta/store";
+import { runtime } from "../runtime";
 import { DEFAULT_WS } from "./workspace";
 
-const g = globalThis as unknown as { __ontosRegistry?: Map<string, DriverRegistry> };
-const registries: Map<string, DriverRegistry> = g.__ontosRegistry ?? (g.__ontosRegistry = new Map());
+// 注册表按工作空间键控，挂运行态（runtime.ts）：Next dev 多模块实例共享，测试换运行态即隔离
+function registries(): Map<string, DriverRegistry> {
+  return (runtime().registries ??= new Map());
+}
 
 /** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 四个内置连接只注入 default——新空间空白起步，数据源自己接。按工作空间键控。 */
 export async function getDriverRegistry(ws: string = DEFAULT_WS): Promise<DriverRegistry> {
-  let r = registries.get(ws);
+  let r = registries().get(ws);
   if (!r) {
     const registry = new DriverRegistry();
     if (ws === DEFAULT_WS) {
@@ -25,7 +28,7 @@ export async function getDriverRegistry(ws: string = DEFAULT_WS): Promise<Driver
     }
     for (const rec of await metaStore().listConnections(ws)) registerSaved(registry, rec);
     r = registry;
-    registries.set(ws, r);
+    registries().set(ws, r);
   }
   return r;
 }
@@ -68,19 +71,4 @@ export async function resolveTableInfos(
 /** 测试用：每次拿全新的 fixture（不经注册表）。 */
 export function freshDriver(): SourceDriver {
   return SqliteFixtureDriver.seeded();
-}
-
-/** 测试用：关掉并清掉注册表单例。fixture 内存库全进程共享，换测试目录前必须清；不传 ws 清全部。 */
-export function resetRegistry(ws?: string): void {
-  const close = (r: DriverRegistry) => {
-    for (const name of r.connectionNames()) r.unregister(name);
-  };
-  if (ws) {
-    const r = registries.get(ws);
-    if (r) close(r);
-    registries.delete(ws);
-  } else {
-    for (const r of registries.values()) close(r);
-    registries.clear();
-  }
 }

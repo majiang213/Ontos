@@ -1,30 +1,16 @@
 // 路由层测试：错误分层（400/422/500）与裁决走真路由的集成。
-// 在临时目录里跑（拷贝种子配置），清 globalThis 单例，与仓库运行态隔离。
+// 每用例一个临时目录 + 全新运行态（helpers.ts），与仓库运行态隔离。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { cleanupRuntime, setupRuntime } from "./helpers";
 
 let tmp: string;
-let repoRoot: string;
 
 beforeEach(async () => {
-  repoRoot = process.cwd();
-  tmp = mkdtempSync(join(tmpdir(), "ontos-route-"));
-  mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-  cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
-  process.chdir(tmp);
-  (await import("../server/engine/configStore")).resetStore();
-  (await import("../server/meta/store")).resetMetaStore();
-  (await import("../server/engine/load")).resetRegistry();
+  tmp = await setupRuntime("ontos-route-");
 });
 afterEach(async () => {
-  (await import("../server/engine/configStore")).resetStore();
-  (await import("../server/meta/store")).resetMetaStore();
-  (await import("../server/engine/load")).resetRegistry();
-  process.chdir(repoRoot);
-  rmSync(tmp, { recursive: true, force: true });
+  await cleanupRuntime(tmp);
 });
 
 async function post(path: string, body?: string, headers?: Record<string, string>) {

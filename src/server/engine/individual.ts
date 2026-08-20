@@ -1,10 +1,11 @@
 // 个体 —— 同一性标准对齐之后，一个体 = 各源各一行（或缺行）。
 // 组装、属性取值、派生求值都在这里；过滤的行级核对也在这里。
 
-import type { Filter, LinkType, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
+import type { Filter, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
 import type { SourceDriver } from "./driver";
 import { resolveLiteral, type EvalContext } from "./expr";
 import { FILTER_OPS } from "../schema/config";
+import { walkFilter } from "../schema/filterWalk";
 
 /** 类名 + 类定义，成对传。 */
 export interface Cls {
@@ -28,15 +29,8 @@ export interface Env {
 /** 引擎拒绝：请求或配置里的名字对不上已发布配置。路由按 422 处理；其它异常是引擎故障，按 500。 */
 export class EngineReject extends Error {}
 
-/** 关系解析（唯一出处）：正向名在 from 侧，反向名（inverse）在 to 侧。找不到返回 undefined。 */
-export function findLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } | undefined {
-  const direct = config.link_types[name];
-  if (direct && direct.from === clsName) return { link: direct, reversed: false };
-  for (const link of Object.values(config.link_types)) {
-    if (link.inverse === name && link.to === clsName) return { link, reversed: true };
-  }
-  return undefined;
-}
+/** 关系解析已收进 schema 层（filterWalk.resolveLink）；本 re-export 只为了不动的调用点。 */
+export { resolveLink as findLink } from "../schema/filterWalk";
 
 export function mustCls(config: OntologyConfig, name: string): Cls {
   const def = config.object_types[name];
@@ -230,33 +224,31 @@ function compareOp(actual: unknown, op: string, expected: unknown, dateLike: boo
 const num = (v: unknown) => typeof v === "number";
 
 /** 过滤值形状校验：in 的值必须数组；其余运算符与等值位不许数组；$link 嵌套限三层（防深层扇出）。
- *  查询与动作入口各跑一次，下推与内存共用同一把尺。 */
-export function assertFilterShapes(filter: Filter, trail = "过滤", depth = 0): void {
-  if (depth > 3) throw new EngineReject(`${trail}：$link 嵌套最多三层`);
-  for (const [key, v] of Object.entries(filter)) {
-    if (key === "$link") {
-      for (const [ln, sub] of Object.entries(v as Record<string, unknown>)) {
-        if (sub !== true && sub !== false) assertFilterShapes(sub as Filter, `${trail} 的 $link.${ln}`, depth + 1);
-      }
-      continue;
-    }
-    if (key.startsWith("$")) continue; // $request/$exists 的形状另行约束
-    if (Array.isArray(v)) throw new EngineReject(`${trail}的 ${key}：等值位不接受数组（数组只能出现在 in 里）`);
-    if (v !== null && typeof v === "object") {
-      const rec = v as Record<string, unknown>;
-      const keys = Object.keys(rec);
-      if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
-        for (const [op, operand] of Object.entries(rec)) {
-          if (op === "in") {
-            if (!Array.isArray(operand)) throw new EngineReject(`${trail}的 ${key}.in：值必须是数组`);
-          } else if (Array.isArray(operand)) {
-            throw new EngineReject(`${trail}的 ${key}.${op}：不接受数组`);
+ *  查询与动作入口各跑一次，下推与内存共用同一把尺。遍历走 schema 层 walkFilter（结构遍历，不解析关系）。 */
+export function assertFilterShapes(filter: Filter, trail = "过滤"): void {
+  walkFilter(null, "", filter, {
+    link: (_cls, ln, _target, sub, depth) => {
+      if (depth + 1 > 3) throw new EngineReject(`${trail}：$link 嵌套最多三层`);
+      if (sub === true || sub === false) return false; // 存在性写法没有子过滤
+    },
+    prop: (_cls, key, v) => {
+      if (Array.isArray(v)) throw new EngineReject(`${trail}的 ${key}：等值位不接受数组（数组只能出现在 in 里）`);
+      if (v !== null && typeof v === "object") {
+        const rec = v as Record<string, unknown>;
+        const keys = Object.keys(rec);
+        if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
+          for (const [op, operand] of Object.entries(rec)) {
+            if (op === "in") {
+              if (!Array.isArray(operand)) throw new EngineReject(`${trail}的 ${key}.in：值必须是数组`);
+            } else if (Array.isArray(operand)) {
+              throw new EngineReject(`${trail}的 ${key}.${op}：不接受数组`);
+            }
           }
         }
+        // 裸的 { property, from } 是操作数不是运算符块，跳过
       }
-      // 裸的 { property, from } 是操作数不是运算符块，跳过
-    }
-  }
+    },
+  });
 }
 
 /* ---------- 整条过滤在个体上的核对（前置、布尔派生、残余过滤共用） ---------- */

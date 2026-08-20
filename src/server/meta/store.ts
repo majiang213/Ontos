@@ -6,6 +6,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import mysql from "mysql2/promise";
+import { runtime } from "../runtime";
 
 /* ---------- 后端 ---------- */
 
@@ -485,26 +486,16 @@ export class MetaStore {
   }
 }
 
-/* ---------- 单例（globalThis；一个共享后端，不按空间分实例） ---------- */
+/* ---------- 单例（挂在 Runtime 上；一个共享后端，不按空间分实例） ---------- */
 
-const g = globalThis as unknown as { __ontosMeta?: MetaStore };
-
-/** 共享元库入口。ONTOS_META_DSN=mysql://… 走 MySQL，否则离线单文件 SQLite。 */
+/** 共享元库入口。ONTOS_META_DSN=mysql://… 走 MySQL，否则离线单文件 SQLite（路径取运行态的 cwd）。 */
 export function metaStore(): MetaStore {
-  if (!g.__ontosMeta) {
-    const dsn = process.env.ONTOS_META_DSN;
-    g.__ontosMeta = new MetaStore(dsn ? new MysqlBackend(dsn) : new SqliteBackend(join(process.cwd(), "src/server/config/ontos-meta.db")));
-  }
-  return g.__ontosMeta;
+  const rt = runtime();
+  rt.meta ??= new MetaStore(rt.metaDsn ? new MysqlBackend(rt.metaDsn) : new SqliteBackend(join(rt.cwd, "src/server/config/ontos-meta.db")));
+  return rt.meta;
 }
 
 /** 测试用：独立临时库（SQLite 后端）。 */
 export function freshMetaStore(path: string): MetaStore {
   return new MetaStore(new SqliteBackend(path));
-}
-
-/** 测试用：关掉并清掉单例。 */
-export function resetMetaStore(): void {
-  void g.__ontosMeta?.close();
-  g.__ontosMeta = undefined;
 }

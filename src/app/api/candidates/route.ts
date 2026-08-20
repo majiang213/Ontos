@@ -2,14 +2,13 @@
 // 机器只在已上画布的对象之间找跨源候选对（《ontos-article.md》§3.2）。
 // 有共同连接的不成对；已定案（含跳过）的不再出现；建议只出倾向与依据，不定案。
 
-import { NextResponse } from "next/server";
 import { getDraft } from "@/server/engine/configStore";
 import { getSlot, type PairAdvice } from "@/server/engine/llmSlot";
 import { metaStore } from "@/server/meta/store";
-import { internalError, wsOf } from "@/app/api/_shared";
+import { respond, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {
-  try {
+  return respond(async () => {
     const ws = wsOf(req);
     const d = (await getDraft(ws)).draft;
     // version=-1 是「已放弃」的裁决（草稿被丢弃）——不算定案，候选对可以再出现
@@ -35,8 +34,6 @@ export async function GET(req: Request) {
       if ([...a.connections].some((c) => b.connections.has(c))) return false;
       return !decided.has([p.class_a, p.class_b].sort().join("|"));
     });
-    return NextResponse.json({ candidates });
-  } catch (e) {
-    return internalError(e);
-  }
+    return { candidates };
+  });
 }

@@ -3,34 +3,23 @@
 // B 方案：版本链在 onto_version 表里，不再落版本文件——断言直接查库。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { cleanupRuntime, restartRuntime, setupRuntime } from "./helpers";
 
 const WS = "default";
 
-let repoRoot: string;
 let tmp: string;
 
-beforeEach(() => {
-  repoRoot = process.cwd();
-  tmp = mkdtempSync(join(tmpdir(), "ontos-store-"));
-  mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-  cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
-  process.chdir(tmp); // configStore / metaStore 按 process.cwd() 找配置与元库
+beforeEach(async () => {
+  tmp = await setupRuntime("ontos-store-");
 });
 
 afterEach(async () => {
-  (await import("../server/engine/configStore")).resetStore();
-  (await import("../server/meta/store")).resetMetaStore(); // 元库单例绑死本轮临时目录，删目录前关掉
-  process.chdir(repoRoot);
-  rmSync(tmp, { recursive: true, force: true });
+  await cleanupRuntime(tmp);
 });
 
 async function freshStore() {
-  const s = await import("../server/engine/configStore");
-  s.resetStore();
-  return s;
+  await restartRuntime(tmp); // 每用例一份干净内存态
+  return import("../server/engine/configStore");
 }
 
 async function meta() {
@@ -114,7 +103,7 @@ describe("配置存储（工作副本与发布）", () => {
     const s = await freshStore();
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
     await s.publishDraft(WS);
-    s.resetStore(); // 模拟重启：内存态清空
+    await restartRuntime(tmp); // 模拟重启：内存态清空
     expect((await s.getPublished(WS)).version).toBe(2);
     expect((await s.getPublished(WS)).config.object_types.vendor).toBeDefined();
   });

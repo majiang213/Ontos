@@ -1,31 +1,21 @@
 // 发布与放弃：POST /api/publish 发布（升版本、写版本文件）；DELETE /api/publish 放弃（回退到已发布快照）。
 // 引擎只读已发布版本，发布后立即可查。配置不合法 422；写盘等自身故障 500。
 
-import { NextResponse } from "next/server";
-import { discardDraft, DraftReject, publishDraft } from "@/server/engine/configStore";
-import { ZodError } from "zod";
-import { internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { discardDraft, publishDraft } from "@/server/engine/configStore";
+import { requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
-    const { version } = await publishDraft(wsOf(req));
-    return NextResponse.json({ ok: true, version });
-  } catch (e) {
-    if (e instanceof ZodError) return NextResponse.json({ error: "配置结构不合法", issues: e.issues }, { status: 422 });
-    if (e instanceof DraftReject) return NextResponse.json({ error: e.message }, { status: 422 });
-    return internalError(e);
-  }
+  // 配置结构不合法（zod）与语义不合法（DraftReject）同落 422：发布的拒绝都是配置问题
+  return respond(async () => ({ ok: true, ...(await publishDraft(wsOf(req))) }), { zod: { status: 422, error: "配置结构不合法" } });
 }
 
 export async function DELETE(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     await discardDraft(wsOf(req));
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return internalError(e);
-  }
+    return { ok: true };
+  });
 }

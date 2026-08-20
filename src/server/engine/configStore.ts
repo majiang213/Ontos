@@ -6,7 +6,8 @@ import { dump, load } from "js-yaml";
 import { configSchema, objectTypeSchema, type OntologyConfig } from "../schema/config";
 import type { DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
-import { findLink } from "./individual";
+import { walkFilter } from "../schema/filterWalk";
+import { runtime } from "../runtime";
 import { validateSemantics } from "./validate";
 import { DEFAULT_WS, seedYamlFor } from "./workspace";
 
@@ -19,14 +20,13 @@ export interface DraftState {
   layout: Record<string, { x: number; y: number }>; // 画布摆位（存 onto_workspace.layout）
 }
 
-interface Store {
+export interface Store {
   published?: { config: OntologyConfig; version: number };
   draft?: DraftState;
 }
-// 每个工作空间一份内存态（已发布快照 + 工作副本），互不串
-const g = globalThis as unknown as { __ontosStores?: Map<string, Store> };
-const stores: Map<string, Store> = g.__ontosStores ?? (g.__ontosStores = new Map());
+// 每个工作空间一份内存态（已发布快照 + 工作副本），互不串；挂运行态（runtime.ts）
 function storeOf(ws: string): Store {
+  const stores = (runtime().stores ??= new Map());
   let s = stores.get(ws);
   if (!s) {
     s = {};
@@ -206,16 +206,7 @@ function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[
     if (hostName === clsName) continue;
     for (const [p, def] of Object.entries(hostCls.properties)) {
       if (!def.derived) continue;
-      const whens = Array.isArray(def.derived) ? def.derived.map((r) => (r as { when?: unknown }).when) : [def.derived];
-      const check = (f: unknown, host: string) => {
-        if (!f || typeof f !== "object") return;
-        for (const [ln, sub] of Object.entries((f as Record<string, unknown>).$link ?? {})) {
-          const target = linkTarget(d, host, ln);
-          if (target === clsName && sub && typeof sub === "object" && filterTopKeys(sub as Record<string, unknown>).includes(prop)) refs.push(`派生属性 ${hostName}.${p}`);
-          if (target) check(sub, target);
-        }
-      };
-      for (const w of whens) check(w, hostName);
+      for (const w of derivedWhens(def.derived)) collectNestedLinkRefs(d, w, hostName, clsName, prop, `派生属性 ${hostName}.${p}`, (t) => refs.push(t));
     }
   }
   // 值侧引用：过滤/赋值里的 { property: prop }（被比较、被读取的属性也是引用）
@@ -253,34 +244,35 @@ function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[
 /** 关系的引用扫描：动作 pre 的 $link、effect 的 link 项、effect update/delete 的 filter.$link、派生规则里的 $link。删关系前挡一道。 */
 function linkRefs(d: OntologyConfig, linkName: string): string[] {
   const refs = new Set<string>();
-  const walkFilter = (f: Record<string, unknown> | undefined, trail: string) => {
+  const walk = (f: unknown, trail: string) => {
     if (!f || typeof f !== "object") return;
-    const linkBlock = f.$link as Record<string, unknown> | undefined;
-    for (const [ln, sub] of Object.entries(linkBlock ?? {})) {
-      if (ln === linkName) refs.add(trail);
-      if (sub && typeof sub === "object") walkFilter(sub as Record<string, unknown>, trail);
-    }
+    // 结构遍历（不解析目标类）：每个 $link 条目都发事件，命中关系名即记账
+    walkFilter(null, "", f as Record<string, unknown>, {
+      link: (_c, ln) => {
+        if (ln === linkName) refs.add(trail);
+      },
+    });
   };
   for (const [clsName, cls] of Object.entries(d.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       const trail = `动作 ${clsName}.${actName}`;
-      walkFilter(act.pre as Record<string, unknown> | undefined, trail);
+      walk(act.pre, trail);
       for (const item of act.effect ?? []) {
         if ("link" in item && item.link === linkName) refs.add(trail);
         const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
-        if (op && "filter" in op) walkFilter(op.filter as Record<string, unknown> | undefined, trail);
+        if (op && "filter" in op) walk(op.filter, trail);
       }
     }
     for (const [p, def] of Object.entries(cls.properties)) {
       if (!def.derived) continue;
-      const whens = Array.isArray(def.derived) ? def.derived.map((r) => (r as { when?: Record<string, unknown> }).when) : [def.derived as Record<string, unknown>];
-      for (const w of whens) walkFilter(w, `派生属性 ${clsName}.${p}`);
+      for (const w of derivedWhens(def.derived)) walk(w, `派生属性 ${clsName}.${p}`);
     }
   }
   return [...refs];
 }
 
-/** 值侧的 { property: x } 引用（from: request 指的是请求参数，不算）：递归过滤树/赋值表，命中即记账。 */
+/** 值侧的 { property: x } 引用（from: request 指的是请求参数，不算）：递归过滤树/赋值表，命中即记账。
+ *  带 $link 的节点是过滤：子过滤按目标类换宿主（走 schema 层 walkFilter）；其余节点通用深挖。 */
 function valuePropRefs(
   node: unknown,
   hostCls: string,
@@ -293,14 +285,16 @@ function valuePropRefs(
   if (!node || typeof node !== "object" || Array.isArray(node)) return;
   const rec = node as Record<string, unknown>;
   if (typeof rec.property === "string" && rec.from !== "request" && hostCls === clsName && rec.property === prop) refs.add(trail);
-  const linkBlock = rec.$link as Record<string, unknown> | undefined;
-  for (const [ln, sub] of Object.entries(linkBlock ?? {})) {
-    const target = linkTarget(d, hostCls, ln); // $link 嵌套里被点名的属性是目标类的
-    valuePropRefs(sub, target ?? hostCls, trail, d, clsName, prop, refs);
+  if ("$link" in rec) {
+    walkFilter(d, hostCls, rec, {
+      link: () => {},
+      prop: (cls, _k, v) => valuePropRefs(v, cls, trail, d, clsName, prop, refs),
+      // special（$request 等）块里的 { property } 指请求参数袋，不算
+    });
+    return;
   }
   for (const [k, v] of Object.entries(rec)) {
-    if (k === "$link") continue;
-    if (k === "$request") continue; // $request 块里的 { property } 指的是请求参数袋，不是类属性
+    if (k === "$request") continue;
     if (v && typeof v === "object") valuePropRefs(v, hostCls, trail, d, clsName, prop, refs);
   }
 }
@@ -310,7 +304,23 @@ function filterTopKeys(f: Record<string, unknown>): string[] {
   return Object.keys(f).filter((k) => !k.startsWith("$"));
 }
 
-/** 派生定义里出现的本类属性键（when 过滤 + 布尔过滤）。$link 嵌套里的键是目标类的，不收——跨类引用由 referencesOf 的 linkTarget 走查负责。 */
+/** $link 嵌套走查（键侧跨类引用）：子过滤落在 clsName 且顶层键点名 prop 时把 trail 记账。派生规则与动作 pre/effect 共用。 */
+function collectNestedLinkRefs(d: OntologyConfig, f: unknown, hostCls: string, clsName: string, prop: string, trail: string, add: (t: string) => void): void {
+  if (!f || typeof f !== "object") return;
+  walkFilter(d, hostCls, f as Record<string, unknown>, {
+    link: (_c, _ln, target, sub) => {
+      if (!target) return false; // 未解析的关系不再深入（校验另行拦）
+      if (target === clsName && sub && typeof sub === "object" && !Array.isArray(sub) && filterTopKeys(sub as Record<string, unknown>).includes(prop)) add(trail);
+    },
+  });
+}
+
+/** 派生定义的 when 序列：列表派生取每条 rule.when；布尔派生就是过滤本体。 */
+function derivedWhens(derived: unknown): unknown[] {
+  return Array.isArray(derived) ? derived.map((r) => (r as { when?: unknown }).when) : [derived];
+}
+
+/** 派生定义里出现的本类属性键（when 过滤 + 布尔过滤）。$link 嵌套里的键是目标类的，不收——跨类引用由 collectNestedLinkRefs 负责。 */
 function derivedFilterKeys(derived: unknown): string[] {
   const keys: string[] = [];
   const walk = (f: Record<string, unknown>) => {
@@ -330,30 +340,14 @@ function derivedFilterKeys(derived: unknown): string[] {
   return keys;
 }
 
-/** 关系名 → 目标类：走引擎同一份解析（findLink），正向取 to，反向名取 from。 */
-function linkTarget(d: OntologyConfig, hostCls: string, linkName: string): string | null {
-  const r = findLink(d, hostCls, linkName);
-  return r ? (r.reversed ? r.link.from : r.link.to) : null;
-}
-
 /** 动作里的引用：本类 pre 的键；任意效应指向本类时的属性键；$link 目标过滤落回本类的键。 */
 function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] {
   const refs = new Set<string>();
-  const scanNestedLinks = (f: Record<string, unknown> | undefined, hostCls: string, trail: string) => {
-    if (!f) return;
-    const linkBlock = f.$link as Record<string, unknown> | undefined;
-    for (const [linkName, sub] of Object.entries(linkBlock ?? {})) {
-      const target = linkTarget(d, hostCls, linkName);
-      if (!target || typeof sub !== "object" || sub === null) continue;
-      if (target === clsName && filterTopKeys(sub as Record<string, unknown>).includes(prop)) refs.add(trail);
-      scanNestedLinks(sub as Record<string, unknown>, target, trail);
-    }
-  };
   for (const [hostName, hostCls] of Object.entries(d.object_types)) {
     for (const [actName, act] of Object.entries(hostCls.actions ?? {})) {
       const trail = `动作 ${hostName}.${actName}`;
       if (hostName === clsName && act.pre && filterTopKeys(act.pre).includes(prop)) refs.add(trail);
-      scanNestedLinks(act.pre, hostName, trail);
+      collectNestedLinkRefs(d, act.pre, hostName, clsName, prop, trail, (t) => refs.add(t));
       for (const item of act.effect ?? []) {
         const op = "update" in item ? item.update : "delete" in item ? item.delete : "create" in item ? item.create : null;
         if (!op || op.object !== clsName) continue; // link 没有属性键；他类效应不归这里管
@@ -362,7 +356,7 @@ function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] 
           ...("filter" in op && op.filter ? filterTopKeys(op.filter) : []),
         ];
         if (keys.includes(prop)) refs.add(trail);
-        if ("filter" in op) scanNestedLinks(op.filter, clsName, trail);
+        if ("filter" in op) collectNestedLinkRefs(d, op.filter, clsName, clsName, prop, trail, (t) => refs.add(t));
       }
     }
   }
@@ -448,12 +442,6 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
   storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: await metaStore().getLayout(ws) };
   await fillDecisionVersions(newVersion, ws); // 回滚也是一次发布：未绑版本的裁决挂到它
   return { version: newVersion };
-}
-
-/** 测试用：清空内存态。不传 ws 清全部空间。 */
-export function resetStore(ws?: string): void {
-  if (ws) stores.delete(ws);
-  else stores.clear();
 }
 
 /** 发布成功后回填：把还没绑版本的裁决留痕挂上这个版本。回填失败不影响发布。 */

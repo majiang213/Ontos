@@ -5,45 +5,35 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { queryRequestSchema } from "@/server/schema/request";
 import { metaStore } from "@/server/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {
-  try {
-    return NextResponse.json({ apis: await metaStore().listQueryApis(wsOf(req)) });
-  } catch (e) {
-    return internalError(e);
-  }
+  return respond(async () => ({ apis: await metaStore().listQueryApis(wsOf(req)) }));
 }
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  let body: { name: string; question: string; query: unknown };
-  try {
-    body = z.object({ name: z.string().min(1), question: z.string().min(1), query: z.unknown() }).parse(await bodyJson(req));
-  } catch {
-    return NextResponse.json({ error: "请求形状不合法（需要 name、question、query）" }, { status: 400 });
-  }
-  try {
-    const query = queryRequestSchema.parse(body.query);
+  return respond(async () => {
+    let body: { name: string; question: string; query: unknown };
+    try {
+      body = z.object({ name: z.string().min(1), question: z.string().min(1), query: z.unknown() }).parse(await bodyJson(req));
+    } catch {
+      // 外层形状（name/question/query 齐不齐）单独报，不进错误阶梯
+      return NextResponse.json({ error: "请求形状不合法（需要 name、question、query）" }, { status: 400 });
+    }
+    const query = queryRequestSchema.parse(body.query); // 形状问题一律 400，与其它路由同层
     await metaStore().saveQueryApi(wsOf(req), body.name, body.question, JSON.stringify(query));
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "查询形状不合法", issues: e.issues }, { status: 400 }); // 形状问题一律 400，与其它路由同层
-    return internalError(e);
-  }
+    return { ok: true };
+  }, { zod: { status: 400, error: "查询形状不合法" } });
 }
 
 export async function DELETE(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const { id } = z.object({ id: z.number() }).parse(await bodyJson(req));
     await metaStore().deleteQueryApi(wsOf(req), id);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return internalError(e);
-  }
+    return { ok: true };
+  });
 }

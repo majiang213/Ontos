@@ -1,30 +1,20 @@
 // M4/M6 与 MCP 测试：版本历史与回滚、验收问题集跑批、问数 API 台账、MCP 工具端点。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { cleanupRuntime, restartRuntime, setupRuntime } from "./helpers";
 
 describe("版本历史与回滚", () => {
   let tmp: string;
-  let repoRoot: string;
-  beforeEach(() => {
-    repoRoot = process.cwd();
-    tmp = mkdtempSync(join(tmpdir(), "ontos-ver-"));
-    mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-    cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
-    process.chdir(tmp);
+  beforeEach(async () => {
+    tmp = await setupRuntime("ontos-ver-");
   });
   afterEach(async () => {
-    (await import("../server/engine/configStore")).resetStore();
-    (await import("../server/meta/store")).resetMetaStore();
-    process.chdir(repoRoot);
-    rmSync(tmp, { recursive: true, force: true });
+    await cleanupRuntime(tmp);
   });
 
   it("回滚是 revert 语义：v1 内容发成 v3，历史链不断", async () => {
     const s = await import("../server/engine/configStore");
-    s.resetStore();
+    await restartRuntime(tmp); // 从干净内存态开始
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
     await s.publishDraft(); // v2 含 vendor
     expect((await s.getPublished()).version).toBe(2);
@@ -39,23 +29,11 @@ describe("版本历史与回滚", () => {
 describe("验收问题集跑批（真路由）", () => {
   // 直接打 POST /api/questions?run=1，不在测试里重实现跑批；与仓库运行态隔离
   let tmp: string;
-  let repoRoot: string;
   beforeEach(async () => {
-    repoRoot = process.cwd();
-    tmp = mkdtempSync(join(tmpdir(), "ontos-q-"));
-    mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-    cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
-    process.chdir(tmp);
-    (await import("../server/engine/configStore")).resetStore();
-    (await import("../server/meta/store")).resetMetaStore();
-    (await import("../server/engine/load")).resetRegistry();
+    tmp = await setupRuntime("ontos-q-");
   });
   afterEach(async () => {
-    (await import("../server/engine/configStore")).resetStore();
-    (await import("../server/meta/store")).resetMetaStore();
-    (await import("../server/engine/load")).resetRegistry();
-    process.chdir(repoRoot);
-    rmSync(tmp, { recursive: true, force: true });
+    await cleanupRuntime(tmp);
   });
 
   it("期望行数对上记通过、对不上记失败；失败带明细，版本落上", async () => {
@@ -78,28 +56,13 @@ describe("验收问题集跑批（真路由）", () => {
 });
 
 describe("MCP 工具端点", () => {
-  // 路由读 cwd 下的已发布配置与元数据库——拷贝种子到临时目录，与仓库运行态（versions/ 等）隔离
+  // 路由读运行态 cwd 下的已发布配置与元数据库——每用例一个临时目录 + 全新运行态，与仓库运行态隔离
   let tmp: string;
-  let repoRoot: string;
   beforeEach(async () => {
-    repoRoot = process.cwd();
-    tmp = mkdtempSync(join(tmpdir(), "ontos-mcp-"));
-    mkdirSync(join(tmp, "src/server/config"), { recursive: true });
-    cpSync(join(repoRoot, "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
-    process.chdir(tmp);
-    // 清掉 globalThis 单例：别的 describe 用过的句柄绑死了旧目录
-    const s = await import("../server/engine/configStore");
-    s.resetStore();
-    (await import("../server/meta/store")).resetMetaStore();
-    (await import("../server/engine/load")).resetRegistry(); // fixture 内存库会被 run_action 真改，用例间要全新
+    tmp = await setupRuntime("ontos-mcp-"); // fixture 内存库会被 run_action 真改，用例间要全新
   });
   afterEach(async () => {
-    const s = await import("../server/engine/configStore");
-    s.resetStore();
-    (await import("../server/meta/store")).resetMetaStore();
-    (await import("../server/engine/load")).resetRegistry();
-    process.chdir(repoRoot);
-    rmSync(tmp, { recursive: true, force: true });
+    await cleanupRuntime(tmp);
   });
 
   /** JSON-RPC 2.0 调用：HTTP 一律 200，成败看信封（result / error）。 */

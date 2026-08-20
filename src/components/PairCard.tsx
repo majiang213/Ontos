@@ -3,7 +3,7 @@
 
 import { useRef, useState } from "react";
 import type { PairAdvice } from "../server/engine/llmSlot";
-import { apiUrl } from "./wsClient";
+import { apiPost } from "./wsClient";
 
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
   const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
@@ -17,30 +17,23 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(apiUrl("/api/decisions"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          class_a: pair.class_a,
-          class_b: pair.class_b,
-          verdict,
-          stage_names: verdict === "阶段" && stage.from && stage.to ? stage : undefined,
-          llm_advice: `${pair.tendency}：${pair.reason}`,
-          evidence: rate ?? undefined, // 证据快照：归一化规则、样本量、交集数、比率
-        }),
+      const data = await apiPost<{ recorded?: boolean }>("/api/decisions", {
+        class_a: pair.class_a,
+        class_b: pair.class_b,
+        verdict,
+        stage_names: verdict === "阶段" && stage.from && stage.to ? stage : undefined,
+        llm_advice: `${pair.tendency}：${pair.reason}`,
+        evidence: rate ?? undefined, // 证据快照：归一化规则、样本量、交集数、比率
       });
-      const data = await r.json();
-      if (!r.ok) setError(data.error ?? "裁决被拒"); // 留在面板里，能重试
-      else
-        onDone(
-          verdict === "阶段"
-            ? `已裁决 ${pair.class_a} × ${pair.class_b}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
-            : verdict === "同一" || verdict === "部分重叠"
-              ? `已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
-              : "" // 仅名称相似/跳过：不动草稿，条目从面板消失即是反馈，不弹提示
-        );
+      onDone(
+        verdict === "阶段"
+          ? `已裁决 ${pair.class_a} × ${pair.class_b}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+          : verdict === "同一" || verdict === "部分重叠"
+            ? `已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+            : "" // 仅名称相似/跳过：不动草稿，条目从面板消失即是反馈，不弹提示
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e)); // 留在面板里，能重试
     } finally {
       setBusy(false);
     }
@@ -81,14 +74,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               setRateBusy(true);
               setError(null);
               try {
-                const r = await fetch(apiUrl("/api/overlap"), {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ class_a: pair.class_a, class_b: pair.class_b }),
-                });
-                const data = await r.json();
-                if (r.ok) setRate(data);
-                else setError(data.error ?? "算不了");
+                setRate(await apiPost<typeof rate>("/api/overlap", { class_a: pair.class_a, class_b: pair.class_b }));
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {

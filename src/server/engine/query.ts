@@ -3,6 +3,7 @@
 
 import type { Filter, LinkType, OntologyConfig } from "../schema/config";
 import { FILTER_OPS } from "../schema/config";
+import { walkFilter } from "../schema/filterWalk";
 import type { ExpandNode, QueryRequest } from "../schema/request";
 import { toColumnValue, type Condition, type SourceDriver } from "./driver";
 import type { EvalContext } from "./expr";
@@ -112,10 +113,13 @@ function neededProps(cls: Cls, requested: string[] | undefined, filter: Filter |
     if (link.transition) addProp(link.transition.property);
   };
   const addFilterKeys = (f: Filter) => {
-    for (const k of Object.keys(f)) {
-      if (k === "$link") for (const name of Object.keys(f.$link as Filter)) addLink(name);
-      else if (!k.startsWith("$")) addProp(k);
-    }
+    walkFilter(config, cls.name, f, {
+      prop: (_c, k) => addProp(k),
+      link: (_c, name) => {
+        addLink(name);
+        return false; // $link 子过滤落在目标类，不进本类的属性集
+      },
+    });
   };
   const addProp = (p: string) => {
     if (need.has(p)) return;

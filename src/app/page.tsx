@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CaretDown, Check, Plus } from "@phosphor-icons/react";
 import CanvasPage from "@/components/CanvasPage";
 import ChatPage from "@/components/ChatPage";
-import { setWs } from "@/components/wsClient";
+import { apiGet, apiPost, setWs } from "@/components/wsClient";
 
 export default function Home() {
   const [page, setPage] = useState<"build" | "chat">("build");
@@ -55,8 +55,7 @@ function WsSwitcher({ ws, onChange }: { ws: string; onChange: (w: string) => voi
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     void (async () => {
-      const r = await fetch("/api/workspaces");
-      const data = await r.json();
+      const data = await apiGet<{ workspaces?: string[] }>("/api/workspaces");
       setList(data.workspaces ?? []);
     })();
   }, []);
@@ -68,16 +67,15 @@ function WsSwitcher({ ws, onChange }: { ws: string; onChange: (w: string) => voi
   };
   const create = async () => {
     if (!name.trim()) return;
-    const r = await fetch("/api/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }) });
-    const data = await r.json();
-    if (!r.ok) {
-      setError(data.error ?? "建不了");
-      return;
+    try {
+      const data = await apiPost<{ workspaces?: string[] }>("/api/workspaces", { name: name.trim() });
+      const created = name.trim();
+      setList(data.workspaces ?? []);
+      close();
+      onChange(created);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "建不了");
     }
-    const created = name.trim();
-    setList(data.workspaces ?? []);
-    close();
-    onChange(created);
   };
   return (
     <span style={{ position: "relative" }}>

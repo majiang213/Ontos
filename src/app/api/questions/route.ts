@@ -2,21 +2,16 @@
 // 跑法：逐条经 LLM 槽位编译后交引擎执行——编译或执行出错记「失败」，正常出数记「通过」。
 // 答错即本体或映射有误，回 M2/M3 修正。
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { runQuery } from "@/server/engine/query";
 import { getSlot } from "@/server/engine/llmSlot";
 import { getDriverRegistry } from "@/server/engine/load";
 import { getPublished } from "@/server/engine/configStore";
 import { metaStore } from "@/server/meta/store";
-import { BadRequest, bodyJson, internalError, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {
-  try {
-    return NextResponse.json({ questions: await metaStore().listQuestions(wsOf(req)) });
-  } catch (e) {
-    return internalError(e);
-  }
+  return respond(async () => ({ questions: await metaStore().listQuestions(wsOf(req)) }));
 }
 
 export async function POST(req: Request) {
@@ -24,7 +19,7 @@ export async function POST(req: Request) {
   if (denied) return denied;
   const url = new URL(req.url);
   if (url.searchParams.get("run")) {
-    try {
+    return respond(async () => {
       const ws = wsOf(req);
       const config = (await getPublished(ws)).config;
       const version = (await getPublished(ws)).version;
@@ -48,32 +43,22 @@ export async function POST(req: Request) {
         await metaStore().setQuestionStatus(ws, q.id, status, version);
         results.push({ id: q.id, question: q.question, status, detail });
       }
-      return NextResponse.json({ results, version });
-    } catch (e) {
-      return internalError(e);
-    }
+      return { results, version };
+    });
   }
-  try {
+  return respond(async () => {
     const { question, expected } = z.object({ question: z.string().min(1), expected: z.string().optional() }).parse(await bodyJson(req));
     await metaStore().addQuestion(wsOf(req), question, expected);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return internalError(e);
-  }
+    return { ok: true };
+  });
 }
 
 export async function DELETE(req: Request) {
   const denied = requireWriteAuth(req);
   if (denied) return denied;
-  try {
+  return respond(async () => {
     const { id } = z.object({ id: z.number() }).parse(await bodyJson(req));
     await metaStore().removeQuestion(wsOf(req), id);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) return NextResponse.json({ error: "请求形状不合法" }, { status: 400 });
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
-    return internalError(e);
-  }
+    return { ok: true };
+  });
 }
