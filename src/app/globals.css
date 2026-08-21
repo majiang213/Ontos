@@ -74,52 +74,13 @@ input { font-family: inherit; outline: none; }
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ---------- 浮动药丸导航（禁用贴顶通栏） ---------- */
-:root {
-  --aside-w: 232px; /* 对话页会话栏宽（900px 档收窄到 160，胶囊中轴跟着走） */
-}
-.nav-float {
-  position: fixed;
-  top: 14px;
-  /* 胶囊位置两页固定一处（会话栏以右的中轴），切页不跳 */
-  left: calc(50% + var(--aside-w) / 2);
-  transform: translateX(-50%);
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px;
-  border-radius: var(--r-chip);
-  background: rgba(255, 254, 251, 0.72);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-soft);
-}
+/* ---------- 顶栏（品牌 + 版本号 + 空间切换器） ---------- */
 .nav-brand {
   font-family: var(--font-serif);
   font-size: 15px;
   letter-spacing: 0.01em;
   padding: 4px 12px 4px 14px;
 }
-.nav-seg {
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 6px 16px;
-  border-radius: var(--r-chip);
-  background: transparent;
-  color: var(--ink-3);
-  transition: color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
-}
-.nav-seg:hover { color: var(--ink-2); }
-.nav-seg.on {
-  background: var(--panel);
-  color: var(--ink);
-  border-color: var(--line);
-  box-shadow: var(--shadow-soft);
-}
-
 /* ---------- 空间切换器（触发器 + 下拉面板） ---------- */
 .ws-trigger {
   display: inline-flex;
@@ -372,61 +333,7 @@ input { font-family: inherit; outline: none; }
   animation: rise-in 480ms var(--ease-out) both;
 }
 
-/* ---------- 对话页 ---------- */
-.chat-wrap {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0;
-}
-/* 会话栏常驻、占文档流：窗口变窄时主区自然收窄，永不折叠成弹层。
-   宽度要装下全局顶栏（品牌 + 版本号 + 空间切换器）：顶栏在侧栏列内，分隔线全高不穿内容 */
-.chat-aside {
-  width: var(--aside-w);
-  flex-shrink: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 78px 10px 12px 16px;
-  border-right: 1px solid var(--line);
-}
-.chat-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 78px 24px 12px;
-}
-.chat-suggest { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
-.msg-user {
-  align-self: flex-end;
-  max-width: 86%;
-  padding: 9px 16px;
-  font-size: 14px;
-  border-radius: 20px 20px 6px 20px;
-  background: var(--accent-soft);
-  color: var(--ink);
-  animation: rise-in 420ms var(--ease-out) both;
-}
-.msg-agent { align-self: flex-start; max-width: 100%; min-width: 0; animation: rise-in 480ms var(--ease-out) both; }
-.answer-head { font-size: 14px; line-height: 1.6; margin-bottom: 8px; }
-.answer-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-.answer-table th {
-  text-align: left;
-  padding: 6px 10px;
-  color: var(--ink-3);
-  font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--line);
-}
-.answer-table td { border-bottom: 1px solid var(--line); padding: 6px 10px; }
-details.fold { margin-top: 10px; }
-details.fold summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }
-details.fold summary:hover { color: var(--ink); }
+
 .fold-body {
   margin-top: 6px;
   font-size: 12px;
@@ -496,22 +403,14 @@ select.ctl { background: var(--panel); }
 
 /* ---------- 响应式：窄视口阶梯收窄 ---------- */
 @media (max-width: 900px) {
-  :root { --aside-w: 160px; }
-  .chat-aside { padding-left: 10px; padding-right: 6px; }
-  .chat-main { padding-left: 14px; padding-right: 14px; }
-  .nav-sha { display: none; } /* 版本号让位：顶栏才装得进收窄后的侧栏 */
+  .nav-sha { display: none; } /* 窄屏隐藏版本号 */
   .nav-brand { padding: 4px 6px 4px 0; }
   .ws-trigger { max-width: 110px; }
-}
-@media (max-width: 640px) {
-  .chat-suggest { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
   .float-tl, .float-tr { left: 12px; right: 12px; }
   .float-tr { top: auto; bottom: 76px; }
-  .msg-user, .msg-agent { max-width: 100%; }
   .node-shell { width: min(288px, calc(100vw - 40px)); }
-  /* 顶栏瘦身：品牌与页面胶囊才不叠在一起（版本号已在 900px 档隐藏） */
+  /* 顶栏瘦身（版本号已在 900px 档隐藏） */
   .nav-brand { padding: 4px 4px 4px 0; }
-  .nav-seg { padding: 6px 10px; }
 }

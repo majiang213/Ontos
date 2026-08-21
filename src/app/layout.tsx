@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Ontos 安托斯 — 对话式本体工作台",
-  description: "逆向建模 → 多源整合 → 发布映射 → 问数",
+  title: "Ontos 安托斯 — 本体工作台",
+  description: "逆向建模 → 多源整合 → 发布映射；问数与动作由外部 Agent 经 MCP 驱动",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

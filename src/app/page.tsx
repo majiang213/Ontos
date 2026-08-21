@@ -1,47 +1,28 @@
-// Ontos —— 两个页面，不是两个会话：构建 = 纯画布页；对话 = 纯对话页。
+// Ontos —— 单一画布页。问数与动作不外置 UI：外部 Agent 经 MCP（/api/mcp）驱动。
 // 左上角是工作空间切换器：空间 = 共享元库里按 workspace_id 隔开的一整套配置与历史。
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { CaretDown, Check, Plus } from "@phosphor-icons/react";
 import CanvasPage from "@/components/CanvasPage";
-import ChatPage from "@/components/ChatPage";
 import { apiGet, apiPost, setWs } from "@/components/wsClient";
 
 export default function Home() {
-  const [page, setPage] = useState<"build" | "chat">("build");
   const [ws, setWsState] = useState("default");
   const switchWs = useCallback((w: string) => {
-    setWs(w); // 全局单值先换，再按 key 重挂两页
+    setWs(w); // 全局单值先换，再按 key 重挂画布
     setWsState(w);
   }, []);
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* 左上角：品牌 + 空间切换器（全局）；页面切换留在中栏 */}
+      {/* 左上角：品牌 + 空间切换器（全局） */}
       <div style={{ position: "fixed", top: 14, left: 16, zIndex: 30, display: "flex", gap: 8, alignItems: "center" }}>
         <span className="nav-brand">Ontos</span>
         <span className="nav-sha" style={{ fontSize: 10, color: "var(--ink-3)", userSelect: "none" }} title="当前代码版本（git 短 hash）">{process.env.NEXT_PUBLIC_GIT_SHA}</span>
         <WsSwitcher ws={ws} onChange={switchWs} />
       </div>
-      <nav className="nav-float">
-        {(
-          [
-            ["build", "本体构建"],
-            ["chat", "对话"],
-          ] as const
-        ).map(([key, label]) => (
-          <button key={key} className={`nav-seg ${page === key ? "on" : ""}`} onClick={() => setPage(key)}>
-            {label}
-          </button>
-        ))}
-      </nav>
-      {/* 两页常驻挂载、用显隐切换：切页不丢画布状态与对话消息；切空间按 key 重挂（换一整套配置与历史） */}
-      <div style={{ display: page === "build" ? "contents" : "none" }}>
-        <CanvasPage key={ws} />
-      </div>
-      <div style={{ display: page === "chat" ? "contents" : "none" }}>
-        <ChatPage key={ws} />
-      </div>
+      {/* 切空间按 key 重挂（换一整套配置与历史） */}
+      <CanvasPage key={ws} />
     </div>
   );
 }

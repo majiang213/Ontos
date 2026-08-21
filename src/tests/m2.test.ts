@@ -53,13 +53,13 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     await expect(bad.nlToQuery("x", config)).rejects.toThrow();
   });
 
-  it("getSlot：没 XAI_API_KEY 回退罐头，有 key 走真模型", async () => {
+  it("getSlot：没 OPENAI_API_KEY 回退罐头，有 key 走真模型", async () => {
     const { getSlot } = await import("../server/engine/llmSlot");
-    delete process.env.XAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
     expect(getSlot().name).toBe("canned-离线回退");
-    process.env.XAI_API_KEY = "test-key";
+    process.env.OPENAI_API_KEY = "test-key";
     expect(getSlot().name).toContain("ai-sdk:");
-    delete process.env.XAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
   });
 });
 

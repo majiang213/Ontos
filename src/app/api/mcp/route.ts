@@ -29,7 +29,7 @@ const TOOLS = [
 
 const rpcOk = (id: unknown, result: unknown) => NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result });
 const rpcErr = (id: unknown, code: number, message: string) => NextResponse.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
-/** tools/call 的结果：文本通道 + 结构化通道；isError 标业务失败（前置不满足等），与 /api/action 的 422 同语义。 */
+/** tools/call 的结果：文本通道 + 结构化通道；isError 标业务失败（前置不满足等）。 */
 const toolResult = (payload: unknown, isError = false) => ({
   content: [{ type: "text", text: JSON.stringify(payload) }],
   structuredContent: payload,

@@ -198,11 +198,11 @@ properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 
   }
 }
 
-/** 槽位选择：有 XAI_API_KEY 走真模型（xAI，OpenAI 兼容），否则离线回退。
- *  换 base URL / 模型用 ONTOS_LLM_BASE_URL / ONTOS_LLM_MODEL。 */
+/** 槽位选择：有 OPENAI_API_KEY 走真模型（OpenAI 兼容协议，通用键同 Claude Code / Codex），否则离线回退。
+ *  换接入点/模型用 OPENAI_BASE_URL / OPENAI_MODEL；默认对接 xAI（https://api.x.ai/v1，grok-4.5）。 */
 export function getSlot(): LlmSlot {
-  const key = process.env.XAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY;
   if (!key) return new CannedSlot();
-  const xai = createXai({ apiKey: key, baseURL: process.env.ONTOS_LLM_BASE_URL ?? undefined });
-  return new AiSdkSlot(xai.responses(process.env.ONTOS_LLM_MODEL ?? "grok-4.5"));
+  const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
+  return new AiSdkSlot(xai.responses(process.env.OPENAI_MODEL ?? "grok-4.5"));
 }

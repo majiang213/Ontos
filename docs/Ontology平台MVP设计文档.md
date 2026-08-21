@@ -75,7 +75,7 @@
 | M7 查询服务 | 查询 JSON → 按已发布配置求值 | 确定性求值：下推各源、内存对齐，求值不含模型；默认查询治理：强制超时、`limit` 上限、聚合下推 |
 | M8 动作执行器 | 动作 JSON → 前置/公理校验 → 投影原库 | 与 M7 对等、同一进程；写回按效应和源映射推出；每条投影是源库上的短事务，更新带条件（要改的列仍等于读到的值），条件不成立则判该条投影失败、重读重发。这是执行层防护，不改请求与配置的口径 |
 
-**对外只有两条 API**：`POST /api/query` 只读原库；`POST /api/action` 按已发布动作投影写原库。没有「新系统 CRUD」。跨源读：各源分别下推，引擎内按同一性标准指定的属性把不同源的行对齐成同一个体。跨库写：不做分布式事务，失败条目进留痕，补偿是重发同一动作或人工修库。大规模联合查询、CDC 本期不做。
+**对外只有两条能力**：`query` 只读原库；`run_action` 按已发布动作投影写原库——两者经 MCP 端点（`POST /api/mcp`）暴露给外部 Agent，另有 REST 形态的只读入口 `POST /api/query`。没有「新系统 CRUD」。跨源读：各源分别下推，引擎内按同一性标准指定的属性把不同源的行对齐成同一个体。跨库写：不做分布式事务，失败条目进留痕，补偿是重发同一动作或人工修库。大规模联合查询、CDC 本期不做。
 
 ## 4. 元模型骨架
 
@@ -217,7 +217,7 @@ link_types:
 
 这份请求的意思是：在役设备的名称，以及各自所属部门的名称。要点四条。`filter` 直挂的是属性条件（含派生属性）；关系条件收在 `$link` 下。类名、属性名、关系名对不上已发布配置，引擎拒绝，不猜。`expand` 按 `link_types` 里声明的关系进入目标类，反向写这条关系的 `inverse` 名；项内可以再套 `filter` 和 `expand`。根上写 `identity` 表示认准一个体，不再筛一批；写 `aggregate` 表示返回分组统计，不返回个体行。
 
-**写入：`POST /api/action`。** 请求只点名，不描述怎么改：
+**写入：MCP 的 `run_action` 工具。** 请求只点名，不描述怎么改：
 
 ```json
 { "action": "convert", "object": "equipment", "identity": "SN-40217" }
@@ -390,7 +390,7 @@ CREATE INDEX idx_action_subject ON log_action (ontology_id, object_type, subject
 
 ### 工作空间（空间隔离的结构）
 
-**概念。** 工作空间是隔离单位：一个空间一套完整的「本体配置 + 版本链 + 平台元数据 + 画布摆位 + 对话历史」。空间之间不共享任何运行时状态；切换空间等于整套换掉。典型用法：一个空间演示设备域、另一个空间演 HR 域，或一个空间做正式、一个空间做试验。
+**概念。** 工作空间是隔离单位：一个空间一套完整的「本体配置 + 版本链 + 平台元数据 + 画布摆位」。空间之间不共享任何运行时状态；切换空间等于整套换掉。典型用法：一个空间演示设备域、另一个空间演 HR 域，或一个空间做正式、一个空间做试验。
 
 **结构：共享元库 + `workspace_id`，一张注册表。** 隔离边界不再落在文件系统上，而是落在共享平台元数据库的 `workspace_id` 列上——这是接入外部 MySQL/PG 时的形态：一个实例管全部空间，跨空间统一管理成为合法需求。共享库的存在也让注册表有了宿主（文件制下「注册表没地方放」的自指问题在共享库下不成立）：
 
@@ -405,11 +405,11 @@ CREATE TABLE onto_workspace (                  -- 工作空间注册表
 ```
 
 - **本体配置与版本链入库**：`onto_version` 增加 `workspace_id`，YAML 全量快照按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`，回滚照旧是 revert 语义（旧内容作为新版本插入）。摆位挂在 `onto_workspace.layout`。
-- **其余 9 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、ont_query_api、log_query、log_action、meta_seq）全部增加 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列；`meta_seq` 主键改 `(workspace_id, name)`。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。
+- **其余 7 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）全部增加 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列；`meta_seq` 主键改 `(workspace_id, name)`。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。
 - **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 即本章 MySQL 8 方言。PG 同理（方言注记见上节）。
 - **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `default` 的 `onto_version` v1 行，此后不再被读；新建空间空白起步（v1 是空本体），演示 fixture 连接也只注入 `default`——切换空间要看得出是另一套。
 
-**语义。** 默认空间 `default`，首次访问时若注册表里没有，自动建行并把演示模板插成 v1。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。对话历史存在浏览器 localStorage，按 `ontos-chat-sessions:<空间名>` 分键。
+**语义。** 默认空间 `default`，首次访问时若注册表里没有，自动建行并把演示模板插成 v1。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。
 
 **迁移。** 文件制（`workspaces/<name>/` 目录 + 每空间 SQLite 文件）被本方案取代；迁移是把每个空间的最新 YAML 与版本链插入共享库对应 `workspace_id` 的行，元数据各行补写 `workspace_id`。
 

@@ -1,4 +1,4 @@
-// M4/M6 与 MCP 测试：版本历史与回滚、验收问题集跑批、问数 API 台账、MCP 工具端点。
+// M4/M6 与 MCP 测试：版本历史与回滚、验收问题集跑批、MCP 工具端点。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, restartRuntime, setupRuntime } from "./helpers";
@@ -108,7 +108,7 @@ describe("MCP 工具端点", () => {
     expect(r.result.isError).toBeUndefined();
   });
 
-  it("run_action：前置不满足标 isError（与 /api/action 的 422 同语义）", async () => {
+  it("run_action：前置不满足标 isError（业务失败与信封错误分开）", async () => {
     const r = await call("run_action", { action: "convert", object: "equipment", identity: "SN-40080" }); // 已在役，前置不满足
     expect(r.result.structuredContent.ok).toBe(false);
     expect(r.result.isError).toBe(true);

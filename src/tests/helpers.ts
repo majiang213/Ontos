@@ -4,7 +4,7 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installRuntime, makeRuntime } from "../server/runtime";
+import { installRuntime, makeRuntime } from "@/server/runtime";
 
 /** 建临时目录、拷种子配置、装一个 cwd 指向它的全新运行态。返回临时目录路径。 */
 export async function setupRuntime(prefix: string): Promise<string> {

@@ -128,15 +128,6 @@ CREATE TABLE IF NOT EXISTS ont_question (
   expected TEXT,
   status TEXT NOT NULL DEFAULT '未跑'
 );
-CREATE TABLE IF NOT EXISTS ont_query_api (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  question TEXT NOT NULL,
-  query_json TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (workspace_id, name)
-);
 CREATE TABLE IF NOT EXISTS log_query (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
@@ -420,27 +411,6 @@ export class MetaStore {
   async setQuestionStatus(ws: string, qid: number, status: string, version?: number): Promise<void> {
     const id = await this.wsId(ws);
     await this.backend.run(`UPDATE ont_question SET status = ?, version = COALESCE(?, version) WHERE workspace_id = ? AND id = ?`, [status, version ?? null, id, qid]);
-  }
-
-  /* 问数 API 台账 */
-
-  async saveQueryApi(ws: string, name: string, question: string, queryJson: string): Promise<void> {
-    const id = await this.wsId(ws);
-    const upsert =
-      this.backend.dialect === "mysql"
-        ? `ON DUPLICATE KEY UPDATE question=VALUES(question), query_json=VALUES(query_json)`
-        : `ON CONFLICT(workspace_id, name) DO UPDATE SET question=excluded.question, query_json=excluded.query_json`;
-    await this.backend.run(`INSERT INTO ont_query_api (workspace_id, name, question, query_json) VALUES (?, ?, ?, ?) ${upsert}`, [id, name, question, queryJson]);
-  }
-
-  async listQueryApis(ws: string): Promise<{ id: number; name: string; question: string; query_json: string; created_at: string }[]> {
-    const id = await this.wsId(ws);
-    return (await this.backend.all(`SELECT * FROM ont_query_api WHERE workspace_id = ? ORDER BY id`, [id])) as never[];
-  }
-
-  async deleteQueryApi(ws: string, qid: number): Promise<void> {
-    const id = await this.wsId(ws);
-    await this.backend.run(`DELETE FROM ont_query_api WHERE workspace_id = ? AND id = ?`, [id, qid]);
   }
 
   /* 日志（不存结果集） */

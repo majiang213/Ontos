@@ -44,6 +44,7 @@
 | `docs/ontos-article.md` | 概念长文：本体论要素、本体与已有系统、跨源对齐方法论、查询与写入的求值过程、局限、配置附录 |
 | `docs/Ontology平台MVP设计文档.md` | MVP 设计文档：产品定位、系统架构、元模型骨架、计划与红线 |
 | `AGENTS.md` | 仓库工作约定：语言规则、术语表、交互架构约定 |
+| `skills/ontos/SKILL.md` | 给外部 Agent（Claude Code 等 ReAct 循环）的接入技能：经 MCP 发现本体词汇、组装查询/动作 JSON、执行与纠错的完整用法 |
 | `src/` | Next.js 应用（前后端一体）：页面与路由 `src/app/`、前端组件 `src/components/`、引擎 `src/server/engine/`、测试 `src/tests/` |
 
 ## 代码结构
@@ -51,18 +52,17 @@
 ```
 src/
 ├── app/                    Next.js App Router（前后端一体）
-│   ├── page.tsx            入口：空间切换 + 页面分段控件
+│   ├── page.tsx            入口：空间切换 + 画布页
 │   ├── globals.css         全部样式（设计 token + 组件类）
-│   └── api/                16 个路由：ask（问数）、query（执行结构化查询）、
-│                           action（动作）、draft（写工作副本）、publish（发布）、
+│   └── api/                14 个路由：query（执行结构化查询）、
+│                           draft（写工作副本）、publish（发布）、
 │                           generate（AI 生成草稿）、introspect（读表结构）、
 │                           candidates / overlap / decisions（整合三步）、
 │                           connections / workspaces、ontology / versions、
-│                           questions / saved-queries、mcp（外部 Agent 入口）
-├── components/             CanvasPage（构建页）、ChatPage（对话页）、
+│                           questions、mcp（外部 Agent 入口）
+├── components/             CanvasPage（构建页）、
 │                           OntologyCanvas（画布）、PairCard（裁决面板）、
 │                           QuestionsCard、forms（连接/新建对象表单）、Bezel（卡面壳）、
-│                           sessionStore（会话模型）、shapeAnswerRows（答案卡塑形）、
 │                           layout.ts（dagre 自动分层布局）、wsClient（API 适配器）
 ├── server/                 后端：引擎、校验、元库、运行态、种子配置
 │   ├── engine/             引擎：
@@ -80,15 +80,65 @@ src/
 │   ├── meta/store.ts       平台元数据库（默认单文件 SQLite，ONTOS_META_DSN 可换 MySQL）
 │   ├── runtime.ts          运行态（元库/注册表/配置存储的进程级单例，测试可整套换掉）
 │   └── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
-└── tests/                  12 个 vitest 文件、159 个用例；引擎行为约定钉在测试里
+└── tests/                  11 个 vitest 文件、150 个用例；引擎行为约定钉在测试里
 ```
 
 四条主线：
 
 - **建模流**：画布操作 → `POST /api/draft` 写工作副本 → `publish` 走 `validate` 校验 → `configStore` 插新版本。画布读工作副本，问数与动作只读已发布快照。
-- **问数流**：`ask` 路由 → `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
-- **动作流**：`action` 路由 → `engine/action` 核前置、定效应、按 `project` 写回源库并留痕；外部 Agent 走 `mcp` 路由进同一个执行器。
+- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos/SKILL.md`）；站内只剩验收跑批（`questions?run=1`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
+- **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具 → `engine/action` 核前置、定效应、按 `project` 写回源库并留痕。
 - **边界**：业务数据永不进平台，引擎只在内存拼装；`src/server/config` 里只有本体模板和平台自己的元库。
+
+## 接口一览
+
+URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` 就是 `/api/ontology`），前端在组件里写字符串字面量，经 `wsClient.ts` 一道接缝拼 `?ws=` 发出。路由是薄壳（解析 → 调引擎 → 出 JSON），逻辑全在 `src/server/engine/`。
+
+### 数据源接入
+
+| 接口 | 描述 | 前端调用处 |
+|---|---|---|
+| `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码）、保存（先测连通再落库）、删除 | `forms.tsx:126`（仅 POST） |
+| `/api/introspect` GET | 表结构内省：每个连接的表定义 + 3 行脱敏采样，源表只读 | `CanvasPage.tsx:77`、`:390` |
+
+### 本体构建（画布页）
+
+| 接口 | 描述 | 前端调用处 |
+|---|---|---|
+| `/api/generate` POST | 逆向建模：选中的表 → 内省 → LLM 产草稿 → 对象以草稿态上画布 | `CanvasPage.tsx:153` |
+| `/api/ontology` GET | 本体视图：画布读工作副本，`states` 标出新增/改过/一致 | `CanvasPage.tsx:69` |
+| `/api/draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx:85` |
+| `/api/publish` POST/DELETE | 发布草稿（升版本、立即可查）/ 放弃草稿回退到已发布快照 | `CanvasPage.tsx:107` / `:120` |
+| `/api/versions` GET/POST | 版本历史列表 / 回滚到指定版（Git revert 语义） | `CanvasPage.tsx:242` / `:319` |
+
+### 跨源整合（裁决三步，画布上的卡片）
+
+| 接口 | 描述 | 前端调用处 |
+|---|---|---|
+| `/api/candidates` GET | 候选对：已上画布对象之间找跨源候选配对，附倾向与依据 | `CanvasPage.tsx:72` |
+| `/api/overlap` POST | 交集率：归一化后算两类识别字段的集合重合度，只读采样 | `PairCard.tsx:77` |
+| `/api/decisions` POST | 裁决：人对候选对定案（五种结论），写草稿 + 留痕（含证据快照） | `PairCard.tsx:20` |
+
+### 问数与动作（对外执行入口，前端不调）
+
+| 接口 | 描述 | 前端调用处 |
+|---|---|---|
+| `/api/mcp` POST | MCP 端点：JSON-RPC 2.0，外部 Agent 调 Ontos 工具（initialize / tools/list / tools/call）；query / run_action 由此进，用法见 `skills/ontos/SKILL.md` | 无——外部 Agent 用 |
+| `/api/query` POST | 查询服务：直接执行结构化查询 JSON，返回答案行 + 取数路径 + 留痕 | 无——REST 形态的只读入口 |
+
+### 验收
+
+| 接口 | 描述 | 前端调用处 |
+|---|---|---|
+| `/api/questions` GET/POST/DELETE | 验收问题集：增删查；POST `?run=1` 全量跑一遍，出错记「失败」 | `QuestionsCard.tsx:15` / `:63` / `:43` / `:85` |
+
+### 空间管理
+
+| 接口 | 描述 | 前端调用处 |
+|---|---|---|
+| `/api/workspaces` GET/POST | 空间列表 / 从空白模板新建空间，版本链按空间隔离 | `app/page.tsx:59` / `:75` |
+
+
 
 ## 代码阅读入口
 
@@ -99,7 +149,7 @@ src/
 3. `src/server/engine/query.ts` 配 `individual.ts`：读的路径——下推、对齐、派生。
 4. `src/server/engine/action.ts`：写的路径——前置、效应、投影、留痕。
 5. `src/server/engine/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。引用扫描在 `refs.ts`（纯函数），资格谓词在 `eligibility.ts`，进程级单例收口在 `runtime.ts`。
-6. `src/app/api/ask/route.ts` 到 `src/components/ChatPage.tsx`：一条请求从路由到界面的完整走法。
+6. `src/app/api/mcp/route.ts` 配 `skills/ontos/SKILL.md`：外部 Agent 的完整入口——工具清单、信封与错误码约定、发现→组装→执行→纠错的用法。
 7. `src/tests/engine.test.ts`：引擎的行为约定。改引擎先跑 `npm test`，全绿再谈别的。
 
 ## 技术栈
@@ -112,8 +162,8 @@ src/
 | 校验 | Zod 4 | 本体配置、问数/动作请求、编辑操作三套 schema；模型产出也过同一套 |
 | 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llmSlot` 的三个槽位出现；不设 key 走离线确定性回退 |
 | 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；演示 fixture 与平台元库走 node:sqlite |
-| 状态 | React 自带 useState / useRef | 无状态库；对话会话按工作空间存 localStorage |
-| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema/会话契约测试，159 个用例 |
+| 状态 | React 自带 useState / useRef | 无状态库 |
+| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，150 个用例 |
 | 图标 | @phosphor-icons/react | |
 
 ## 运行
@@ -130,6 +180,6 @@ npm test       # 引擎 golden 测试（vitest）
 
 | 变量 | 作用 | 缺省 |
 |---|---|---|
-| `XAI_API_KEY` | 接真模型（xAI，OpenAI 兼容）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（演示四问可用） |
-| `ONTOS_LLM_BASE_URL` / `ONTOS_LLM_MODEL` | 换接入点/模型 | `https://api.x.ai/v1` / `grok-4.5` |
+| `OPENAI_API_KEY` | 接真模型（OpenAI 兼容协议，通用键，同 Claude Code / Codex 惯例）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（演示四问可用） |
+| `OPENAI_BASE_URL` / `OPENAI_MODEL` | 换接入点/模型（任何 OpenAI 兼容端点均可，含内部网关） | `https://api.x.ai/v1` / `grok-4.5` |
 | `ONTOS_TOKEN` | 写端点令牌闸（连接/发布/裁决/动作等要写库的 API 需 `Authorization: Bearer <token>`） | 不设 = 演示模式全放开 |

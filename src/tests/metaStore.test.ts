@@ -62,16 +62,6 @@ describe("元数据库", () => {
     expect((await store.listQuestions(WS)).length).toBe(1);
   });
 
-  it("问数 API 台账：命名保存、同名更新、删除", async () => {
-    await store.saveQueryApi(WS, "在役设备", "在役设备及其所属部门", '{"object":"equipment"}');
-    await store.saveQueryApi(WS, "在役设备", "在役设备及部门（改）", '{"object":"equipment","v":2}');
-    const list = await store.listQueryApis(WS);
-    expect(list.length).toBe(1);
-    expect(list[0].question).toContain("改");
-    await store.deleteQueryApi(WS, list[0].id);
-    expect((await store.listQueryApis(WS)).length).toBe(0);
-  });
-
   it("日志：写读往返；不存结果集", async () => {
     await store.logQuery(WS, { question: "在役设备", query_json: "{}", row_count: 97, ok: true, duration_ms: 12 });
     await store.logAction(WS, { action: "convert", object_type: "equipment", subject: "SN-40217", projections: [{ source: "device", ok: true }], ok: true });
