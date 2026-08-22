@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Background,
+  ConnectionMode,
   Controls,
   Handle,
   MarkerType,
@@ -184,6 +185,11 @@ function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, on
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
       nodesConnectable
+      // 手动连线宽松判定：落在目标对象身上任意位置都算连它（取最近的连接点），方向仍由起点定；
+      // 严格模式必须命中对方 10px 的顶点，用户拖上去多半落空，表现为「连不上」
+      connectionMode={ConnectionMode.Loose}
+      connectionRadius={150} // 半径要盖过节点半身位（节点最大 288×~220），落在节点正中也能吸附
+      connectOnClick={false} // 点选连线会和节点点击（开编辑卡）打架，只保留拖拽一种手势
       deleteKeyCode={null} // 删除只走编辑卡/详情卡：键盘删节点不过草稿，状态会乱
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}

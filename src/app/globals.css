@@ -247,8 +247,8 @@ input { font-family: inherit; outline: none; }
 
 /* 连线锚点：平时隐形，悬停节点时浮现；从节点底部拖出、落到另一节点即建关系 */
 .node-shell .react-flow__handle {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   background: var(--accent);
   border: 2px solid var(--panel);
   opacity: 0;
