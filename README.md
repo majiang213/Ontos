@@ -75,10 +75,12 @@ src/
 │   │                       configStore（工作副本与已发布的唯一出入口）、
 │   │                       refs（删除前的引用扫描）、eligibility（候选对资格谓词）、
 │   │                       workspace（工作空间）、llmSlot（模型槽位 + 离线回退）、
+│   │                       questions（验收跑批：失败分阶段 + 期望比对）、
 │   │                       logging（问数/动作留痕编排）、expr（表达式）、
 │   │                       validate（语义校验）、views（配置三视图）
 │   ├── schema/             Zod 形状：config（本体配置）、request（问数/动作请求）、ops（编辑操作）
-│   │                       filterWalk（$link 过滤树的唯一遍历入口与关系解析）
+│   │                       filterWalk（$link 过滤树的唯一遍历入口与关系解析）、
+│   │                       valueShape（取值来源原语：{ from: X } 词表的唯一事实源）
 │   ├── meta/store.ts       平台元数据库（默认单文件 SQLite，ONTOS_META_DSN 可换 MySQL）
 │   ├── runtime.ts          运行态（元库/注册表/配置存储的进程级单例，测试可整套换掉）
 │   └── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
@@ -88,7 +90,7 @@ src/
 四条主线：
 
 - **建模流**：画布操作 → `POST /api/draft` 写工作副本 → `publish` 走 `validate` 校验 → `configStore` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 也能经 MCP 的 `apply_draft` 写工作副本（带 `base_rev` 防盖写），开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
-- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
+- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/questions`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
 - **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具（用法见 `skills/ontos-action-run/SKILL.md`）→ `engine/action` 核前置、定效应、按 `project` 写回源库并留痕。
 - **边界**：业务数据永不进平台，引擎只在内存拼装；`src/server/config` 里只有本体模板和平台自己的元库。
 
@@ -132,7 +134,7 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/questions` GET/POST/DELETE | 验收问题集：增删查；POST `?run=1` 全量跑一遍，出错记「失败」 | `QuestionsCard.tsx:15` / `:63` / `:43` / `:85` |
+| `/api/questions` GET/POST/DELETE | 验收问题集：增删查，GET 带当前已发布版本；POST `?run=1` 全量跑一遍（body `{ id }` 只跑一条）。期望结果两种写法：纯数字（比对行数）或 `字段=值`；失败分阶段记（编译失败/执行出错/答案不符），原因落 `detail` | `QuestionsCard.tsx:31` / `:129` / `:106` / `:161` / `:56` |
 
 ### 空间管理
 

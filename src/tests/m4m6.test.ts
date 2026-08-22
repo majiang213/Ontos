@@ -36,7 +36,7 @@ describe("验收问题集跑批（真路由）", () => {
     await cleanupRuntime(tmp);
   });
 
-  it("期望行数对上记通过、对不上记失败；失败带明细，版本落上", async () => {
+  it("期望行数对上记通过、对不上记答案不符；失败明细落库，版本落上", async () => {
     const meta = (await import("../server/meta/store")).metaStore();
     const { POST } = await import("../app/api/questions/route");
     await meta.addQuestion("test", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
@@ -46,12 +46,66 @@ describe("验收问题集跑批（真路由）", () => {
     const pass = data.results.find((r: { question: string }) => r.question === "在役设备及其所属部门");
     const fail = data.results.find((r: { question: string }) => r.question === "还有多少在途设备");
     expect(pass.status).toBe("通过");
-    expect(fail.status).toBe("失败");
+    expect(fail.status).toBe("答案不符");
     expect(fail.detail).toContain("期望 1 行");
-    // 状态与版本落库
+    // 状态、明细与版本落库
     const stored = await meta.listQuestions("test");
     expect(stored.find((q) => q.question === "在役设备及其所属部门")?.status).toBe("通过");
+    expect(stored.find((q) => q.question === "还有多少在途设备")?.detail).toContain("实得 81 行");
     expect(stored.every((q) => q.version === 1)).toBe(true);
+  });
+
+  it("期望写 字段=值：结果里至少一行对上记通过，对不上记答案不符", async () => {
+    const meta = (await import("../server/meta/store")).metaStore();
+    const { POST } = await import("../app/api/questions/route");
+    await meta.addQuestion("test", "还有多少在途设备", "serial_no=SN-40217"); // 在途里有这台
+    await meta.addQuestion("test", "有多少报废设备", "serial_no=SN-40217"); // 报废里没有这台
+    const res = await POST(new Request("http://x/api/questions?ws=test&run=1", { method: "POST" }) as never);
+    const data = await res.json();
+    const hit = data.results.find((r: { question: string }) => r.question === "还有多少在途设备");
+    const miss = data.results.find((r: { question: string }) => r.question === "有多少报废设备");
+    expect(hit.status).toBe("通过");
+    expect(miss.status).toBe("答案不符");
+    expect(miss.detail).toContain("serial_no");
+    expect(miss.detail).toContain("SN-40217");
+  });
+
+  it("body 给 { id } 只跑那一条；GET 列表带当前已发布版本", async () => {
+    const meta = (await import("../server/meta/store")).metaStore();
+    const { GET, POST } = await import("../app/api/questions/route");
+    await meta.addQuestion("test", "还有多少在途设备", "81");
+    await meta.addQuestion("test", "在役设备及其所属部门", "97");
+    const [q1, q2] = await meta.listQuestions("test");
+    const res = await POST(
+      new Request("http://x/api/questions?ws=test&run=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q1.id }) }) as never
+    );
+    const data = await res.json();
+    expect(data.results.length).toBe(1);
+    expect(data.results[0].status).toBe("通过");
+    const stored = await meta.listQuestions("test");
+    expect(stored.find((q) => q.id === q1.id)?.status).toBe("通过");
+    expect(stored.find((q) => q.id === q2.id)?.status).toBe("未跑"); // 没跑到的那条不动
+    // 不存在的 id → 400
+    const bad = await POST(
+      new Request("http://x/api/questions?ws=test&run=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: 9999 }) }) as never
+    );
+    expect(bad.status).toBe(400);
+    // GET 带当前已发布版本，界面据此标「待重跑」
+    const list = await (await GET(new Request("http://x/api/questions?ws=test") as never)).json();
+    expect(list.version).toBe(1);
+  });
+
+  it("期望写法不认识：新增时直接 400，白话提示", async () => {
+    const { POST } = await import("../app/api/questions/route");
+    const res = await POST(
+      new Request("http://x/api/questions?ws=test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "随便问问", expected: "大概 3 行吧" }),
+      }) as never
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("纯数字");
   });
 });
 

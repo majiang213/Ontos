@@ -467,7 +467,7 @@ export default function CanvasPage() {
       )}
 
       {/* 验收问题集卡 */}
-      {card?.kind === "questions" && <QuestionsCard onClose={() => setCard(null)} showToast={showToast} />}
+      {card?.kind === "questions" && <QuestionsCard onClose={() => setCard(null)} showToast={showToast} version={ont?.version} />}
 
       {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
       {panelOpen && (

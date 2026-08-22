@@ -51,7 +51,7 @@ describe("元数据库", () => {
     expect(Object.keys(overlaps[0]).every((k) => !/value|set|ids/i.test(k))).toBe(true);
   });
 
-  it("验收问题集：增删、状态随版本更新", async () => {
+  it("验收问题集：增删、状态随版本更新、失败原因落 detail", async () => {
     await store.addQuestion(WS, "在役设备及其所属部门");
     await store.addQuestion(WS, "现在还有多少在途设备");
     const [q1] = await store.listQuestions(WS);
@@ -59,6 +59,11 @@ describe("元数据库", () => {
     await store.setQuestionStatus(WS, q1.id, "通过", 2);
     expect((await store.listQuestions(WS))[0].status).toBe("通过");
     expect((await store.listQuestions(WS))[0].version).toBe(2);
+    // 失败原因落库；下次通过时清掉
+    await store.setQuestionStatus(WS, q1.id, "答案不符", 3, "期望 1 行，实得 81 行");
+    expect((await store.listQuestions(WS))[0].detail).toBe("期望 1 行，实得 81 行");
+    await store.setQuestionStatus(WS, q1.id, "通过", 4);
+    expect((await store.listQuestions(WS))[0].detail).toBeNull();
     await store.removeQuestion(WS, q1.id);
     expect((await store.listQuestions(WS)).length).toBe(1);
   });

@@ -310,10 +310,11 @@ CREATE TABLE onto_draft (                      -- 画布工作副本；每个本
 CREATE TABLE onto_question (                   -- 验收问题集
   id          BIGINT PRIMARY KEY AUTO_INCREMENT,
   ontology_id BIGINT NOT NULL REFERENCES onto_ontology(id),
-  version     INT    NOT NULL,
+  version     INT    NOT NULL,             -- 最后一次跑批时的本体版本
   question    TEXT   NOT NULL,
-  expected    JSON,
-  status      VARCHAR(8) NOT NULL
+  expected    TEXT,                        -- 纯数字=比对行数；字段=值=至少一行对上；留空=能查出就算过
+  status      VARCHAR(8) NOT NULL,         -- 未跑 / 通过 / 编译失败 / 执行出错 / 答案不符
+  detail      TEXT                         -- 失败原因（白话），通过时清空
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE INDEX idx_question_version ON onto_question (ontology_id, version);
 

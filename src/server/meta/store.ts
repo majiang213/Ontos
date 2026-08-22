@@ -24,6 +24,13 @@ class SqliteBackend implements MetaBackend {
   constructor(file: string) {
     this.db = new DatabaseSync(file);
     this.db.exec(SQLITE_DDL);
+    for (const m of MIGRATIONS) {
+      try {
+        this.db.exec(m);
+      } catch {
+        /* 列已存在 */
+      }
+    }
   }
   async all(sql: string, params: unknown[] = []) {
     return this.db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
@@ -44,7 +51,15 @@ class MysqlBackend implements MetaBackend {
   private pool: mysql.Pool;
   constructor(dsn: string) {
     this.pool = mysql.createPool({ uri: dsn, connectionLimit: 4, namedPlaceholders: false });
-    this.ready = this.pool.query(MYSQL_DDL).then(() => undefined);
+    this.ready = this.pool.query(MYSQL_DDL).then(async () => {
+      for (const m of MIGRATIONS) {
+        try {
+          await this.pool.query(m);
+        } catch {
+          /* 列已存在 */
+        }
+      }
+    });
   }
   private ready: Promise<void>;
   async all(sql: string, params: unknown[] = []) {
@@ -126,7 +141,8 @@ CREATE TABLE IF NOT EXISTS ont_question (
   version INTEGER,
   question TEXT NOT NULL,
   expected TEXT,
-  status TEXT NOT NULL DEFAULT '未跑'
+  status TEXT NOT NULL DEFAULT '未跑',
+  detail TEXT
 );
 CREATE TABLE IF NOT EXISTS log_query (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,6 +184,9 @@ const MYSQL_DDL = SQLITE_DDL.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, "BIGI
   .replace(/PRIMARY KEY \(workspace_id, name\)/g, "PRIMARY KEY (workspace_id, name)")
   .replace(/datetime\('now'\)/g, "CURRENT_TIMESTAMP")
   .replace(/REAL/g, "DOUBLE") + ";";
+
+/* 旧库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，逐条试加，报「列已存在」就跳过。 */
+const MIGRATIONS = [`ALTER TABLE ont_question ADD COLUMN detail TEXT`];
 
 /* ---------- 记录类型 ---------- */
 
@@ -403,7 +422,7 @@ export class MetaStore {
 
   /* 验收问题集 */
 
-  async listQuestions(ws: string): Promise<{ id: number; question: string; expected?: string; status: string; version?: number }[]> {
+  async listQuestions(ws: string): Promise<{ id: number; question: string; expected?: string; status: string; detail?: string; version?: number }[]> {
     const id = await this.wsId(ws);
     return (await this.backend.all(`SELECT * FROM ont_question WHERE workspace_id = ? ORDER BY id`, [id])) as never[];
   }
@@ -418,9 +437,9 @@ export class MetaStore {
     await this.backend.run(`DELETE FROM ont_question WHERE workspace_id = ? AND id = ?`, [id, qid]);
   }
 
-  async setQuestionStatus(ws: string, qid: number, status: string, version?: number): Promise<void> {
+  async setQuestionStatus(ws: string, qid: number, status: string, version?: number, detail?: string): Promise<void> {
     const id = await this.wsId(ws);
-    await this.backend.run(`UPDATE ont_question SET status = ?, version = COALESCE(?, version) WHERE workspace_id = ? AND id = ?`, [status, version ?? null, id, qid]);
+    await this.backend.run(`UPDATE ont_question SET status = ?, detail = ?, version = COALESCE(?, version) WHERE workspace_id = ? AND id = ?`, [status, detail ?? null, version ?? null, id, qid]);
   }
 
   /* 日志（不存结果集） */
