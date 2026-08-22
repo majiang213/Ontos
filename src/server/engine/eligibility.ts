@@ -1,8 +1,9 @@
 // 候选对资格 —— 「什么算疑似重复」的唯一出处（《ontos-article.md》§3.2）。
-// candidates（列表）、decisions（定案闸）共用同一套谓词，不许再各写一份靠注释对齐。
+// 只给 pairs.ts 流水线用：列表 / 交集率 / 定案共用同一套谓词，路由不再各自写闸。
 // 资格 = 两边有源 ∧ 无共同连接 ∧ 未定案；定案侧对同源对放行两个不动配置的结论（各自独立语义）。
 
 import type { ObjectType } from "../schema/config";
+import { Verdict } from "./verdict";
 
 /** 类的连接集合（无源 = 空集）。 */
 export function connectionsOf(t: ObjectType): Set<string> {
@@ -31,4 +32,4 @@ export function pairEligible(a: ObjectType, b: ObjectType, decidedKeys: Set<stri
 }
 
 /** 同源对也允许裁的结论：两个都是「各自独立」语义，不动配置，所以不设跨源闸。 */
-export const SAME_SOURCE_OK_VERDICTS = new Set(["仅名称相似", "跳过"]);
+export const SAME_SOURCE_OK_VERDICTS = new Set<Verdict>([Verdict.NameSimilar, Verdict.Skip]);

@@ -3,6 +3,7 @@
 
 import { useRef, useState } from "react";
 import type { PairAdvice } from "../server/engine/llmSlot";
+import { VERDICTS, VERDICT_LABELS, Verdict } from "../server/engine/verdict";
 import { apiPost } from "./wsClient";
 
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
@@ -13,7 +14,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
   const [error, setError] = useState<string | null>(null);
   const stageFromRef = useRef<HTMLInputElement>(null);
 
-  const decide = async (verdict: string) => {
+  const decide = async (verdict: Verdict) => {
     setBusy(true);
     setError(null);
     try {
@@ -21,15 +22,15 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
         class_a: pair.class_a,
         class_b: pair.class_b,
         verdict,
-        stage_names: verdict === "阶段" && stage.from && stage.to ? stage : undefined,
-        llm_advice: `${pair.tendency}：${pair.reason}`,
+        stage_names: verdict === Verdict.Stage && stage.from && stage.to ? stage : undefined,
+        llm_advice: `${VERDICT_LABELS[pair.tendency]}：${pair.reason}`,
         evidence: rate ?? undefined, // 证据快照：归一化规则、样本量、交集数、比率
       });
       onDone(
-        verdict === "阶段"
+        verdict === Verdict.Stage
           ? `已裁决 ${pair.class_a} × ${pair.class_b}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
-          : verdict === "同一" || verdict === "部分重叠"
-            ? `已裁决 ${pair.class_a} × ${pair.class_b}：${verdict}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+          : verdict === Verdict.Same || verdict === Verdict.Overlap
+            ? `已裁决 ${pair.class_a} × ${pair.class_b}：${VERDICT_LABELS[verdict]}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
             : "" // 仅名称相似/跳过：不动草稿，条目从面板消失即是反馈，不弹提示
       );
     } catch (e) {
@@ -39,14 +40,15 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
     }
   };
 
-  // 五种结论的白话说明：名字是定案术语，解释是给用户扫一眼的
-  const options: { v: string; hint: string }[] = [
-    { v: "同一", hint: "就是同一批东西——合并成一个对象，挂多个来源" },
-    { v: "部分重叠", hint: "有一部分重合——公共字段立一个公共对象，各自特有的字段留下" },
-    { v: "阶段", hint: "同一批东西的不同时期（如在途设备 → 在役设备）——并成一个对象，自动加状态字段和「转为晚阶段」动作" },
-    { v: "仅名称相似", hint: "只是名字像，其实不相干——各自独立" },
-    { v: "跳过", hint: "这次不判，先放着" },
-  ];
+  // 五种结论的白话说明：名字是定案术语（VERDICT_LABELS），解释是给用户扫一眼的
+  const HINTS: Record<Verdict, string> = {
+    [Verdict.Same]: "就是同一批东西——合并成一个对象，挂多个来源",
+    [Verdict.Overlap]: "有一部分重合——公共字段立一个公共对象，各自特有的字段留下",
+    [Verdict.Stage]: "同一批东西的不同时期（如在途设备 → 在役设备）——并成一个对象，自动加状态字段和「转为晚阶段」动作",
+    [Verdict.NameSimilar]: "只是名字像，其实不相干——各自独立",
+    [Verdict.Skip]: "这次不判，先放着",
+  };
+  const options: { v: Verdict; label: string; hint: string }[] = VERDICTS.map((v) => ({ v, label: VERDICT_LABELS[v], hint: HINTS[v] }));
 
   return (
     <div style={{ borderTop: "1px solid var(--hairline)", padding: "14px 0 4px" }}>
@@ -55,7 +57,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
         <code>{pair.class_a}</code> × <code>{pair.class_b}</code>
       </div>
       <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6 }}>
-        AI 建议「{pair.tendency}」，依据：{pair.reason}。
+        AI 建议「{VERDICT_LABELS[pair.tendency]}」，依据：{pair.reason}。
         <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>建议只是参考——起名像不像会骗人，定夺要看真实数据和你。</div>
       </div>
       {/* 交集率：硬证据，按需算；注解跟在同一行 */}
@@ -91,7 +93,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
       <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "14px 0 6px" }}>是同一批现实对象吗？选一个结论：</div>
       <div style={{ borderTop: "1px solid var(--hairline)" }}>
         {options.map((o) => {
-          const incomplete = o.v === "阶段" && (!stage.from || !stage.to); // 阶段缺参数：不置灰（输入框在行里），点击改成聚焦
+          const incomplete = o.v === Verdict.Stage && (!stage.from || !stage.to); // 阶段缺参数：不置灰（输入框在行里），点击改成聚焦
           return (
             <div
               key={o.v}
@@ -112,9 +114,9 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
                 if (e.key === "Enter" || e.key === " ") void decide(o.v);
               }}
             >
-              <span className="verdict-name">{o.v}</span>
+              <span className="verdict-name">{o.label}</span>
               <span className="verdict-hint">{o.hint}</span>
-              {o.v === "阶段" && (
+              {o.v === Verdict.Stage && (
                 <span className="verdict-stage" onClick={(e) => e.stopPropagation()}>
                     <span style={{ fontSize: 11, color: "var(--ink-3)" }}>填两个时期的名字：</span>
                     <span style={{ fontSize: 11, color: "var(--ink-3)" }}>早</span>

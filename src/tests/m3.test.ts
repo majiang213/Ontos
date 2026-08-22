@@ -8,6 +8,9 @@ import { cleanupRuntime, setupRuntime } from "./helpers";
 import { pickRule, normalizeWith, RULES } from "../server/engine/normalize";
 import { computeOverlap } from "../server/engine/overlap";
 import { applyVerdict } from "../server/engine/adjudicate";
+import { Verdict } from "../server/engine/verdict";
+import { decide, listCandidates, overlapOf } from "../server/engine/pairs";
+import { EngineReject } from "../server/engine/individual";
 import { freshDriver } from "../server/engine/load";
 import { freshMetaStore } from "../server/meta/store";
 import { configSchema, type OntologyConfig } from "../server/schema/config";
@@ -124,7 +127,7 @@ describe("裁决写草稿", () => {
 
   it("同一：B 的源并进 A，同名对上、特有列加成属性，B 撤掉", () => {
     const d = twoClasses();
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "同一");
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Same);
     expect(d.object_types.po_b).toBeUndefined();
     expect(Object.keys(d.object_types.po_a.sources!)).toEqual(["sa", "sb"]);
     expect(d.object_types.po_a.sources!.sb.fields.sn).toBe("serial_no"); // 同名属性对上 B 的列
@@ -137,7 +140,7 @@ describe("裁决写草稿", () => {
     d.object_types.po_b.identity = "serial_no";
     d.object_types.po_b.properties = { serial_no: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } };
     d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", name: "name" };
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "同一");
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Same);
     const A = d.object_types.po_a;
     expect(A.properties.serial_no).toBeUndefined(); // B 的识别属性不另立
     expect(A.sources!.sb.fields.sn).toBe("serial_no"); // 列映射改写为 A 的识别属性
@@ -147,7 +150,7 @@ describe("裁决写草稿", () => {
 
   it("阶段：收成一类 + 派生 status + transition 关系 + 转化动作", () => {
     const d = twoClasses();
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "阶段", { from: "在途", to: "在役" });
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Stage, { from: "在途", to: "在役" });
     const A = d.object_types.po_a;
     expect(d.object_types.po_b).toBeUndefined();
     expect(Object.keys(A.sources!)).toEqual(["sa", "sb"]);
@@ -162,14 +165,14 @@ describe("裁决写草稿", () => {
     const d = twoClasses();
     d.object_types.po_b.properties.extra_b2 = { type: "string" };
     d.object_types.po_b.sources!.sb.fields.extra_b2 = "name"; // B 特有列也映射着
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "阶段", { from: "在途", to: "在役" });
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Stage, { from: "在途", to: "在役" });
     expect(d.object_types.po_a.properties.extra_b2).toBeDefined();
     assertPublishable(d);
   });
 
   it("部分重叠：公共属性立上位对象并移走，识别字段复制不移动", () => {
     const d = twoClasses();
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "部分重叠");
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
     const parent = d.object_types.shared_po_a_po_b;
     expect(parent).toBeDefined();
     expect(Object.keys(parent.properties).sort()).toEqual(["name", "sn"]);
@@ -185,7 +188,7 @@ describe("裁决写草稿", () => {
     d.object_types.po_b.identity = "serial_no";
     d.object_types.po_b.properties = { serial_no: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } };
     d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", name: "name" };
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "部分重叠");
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
     const parent = d.object_types.shared_po_a_po_b;
     expect(parent.sources!.sa.key).toBe("sn");
     expect(parent.sources!.sb.key).toBe("serial_no");
@@ -195,7 +198,86 @@ describe("裁决写草稿", () => {
   it("仅名称相似：配置不动", () => {
     const d = twoClasses();
     const before = JSON.stringify(d);
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, "仅名称相似");
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.NameSimilar);
     expect(JSON.stringify(d)).toBe(before);
+  });
+});
+
+describe("裁决流水线", () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = await setupRuntime("ontos-pairs-");
+  });
+  afterEach(async () => {
+    await cleanupRuntime(tmp);
+  });
+
+  it("decide「同一」：合并两个跨源类，留痕带证据", async () => {
+    const s = await import("../server/engine/configStore");
+    await s.applyOp({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
+        po_b: { kind: "thing", identity: "serial_no", properties: { serial_no: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { serial_no: "serial_no" } } } },
+      },
+    });
+    const r = await decide({
+      class_a: "po_a",
+      class_b: "po_b",
+      verdict: Verdict.Same,
+      evidence: { norm_rule: "serial", count_a: 121, count_b: 100, count_hit: 40, rate: 0.33 },
+    });
+    expect(r).toEqual({ ok: true, recorded: true });
+    const d = (await s.getDraft()).draft;
+    expect(d.object_types.po_b).toBeUndefined();
+    expect(d.object_types.po_a.sources!.sb.fields.sn).toBe("serial_no");
+    const meta = (await import("../server/meta/store")).metaStore();
+    const dec = (await meta.listDecisions("default"))[0];
+    expect(dec.verdict).toBe(Verdict.Same);
+    expect(dec.evidence?.count_hit).toBe(40);
+    expect(dec.version).toBeNull();
+    await s.publishDraft();
+    expect((await meta.listDecisions("default"))[0].version).toBe(2);
+  });
+
+  it("decide：校验闸回退时不留幻影记录", async () => {
+    const s = await import("../server/engine/configStore");
+    await s.applyOp({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, status: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", status: "sn" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no" } } } },
+      },
+    });
+    await expect(decide({ class_a: "po_a", class_b: "po_b", verdict: Verdict.Stage, stage_names: { from: "在途", to: "在役" } })).rejects.toThrow();
+    const meta = (await import("../server/meta/store")).metaStore();
+    expect((await meta.listDecisions("default")).length).toBe(0);
+    expect((await s.getDraft()).draft.object_types.po_b).toBeDefined();
+  });
+
+  it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
+    const s = await import("../server/engine/configStore");
+    await s.applyOp({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+    });
+    const isPair = (p: { class_a: string; class_b: string }) =>
+      (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a");
+    expect((await listCandidates()).some(isPair)).toBe(true);
+    const before = JSON.stringify((await s.getDraft()).draft);
+    const r = await decide({ class_a: "po_a", class_b: "po_b", verdict: Verdict.Skip });
+    expect(r.recorded).toBe(true);
+    expect(JSON.stringify((await s.getDraft()).draft)).toBe(before);
+    expect((await listCandidates()).some(isPair)).toBe(false);
+  });
+
+  it("overlapOf：无源类、同源对拒绝", async () => {
+    const s = await import("../server/engine/configStore");
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
+    await expect(overlapOf("default", "equipment", "vendor")).rejects.toThrow(EngineReject);
+    await expect(overlapOf("default", "repair", "assignment")).rejects.toThrow(EngineReject);
   });
 });

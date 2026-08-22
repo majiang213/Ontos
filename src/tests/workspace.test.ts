@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, setupRuntime } from "./helpers";
+import { Verdict } from "../server/engine/verdict";
 
 let tmp: string;
 
@@ -14,16 +15,21 @@ afterEach(async () => {
 });
 
 describe("空间隔离", () => {
-  it("两个空间各自发布升级，互不干扰；新空间空白起步，演示模板只属于 default", async () => {
+  it("两个空间各自发布升级，互不干扰；新空间与 default 空白起步，演示模板与 fixture 只属于 test", async () => {
     const s = await import("../server/engine/configStore");
     const meta = (await import("../server/meta/store")).metaStore();
     // default 建对象并发布 → v2
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, "default");
     expect((await s.publishDraft("default")).version).toBe(2);
-    // lab 首次访问：空白起步（v1、空本体）；模板只属于 default
+    // lab 首次访问：空白起步（v1、空本体）；default 也空白起步（没有模板类）——模板只属于 test
     expect((await s.getPublished("lab")).version).toBe(1);
     expect(Object.keys((await s.getPublished("lab")).config.object_types)).toEqual([]);
-    expect((await s.getPublished("default")).config.object_types.equipment).toBeDefined();
+    expect((await s.getPublished("default")).config.object_types.equipment).toBeUndefined();
+    expect((await s.getPublished("test")).config.object_types.equipment).toBeDefined();
+    // fixture 连接只注入 test：default 空白起步，数据源自己接
+    const { getDriverRegistry } = await import("../server/engine/load");
+    expect((await getDriverRegistry("test")).connectionNames()).toContain("purchase_sys");
+    expect((await getDriverRegistry("default")).connectionNames()).toEqual([]);
     // lab 自己发布：default 的版本与内容都不受影响
     await s.applyOp({ op: "create_object", name: "person_x", kind: "thing" }, "lab");
     expect((await s.publishDraft("lab")).version).toBe(2);
@@ -38,7 +44,7 @@ describe("空间隔离", () => {
 
   it("元数据按 workspace_id 隔离：一个空间留痕不进另一个", async () => {
     const meta = (await import("../server/meta/store")).metaStore();
-    await meta.recordDecision("default", { class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: "跳过", decided_by: "测试" });
+    await meta.recordDecision("default", { class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: Verdict.Skip, decided_by: "测试" });
     expect((await meta.listDecisions("default")).length).toBe(1);
     expect((await meta.listDecisions("lab")).length).toBe(0);
     // 发号器也按空间分开：同名序列各自从 1 起
@@ -61,10 +67,11 @@ describe("workspaces 路由", () => {
       POST(new Request("http://x/api/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }) as never)
     );
 
-  it("列表含 default；新建成功；重名 422；非法名 422", async () => {
+  it("列表含 default 与 test；新建成功；重名 422；非法名 422", async () => {
     const { GET } = await import("../app/api/workspaces/route");
     const list = await (await GET()).json();
     expect(list.workspaces).toContain("default");
+    expect(list.workspaces).toContain("test"); // 测试空间常驻列表（首次访问才注册）
     const ok = await post("lab2");
     expect(ok.status).toBe(200);
     expect((await ok.json()).workspaces).toContain("lab2");

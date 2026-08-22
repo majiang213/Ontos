@@ -39,9 +39,9 @@ describe("验收问题集跑批（真路由）", () => {
   it("期望行数对上记通过、对不上记失败；失败带明细，版本落上", async () => {
     const meta = (await import("../server/meta/store")).metaStore();
     const { POST } = await import("../app/api/questions/route");
-    await meta.addQuestion("default", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
-    await meta.addQuestion("default", "还有多少在途设备", "1"); // 故意答错（实际 81）
-    const res = await POST(new Request("http://x/api/questions?run=1", { method: "POST" }) as never);
+    await meta.addQuestion("test", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
+    await meta.addQuestion("test", "还有多少在途设备", "1"); // 故意答错（实际 81）
+    const res = await POST(new Request("http://x/api/questions?ws=test&run=1", { method: "POST" }) as never);
     const data = await res.json();
     const pass = data.results.find((r: { question: string }) => r.question === "在役设备及其所属部门");
     const fail = data.results.find((r: { question: string }) => r.question === "还有多少在途设备");
@@ -49,7 +49,7 @@ describe("验收问题集跑批（真路由）", () => {
     expect(fail.status).toBe("失败");
     expect(fail.detail).toContain("期望 1 行");
     // 状态与版本落库
-    const stored = await meta.listQuestions("default");
+    const stored = await meta.listQuestions("test");
     expect(stored.find((q) => q.question === "在役设备及其所属部门")?.status).toBe("通过");
     expect(stored.every((q) => q.version === 1)).toBe(true);
   });
@@ -65,10 +65,10 @@ describe("MCP 工具端点", () => {
     await cleanupRuntime(tmp);
   });
 
-  /** JSON-RPC 2.0 调用：HTTP 一律 200，成败看信封（result / error）。 */
+  /** JSON-RPC 2.0 调用：HTTP 一律 200，成败看信封（result / error）。测试数据在 test 空间。 */
   async function rpc(method: string, params?: Record<string, unknown>, rawBody?: string) {
     const { POST } = await import("../app/api/mcp/route");
-    const req = new Request("http://localhost/api/mcp", {
+    const req = new Request("http://localhost/api/mcp?ws=test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: rawBody ?? JSON.stringify({ jsonrpc: "2.0", id: 7, method, params }),

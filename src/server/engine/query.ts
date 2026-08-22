@@ -1,268 +1,28 @@
 // M7 查询求值 —— 对应《ontos-article.md》§5.4 与图 7。
-// 先定列再下推；各源取回后按同一性标准对齐；派生按形状翻译；全程只读。
+// 个体由 individual 组装；本文件只投影结果树（展开、聚合、排序）。全程只读。
 
-import type { Filter, LinkType, OntologyConfig } from "../schema/config";
-import { FILTER_OPS } from "../schema/config";
-import { walkFilter } from "../schema/filterWalk";
+import type { OntologyConfig } from "../schema/config";
 import type { ExpandNode, QueryRequest } from "../schema/request";
-import { dialectFor, toColumnValue, type Condition, type SourceDriver } from "./driver";
+import type { SourceDriver } from "./driver";
 import type { EvalContext } from "./expr";
 import {
   assertFilterShapes,
+  createEnv,
   currentOf,
   EngineReject,
   evalDerived,
-  evalFilterOnIndividual,
-  findLink,
-  keyColumn,
+  matchConds,
   mustCls,
+  mustLink,
   propValue,
-  resolveOperand,
-  sourcesOf,
-  whenRuleHits,
+  selectIndividuals,
+  transitionHolds,
   type Cls,
   type Env,
   type Individual,
 } from "./individual";
 
 const DEFAULT_LIMIT = 200; // 查询治理：请求不写 limit 时的兜底上限
-
-/* ---------- 环境：关系判定与个体存在性 ---------- */
-
-interface ResolvedLink {
-  link: LinkType;
-  reversed: boolean; // true = 按 inverse 名从 to 走回 from
-}
-
-function resolveLink(config: OntologyConfig, clsName: string, name: string): ResolvedLink {
-  const found = findLink(config, clsName, name);
-  if (!found) throw new EngineReject(`关系名对不上配置：${clsName} 出发没有 ${name}`);
-  return found;
-}
-
-/** 转化关系的两截判定（§6.4）：出发规则里值为 true 的源现在有没有行；到达规则现在是否整条命中。 */
-async function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: Env, ctx: EvalContext): Promise<boolean> {
-  const t = link.transition!;
-  const clsOfLink = cls;
-  const def = clsOfLink.def.properties[t.property];
-  if (!def?.derived || !Array.isArray(def.derived)) throw new EngineReject(`transition.property 不是 when 派生：${t.property}`);
-  const fromRule = def.derived.find((r) => r.value === t.from);
-  const toRule = def.derived.find((r) => r.value === t.to);
-  if (!fromRule || !toRule) throw new EngineReject(`派生规则里找不到阶段 ${String(t.from)} / ${String(t.to)}`);
-  const fromSourcesHaveRows = Object.entries(fromRule.when)
-    .filter(([, cond]) => cond === true)
-    .every(([src]) => ind.rows[src] != null);
-  return fromSourcesHaveRows && (await whenRuleHits(clsOfLink, ind, toRule, env, ctx));
-}
-
-/** 组装求值环境：配置 + 驱动 + 关系判定 + 存在性检查。查询与动作共用。 */
-export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
-  const env: Env = {
-    config,
-    driver,
-    async existsIndividual(clsName, identityValue) {
-      return (await selectIndividuals(env, clsName, { identity: identityValue })).length > 0;
-    },
-    async linkHolds(clsName, ind, linkName, targetFilter, ctx) {
-      const cls = mustCls(config, clsName);
-      const { link, reversed } = resolveLink(config, clsName, linkName);
-      if (link.transition) {
-        if (targetFilter !== undefined) throw new EngineReject(`转化关系不支持目标侧过滤：${linkName}`);
-        return transitionHolds(cls, ind, link, env, ctx);
-      }
-      // match 关系：两端属性值相等则成立。空值不连关系。
-      const merged = matchConds(cls, ind, link, reversed, targetFilter as Filter | undefined, (k) => `目标侧过滤 ${k} 与关系 ${linkName} 的配对字段冲突`);
-      if (!merged) return false;
-      const targetClsName = reversed ? link.from : link.to;
-      return (await selectIndividuals(env, targetClsName, { filter: merged, ctx })).length > 0;
-    },
-  };
-  return env;
-}
-
-/* ---------- 个体组装：先定列，再下推 ---------- */
-
-/** match 配对 → 目标侧条件（唯一出处）：reversed 换向；配对值为空返回 null（关系不成立，没有目标）。
- *  目标侧过滤与配对字段冲突即拒绝（静默覆盖会让配对形同虚设），冲突文案由调用方定。 */
-function matchConds(cls: Cls, ind: Individual, link: LinkType, reversed: boolean, targetFilter: Filter | undefined, conflictMsg: (k: string) => string): Filter | null {
-  const conds: Filter = {};
-  for (const pair of link.match ?? []) {
-    const myProp = reversed ? pair.to : pair.from;
-    const targetProp = reversed ? pair.from : pair.to;
-    const v = propValue(cls, ind, myProp);
-    if (v == null) return null; // 空值不连关系
-    conds[targetProp] = v;
-  }
-  const merged: Filter = { ...conds };
-  for (const [k, v] of Object.entries(targetFilter ?? {})) {
-    if (k in conds) throw new EngineReject(conflictMsg(k));
-    merged[k] = v;
-  }
-  return merged;
-}
-
-interface SelectOpts {
-  identity?: unknown;
-  filter?: Filter;
-  requested?: string[];
-  expands?: ExpandNode[];
-  allColumns?: boolean; // 动作执行用：读全量映射列
-  ctx?: EvalContext;
-  path?: string[];
-  limit?: number; // 单源且无过滤时下推行数上限；多源/带过滤必须取全量再对齐核对，不下推
-}
-
-/** 本次涉及的属性：要返回的 + 过滤点到的 + 派生的输入 + 展开与 $link 的配对属性。 */
-function neededProps(cls: Cls, requested: string[] | undefined, filter: Filter | undefined, expands: ExpandNode[] | undefined, config: OntologyConfig): Set<string> {
-  const need = new Set<string>();
-  const addLink = (name: string) => {
-    const { link, reversed } = resolveLink(config, cls.name, name);
-    if (link.match) for (const pair of link.match) addProp(reversed ? pair.to : pair.from);
-    if (link.transition) addProp(link.transition.property);
-  };
-  const addFilterKeys = (f: Filter) => {
-    walkFilter(config, cls.name, f, {
-      prop: (_c, k) => addProp(k),
-      link: (_c, name) => {
-        addLink(name);
-        return false; // $link 子过滤落在目标类，不进本类的属性集
-      },
-    });
-  };
-  const addProp = (p: string) => {
-    if (need.has(p)) return;
-    need.add(p);
-    const def = cls.def.properties[p];
-    if (!def) throw new EngineReject(`名字对不上配置：${cls.name}.${p}`);
-    if (def.derived) {
-      if (Array.isArray(def.derived)) {
-        for (const rule of def.derived) {
-          for (const cond of Object.values(rule.when)) {
-            if (typeof cond === "object") addFilterKeys(cond as Filter);
-          }
-        }
-      } else {
-        addFilterKeys(def.derived as Filter);
-      }
-    }
-  };
-  requested?.forEach(addProp);
-  if (filter) addFilterKeys(filter);
-  for (const ex of expands ?? []) addLink(ex.relation);
-  return need;
-}
-
-/** 能下推的平推条件：非派生、只在一个源有映射、操作数不依赖 current。其余留在内存核对。 */
-async function pushdownConditions(cls: Cls, filter: Filter | undefined, ctx: EvalContext): Promise<Map<string, Condition[]>> {
-  const out = new Map<string, Condition[]>();
-  if (!filter) return out;
-  for (const [prop, cv] of Object.entries(filter)) {
-    if (prop.startsWith("$")) continue;
-    const def = cls.def.properties[prop];
-    if (!def) throw new EngineReject(`过滤里的名字对不上配置：${cls.name}.${prop}`);
-    if (def.derived) continue;
-    const mapped = sourcesOf(cls).filter(([, e]) => e.fields[prop]);
-    if (mapped.length !== 1) continue; // 多源都有时按声明顺序取值，推送会改变语义，留内存
-    const conds = await toConditions(mapped[0][1].fields[prop], cv, ctx, def.type === "date");
-    if (!conds) continue;
-    out.set(mapped[0][0], [...(out.get(mapped[0][0]) ?? []), ...conds]);
-  }
-  return out;
-}
-
-async function toConditions(column: string, cv: unknown, ctx: EvalContext, dateLike = false): Promise<Condition[] | null> {
-  try {
-    if (cv !== null && typeof cv === "object" && !Array.isArray(cv)) {
-      const rec = cv as Record<string, unknown>;
-      const keys = Object.keys(rec);
-      const isOpObject = keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k));
-      if (!isOpObject) {
-        // 裸的 { property, from } 视为等值；取不到值就留内存核对
-        const v = await resolveOperand(cv, ctx);
-        return v === undefined ? null : [{ column, op: "eq", value: v, dateLike: dateLike || undefined }];
-      }
-      const conds: Condition[] = [];
-      for (const [op, operand] of Object.entries(rec)) {
-        const v = await resolveOperand(operand, ctx);
-        if (v === undefined) return null; // 依赖 current 等，留内存核对
-        if (v === null) {
-          if (op === "eq") conds.push({ column, op: "null" });
-          else if (op === "ne") conds.push({ column, op: "notnull" });
-          else return null; // 与 null 比大小：下推会改变语义（空按至今），留内存核对
-        } else {
-          conds.push({ column, op: op as Condition["op"], value: v, nullLoose: dateLike || undefined, dateLike: dateLike || undefined });
-        }
-      }
-      return conds;
-    }
-    if (cv === null) return [{ column, op: "null" }];
-    const v = await resolveOperand(cv, ctx);
-    return v === undefined ? null : [{ column, op: "eq", value: v, dateLike: dateLike || undefined }];
-  } catch {
-    return null; // 操作数取不到值（如依赖 current），留内存核对
-  }
-}
-
-/** 组装个体：各源分别下推，按对齐键配成同一个体，再做内存过滤核对。 */
-export async function selectIndividuals(env: Env, clsName: string, opts: SelectOpts = {}): Promise<Individual[]> {
-  const cls = mustCls(env.config, clsName);
-  const srcs = sourcesOf(cls);
-  if (srcs.length === 0) return []; // 无源类（如 change）读不出个体
-  const ctx: EvalContext = { identity: opts.identity as string | number | undefined, ...(opts.ctx ?? {}) };
-  const need = neededProps(cls, opts.requested, opts.filter, opts.expands, env.config); // 始终计算：校验名字、供取列
-  const readAll = opts.allColumns || opts.requested === undefined; // 没点 properties 就要返回全部，列得取全
-  const pushed = await pushdownConditions(cls, opts.filter, ctx);
-  const byKey = new Map<string, Individual>();
-
-  // limit 只在「单源、无过滤、无展开」时下推：多源要先取全量对齐，内存过滤同理，推下去会切掉候选
-  const pushLimit = opts.limit !== undefined && srcs.length === 1 && !opts.filter && !opts.expands?.length ? opts.limit : undefined;
-  let nullKeys = 0;
-  let dupKeys = 0;
-  for (const [srcName, entry] of srcs) {
-    const keyCol = keyColumn(cls, entry);
-    const cols = new Set<string>([keyCol]);
-    if (readAll) for (const c of Object.values(entry.fields)) cols.add(c);
-    else for (const p of need) { const c = entry.fields[p]; if (c) cols.add(c); }
-    const conds: Condition[] = [...(pushed.get(srcName) ?? [])];
-    if (opts.identity !== undefined) conds.push({ column: keyCol, op: "eq", value: opts.identity });
-    // date 条件的值是 Unix 秒：下推活体库前按连接方言归一（读侧与写回同一规则）
-    const dialect = dialectFor(env.driver, entry.connection);
-    const bound = conds.map((c) => {
-      if (!c.dateLike || c.value === undefined) return c;
-      const v = Array.isArray(c.value) ? c.value.map((x) => toColumnValue(x, "date", dialect)) : toColumnValue(c.value, "date", dialect);
-      return { ...c, value: v };
-    });
-    const rows = await env.driver.select(entry.connection, entry.table, [...cols], bound, pushLimit);
-    opts.path?.push(
-      `下推 ${entry.connection}.${entry.table}：取 ${[...cols].join("、")}${conds.length ? `，带条件 ${conds.length} 条` : ""}${pushLimit ? `，limit ${pushLimit} 下推` : ""}，命中 ${rows.length} 行（只读）`
-    );
-    for (const row of rows) {
-      const kv = row[keyCol];
-      if (kv == null || String(kv).trim() === "") {
-        nullKeys++; // 缺识别值的行没法对齐，排除并记账
-        continue;
-      }
-      const k = String(kv);
-      const ind = byKey.get(k) ?? { key: k, rows: Object.fromEntries(srcs.map(([s]) => [s, null])) };
-      if (ind.rows[srcName] != null) dupKeys++; // 同源同键重复：保留首行，记账
-      else ind.rows[srcName] = row;
-      byKey.set(k, ind);
-    }
-  }
-  if (nullKeys > 0) opts.path?.push(`${nullKeys} 行缺识别值，已排除（不对齐成个体）`);
-  if (dupKeys > 0) opts.path?.push(`${dupKeys} 行与同源已有行识别值重复，保留首行`);
-
-  let list = [...byKey.values()];
-  if (opts.filter) {
-    const kept: Individual[] = [];
-    for (const ind of list) {
-      if (await evalFilterOnIndividual(cls, ind, opts.filter!, env, ctx)) kept.push(ind);
-    }
-    list = kept;
-    opts.path?.push(`内存核对过滤与派生：${list.length} 个体留下`);
-  }
-  return list;
-}
 
 /* ---------- 查询树求值 ---------- */
 
@@ -358,7 +118,7 @@ async function expandItem(
   ctx: EvalContext,
   path: string[]
 ): Promise<[string, Record<string, unknown>[]]> {
-  const { link, reversed } = resolveLink(env.config, cls.name, item.relation);
+  const { link, reversed } = mustLink(env.config, cls.name, item.relation);
   if (link.transition) {
     if (item.expand?.length) throw new EngineReject(`转化关系不支持嵌套展开：${item.relation}`);
     if (item.filter !== undefined) throw new EngineReject(`转化关系不支持目标侧过滤：${item.relation}`); // 与 linkHolds 同口径，不静默吞

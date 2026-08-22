@@ -88,7 +88,7 @@ _UI 说法_：映射。_Avoid_：新系统、出码、运行中、对象列表�
 _UI 说法_：本体（产品核心词，保留）。
 
 **工作空间** 🔴：
-隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链在 `onto_version`，各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。**新建从空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `default`；API 用 `?ws=` 指定。
+隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链在 `onto_version`，各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册）——按空间名判断填充，与是否配置 LLM Key 无关；API 用 `?ws=` 指定。
 _UI 说法_：工作空间（左上角下拉）。
 
 **对象类型 / 属性 / 关系** 🔶：
@@ -111,7 +111,7 @@ _UI 说法_：派生字段（规则随字段展示）。
 
 **五关系类型** 🔴：
 跨源合并的五种答案：①完全等价（合并单对象挂多源）②部分重叠（上位对象+各自特有属性）③生命周期阶段（统一对象+状态+转化关系）④子类型（V2 预留）⑤仅名字像（各自独立）。
-_UI 说法_：裁决按钮用简写「同一 / 部分重叠 / 阶段 / 仅名称相似 / 跳过」（与 decisions API 的 verdict 枚举、adj_decision 留痕一致）。
+_UI 说法_：裁决按钮用简写「同一 / 部分重叠 / 阶段 / 仅名称相似 / 跳过」（UI 文案经 `VERDICT_LABELS` 映射；decisions API 的 verdict 枚举与 adj_decision 留痕存英文键 `same / overlap / stage / name_similar / skip`，汉字只当描述不当 Key）。
 _注意_：①②③⑤ 在 demo 里全部可落本体；跳过的对按"各自独立"处理。
 
 **裁决** 🔴：

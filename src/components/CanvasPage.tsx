@@ -246,7 +246,8 @@ export default function CanvasPage() {
               }
             }}
           >
-            已发布 v{ont?.version ?? "…"} ▾
+            {/* 空白种子版本（v1 且没有任何对象）不算「发布过」——空白空间注册时自动有一个空本体的 v1 */}
+            {ont && ont.version === 1 && Object.keys(ont.object_types).length === 0 ? "未发布" : `已发布 v${ont?.version ?? "…"}`} ▾
           </button>
           {/* 发布常驻工具条、永可点：有改动时是「发布 vN+1 / 放弃」，没改动点一下给提示（不置灰） */}
           {ont?.dirty ? (
@@ -303,7 +304,10 @@ export default function CanvasPage() {
                 <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
               </div>
               {versionsData === null && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>读着呢…</div>}
-              {(versionsData ?? []).map((v) => (
+              {versionsData !== null && ont && ont.version === 1 && Object.keys(ont.object_types).length === 0 ? (
+                // 空白种子版本（注册时自动落的空本体 v1）不算发布史
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>还没有发布过——发布一次之后这里会列出历史版本</div>
+              ) : (versionsData ?? []).map((v) => (
                 <div key={v.version} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
                   <span>
                     <strong>v{v.version}</strong>　<span style={{ color: "var(--ink-3)" }}>{v.createdAt.slice(0, 16).replace("T", " ")}</span>

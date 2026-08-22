@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { freshMetaStore, type MetaStore } from "../server/meta/store";
+import { Verdict } from "../server/engine/verdict";
 
 let tmp: string;
 let store: MetaStore;
@@ -38,11 +39,11 @@ describe("元数据库", () => {
       class_a: "在途设备", class_b: "在役设备", source_a: "purchase", source_b: "device",
       llm_advice: "倾向阶段：字段高度重合，设备侧多状态/启用日", rate: 0.33,
       evidence: { norm_rule: "serial", sample_a: 121, sample_b: 100, hit: 40 },
-      verdict: "阶段", decided_by: "demo",
+      verdict: Verdict.Stage, decided_by: "demo",
     });
     const list = await store.listDecisions(WS);
     expect(list.length).toBe(1);
-    expect(list[0].verdict).toBe("阶段");
+    expect(list[0].verdict).toBe(Verdict.Stage);
     await store.recordOverlap(WS, { class_a: "a", class_b: "b", norm_rule: "serial", count_a: 121, count_b: 100, count_hit: 40, rate: 40 / 121 });
     const overlaps = await store.listOverlaps(WS);
     expect(overlaps.length).toBe(1);

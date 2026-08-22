@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { listClasses, readClass, search } from "../server/engine/views";
+import { Verdict } from "../server/engine/verdict";
 import { CannedSlot } from "../server/engine/llmSlot";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -47,19 +48,23 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
   it("合法产出过闸；乱说话的产出被 Zod 拒绝（模型当顾问不当计算器）", async () => {
     const { AiSdkSlot } = await import("../server/engine/llmSlot");
     const good = { object: "equipment", filter: { status: "in_service" }, properties: ["name"] };
-    const slot = new AiSdkSlot(fakeModel, (async () => ({ object: good })) as never);
+    const slot = new AiSdkSlot(fakeModel, (async () => ({ output: good })) as never);
     expect((await slot.nlToQuery("在役设备", config)).object).toBe("equipment");
-    const bad = new AiSdkSlot(fakeModel, (async () => ({ object: { object: 123 } })) as never);
+    const bad = new AiSdkSlot(fakeModel, (async () => ({ output: { object: 123 } })) as never);
     await expect(bad.nlToQuery("x", config)).rejects.toThrow();
   });
 
-  it("getSlot：没 OPENAI_API_KEY 回退罐头，有 key 走真模型", async () => {
+  it("getSlot：没 OPENAI_API_KEY 回退罐头；有 key 没指定模型报错；有 key 有模型走真模型", async () => {
     const { getSlot } = await import("../server/engine/llmSlot");
     delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_MODEL;
     expect(getSlot().name).toBe("canned-离线回退");
     process.env.OPENAI_API_KEY = "test-key";
+    expect(() => getSlot()).toThrow(/OPENAI_MODEL/);
+    process.env.OPENAI_MODEL = "test-model";
     expect(getSlot().name).toContain("ai-sdk:");
     delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_MODEL;
   });
 });
 
@@ -119,6 +124,6 @@ describe("LLM 槽位离线回退", () => {
     ]);
     // a-b 与 b-c：跨源且字段重合过半；a-c 同源不成对；d 字段对不上
     expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "b-c"]);
-    expect(pairs[0].tendency).toBe("阶段"); // 含状态字段
+    expect(pairs[0].tendency).toBe(Verdict.Stage); // 含状态字段
   });
 });

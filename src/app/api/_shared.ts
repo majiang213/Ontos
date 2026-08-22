@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { DraftReject } from "@/server/engine/configStore";
 import { EngineReject } from "@/server/engine/individual";
+import { ConnectionReject } from "@/server/engine/load";
 import { DEFAULT_WS, isWsName, WsReject } from "@/server/engine/workspace";
 
 export { safeLog } from "@/server/engine/logging";
@@ -41,6 +42,9 @@ export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status
       return NextResponse.json({ error: z.error, issues: e.issues }, { status: z.status });
     }
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof ConnectionReject) {
+      return NextResponse.json({ error: e.message }, { status: e.kind === "bad_request" ? 400 : 422 });
+    }
     if (e instanceof DraftReject || e instanceof EngineReject || e instanceof WsReject) return NextResponse.json({ error: e.message }, { status: 422 });
     return internalError(e);
   }

@@ -1,5 +1,5 @@
 // 查询与写入请求的 Zod schema —— 对应《ontos-article.md》§5、§6。
-// 这两个形状同时用于：路由入口校验、generateObject 的输出约束。
+// 这两个形状同时用于：路由入口校验、模型结构化输出的约束。
 
 import { z } from "zod";
 import { filterSchema, type Filter } from "./config";

@@ -7,19 +7,20 @@ import type { ActionRequest } from "../schema/request";
 import { dialectFor, toColumnValue, type SourceDriver } from "./driver";
 import {
   assertFilterShapes,
+  createEnv,
   currentView,
   evalDerived,
   evalFilterOnIndividual,
   keyColumn,
   mustCls,
   propValue,
+  selectIndividuals,
   sourcesOf,
   type Cls,
   type Env,
   type Individual,
 } from "./individual";
 import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "./expr";
-import { createEnv, selectIndividuals } from "./query";
 
 export interface ProjectionRecord {
   source: string;

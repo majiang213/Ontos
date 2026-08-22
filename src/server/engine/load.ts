@@ -1,28 +1,41 @@
 // 驱动注册表 —— 全部路由的唯一驱动入口：fixture 内置连接 + 元数据库里保存的连接（mysql/pg/sqlite 文件）。
-// 单例挂 globalThis：Next dev 下各路由包各有模块实例，挂全局才能保证
-// 「验收之后再问，看到的是同一个源库」「连接保存后即时生效」。
-// （已发布配置的加载在 configStore.ts：getPublished。）
+// 保存/删除生命周期也在这里：测过才落库、失败还回旧驱动、已发布引用不可删。
+// 单例挂运行态：Next dev 下各路由包各有模块实例，挂全局才能保证即时生效。
 
 import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import type { ConnectionRec } from "../meta/store";
+import { metaStore } from "../meta/store";
+import { runtime } from "../runtime";
+import { getPublished } from "./configStore";
 import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
-import { metaStore } from "../meta/store";
-import { runtime } from "../runtime";
-import { DEFAULT_WS } from "./workspace";
+import { DEFAULT_WS, TEST_WS } from "./workspace";
+
+/** 连接生命周期拒绝：bad_request 对形状/路径，rejected 对资格（演示源、连不上、占用）。 */
+export class ConnectionReject extends Error {
+  constructor(
+    message: string,
+    readonly kind: "bad_request" | "rejected" = "rejected"
+  ) {
+    super(message);
+    this.name = "ConnectionReject";
+  }
+}
 
 // 注册表按工作空间键控，挂运行态（runtime.ts）：Next dev 多模块实例共享，测试换运行态即隔离
 function registries(): Map<string, DriverRegistry> {
   return (runtime().registries ??= new Map());
 }
 
-/** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 四个内置连接只注入 default——新空间空白起步，数据源自己接。按工作空间键控。 */
+/** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 四个内置连接只注入 test——其余空间（含 default）空白起步，数据源自己接。按工作空间键控，与 LLM Key 无关。 */
 export async function getDriverRegistry(ws: string = DEFAULT_WS): Promise<DriverRegistry> {
   let r = registries().get(ws);
   if (!r) {
     const registry = new DriverRegistry();
-    if (ws === DEFAULT_WS) {
+    if (ws === TEST_WS) {
       const fixture = SqliteFixtureDriver.seeded();
       for (const conn of fixture.connections()) registry.register(conn, fixture);
     }
@@ -71,4 +84,53 @@ export async function resolveTableInfos(
 /** 测试用：每次拿全新的 fixture（不经注册表）。 */
 export function freshDriver(): SourceDriver {
   return SqliteFixtureDriver.seeded();
+}
+
+/** 保存连接：先注册再测，通过才落库。失败还回旧驱动。test=true 时空库不落库。 */
+export async function saveConnection(ws: string, rec: ConnectionRec, test?: boolean): Promise<{ ok: true; saved: boolean; warning?: string; tables?: TableInfo[] }> {
+  const next = { ...rec };
+  if (next.type === "sqlite") {
+    if (!next.db_name) throw new ConnectionReject("sqlite 连接必须给文件路径（db_name）", "bad_request");
+    // turbopackIgnore：路径来自请求，不能静态分析；cwd 只从运行态读，测试换 tmp 才隔得开
+    const p = resolve(/* turbopackIgnore: true */ runtime().cwd, next.db_name);
+    if (!existsSync(p)) throw new ConnectionReject(`sqlite 文件不存在：${p}`, "bad_request");
+    next.db_name = p;
+  } else if (!next.host || !next.db_name) {
+    throw new ConnectionReject("mysql/pg 连接必须给 host 与 db_name", "bad_request");
+  }
+  const registry = await getDriverRegistry(ws);
+  const previous = (await metaStore().listConnections(ws)).find((c) => c.name === next.name);
+  if (!previous && registry.has(next.name)) {
+    throw new ConnectionReject(`${next.name} 是内置演示源，换个名字`);
+  }
+  registerSaved(registry, next);
+  if (test) {
+    try {
+      const tables = await registry.introspect(next.name);
+      if (tables.length === 0) {
+        registry.unregister(next.name);
+        if (previous) registerSaved(registry, previous);
+        return { ok: true, warning: "连上了，但库里没有表", tables, saved: false };
+      }
+    } catch (e) {
+      registry.unregister(next.name);
+      if (previous) registerSaved(registry, previous);
+      throw new ConnectionReject(`连不上：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  await metaStore().saveConnection(ws, next);
+  return { ok: true, saved: true };
+}
+
+/** 删除已保存的连接。内置演示源不在元库，删不了；已发布本体还引用着的也不能删。 */
+export async function dropConnection(ws: string, name: string): Promise<void> {
+  if (!(await metaStore().listConnections(ws)).some((c) => c.name === name)) {
+    throw new ConnectionReject(`连接不存在：${name}（内置演示源不能删）`);
+  }
+  const inUse = Object.values((await getPublished(ws)).config.object_types).some((t) =>
+    Object.values(t.sources ?? {}).some((s) => s.connection === name)
+  );
+  if (inUse) throw new ConnectionReject(`连接 ${name} 仍被已发布本体引用，先改本体再删`);
+  await metaStore().deleteConnection(ws, name);
+  (await getDriverRegistry(ws)).unregister(name);
 }

@@ -326,7 +326,7 @@ CREATE TABLE adj_decision (                    -- 裁决留痕
   llm_advice  TEXT,                            -- 模型建议与依据
   rate        DECIMAL(5,4),                    -- 裁决时看到的交集率
   evidence    JSON,                            -- 证据快照：归一化规则、样本量、交集数
-  verdict     VARCHAR(16)  NOT NULL,           -- 同一 | 部分重叠 | 阶段 | 仅名称相似 | 跳过
+  verdict     VARCHAR(16)  NOT NULL,           -- same | overlap | stage | name_similar | skip（同一 | 部分重叠 | 阶段 | 仅名称相似 | 跳过）
   decided_by  VARCHAR(128) NOT NULL,           -- 裁决人
   created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

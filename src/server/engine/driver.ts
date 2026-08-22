@@ -1,6 +1,9 @@
 // 源驱动抽象 —— 引擎与源库之间的唯一接口。
 // 引擎把对某个源的需求编成「列 + 条件」，驱动翻成方言 SQL 下推。
 // 条件里的 column 已经是源列名（经 sources.fields 翻好），驱动不认属性名。
+// 「空=至今」作用在哪些运算符上见 filterOp.treatsNullAsUntilNow。
+
+import { treatsNullAsUntilNow } from "./filterOp";
 
 export type CondOp =
   | "eq" | "ne" | "lt" | "lte" | "gt" | "gte"
@@ -111,8 +114,7 @@ function conditionSql(cond: Condition, quote: (id: string) => string, dialect: "
         : { sql: `(${col} <> ? OR ${col} IS NULL)`, params: [cond.value] };
     default: {
       const sym = { lt: "<", lte: "<=", gt: ">", gte: ">=" }[cond.op];
-      // 「空=至今」只对 date 属性生效：gt/gte 时 NULL 也算满足（至今晚于任何日期）
-      const nullOk = cond.nullLoose === true && (cond.op === "gt" || cond.op === "gte");
+      const nullOk = cond.nullLoose === true && treatsNullAsUntilNow(cond.op);
       const base = `${col} ${sym} ?`;
       return nullOk
         ? { sql: `(${base} OR ${col} IS NULL)`, params: [cond.value] }

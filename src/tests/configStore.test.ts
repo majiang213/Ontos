@@ -4,8 +4,11 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, restartRuntime, setupRuntime } from "./helpers";
+import { Verdict } from "../server/engine/verdict";
 
-const WS = "default";
+// 测试数据（演示模板）在 test 空间，所以配置存储的用例跑在 test 上；default 空白起步。
+
+const WS = "test";
 
 let tmp: string;
 
@@ -189,7 +192,7 @@ describe("配置存储（工作副本与发布）", () => {
     const s = await freshStore();
     const m = await meta();
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
-    await m.recordDecision(WS, { class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: "跳过", decided_by: "测试" });
+    await m.recordDecision(WS, { class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: Verdict.Skip, decided_by: "测试" });
     await s.discardDraft(WS);
     expect((await m.listDecisions(WS))[0].version).toBe(-1); // 已放弃
     // 下一次发布不回填它

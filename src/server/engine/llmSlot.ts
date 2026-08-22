@@ -6,8 +6,9 @@ import type { QueryRequest } from "../schema/request";
 import { queryRequestSchema } from "../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../schema/config";
 import type { TableInfo } from "./driver";
+import { TENDENCIES, VERDICT_LABELS, Verdict, type Tendency } from "./verdict";
 import { z } from "zod";
-import { generateObject, type LanguageModel } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { createXai } from "@ai-sdk/xai";
 
 export interface LlmSlot {
@@ -24,7 +25,7 @@ export interface LlmSlot {
 export interface PairAdvice {
   class_a: string;
   class_b: string;
-  tendency: "同一" | "部分重叠" | "阶段" | "仅名称相似";
+  tendency: Tendency;
   reason: string;
 }
 
@@ -33,7 +34,7 @@ export interface PairAdvice {
 export class CannedSlot implements LlmSlot {
   readonly name = "canned-离线回退";
   async nlToQuery(question: string, _config: OntologyConfig): Promise<QueryRequest> {
-    // 演示剧本四问 + 默认。形状与 generateObject 产物一致，过同一道 Zod
+    // 演示剧本四问 + 默认。形状与 generateText + Output.object 产物一致，过同一道 Zod
     if (/每个部门|各部门|多少台|多少设备/.test(question)) {
       return queryRequestSchema.parse({
         object: "equipment",
@@ -110,11 +111,11 @@ export class CannedSlot implements LlmSlot {
         const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
         if (ratio < 0.4 && !nameLike) continue; // 字段对不上、名字也不像，不进候选
         if (ratio < 0.4 && nameLike) {
-          pairs.push({ class_a: a.name, class_b: b.name, tendency: "仅名称相似", reason: `名字相近（${a.name} / ${b.name}），字段对不上` });
+          pairs.push({ class_a: a.name, class_b: b.name, tendency: Verdict.NameSimilar, reason: `名字相近（${a.name} / ${b.name}），字段对不上` });
           continue;
         }
         const hasStage = [...a.fields, ...b.fields].some((f) => /status|state|阶段|状态/.test(f));
-        const tendency = ratio > 0.8 ? "同一" : hasStage ? "阶段" : "部分重叠";
+        const tendency: Tendency = ratio > 0.8 ? Verdict.Same : hasStage ? Verdict.Stage : Verdict.Overlap;
         pairs.push({
           class_a: a.name,
           class_b: b.name,
@@ -128,17 +129,17 @@ export class CannedSlot implements LlmSlot {
 }
 
 /* ---------- 真模型实现（Vercel AI SDK + xAI）----------
-   三个槽位同构：generateObject({ model, schema, prompt })。
+   三个槽位同构：generateText({ model, output: Output.object({ schema }), prompt })。
    模型当顾问不当计算器：出槽前再过一道 Zod（模型乱说话 = 拒绝，不进引擎）。 */
 
-type Gen = typeof generateObject;
+type Gen = typeof generateText;
 
 const draftSchema = z.object({ object_types: z.record(z.string(), objectTypeSchema) });
 const pairsSchema = z.object({
   pairs: z.array(z.object({
     class_a: z.string(),
     class_b: z.string(),
-    tendency: z.enum(["同一", "部分重叠", "阶段", "仅名称相似"]),
+    tendency: z.enum(TENDENCIES),
     reason: z.string(),
   })),
 });
@@ -147,7 +148,7 @@ export class AiSdkSlot implements LlmSlot {
   readonly name: string;
   constructor(
     private model: LanguageModel,
-    private gen: Gen = generateObject // 测试注入假实现；生产是 SDK 的 generateObject
+    private gen: Gen = generateText // 测试注入假实现；生产是 SDK 的 generateText
   ) {
     this.name = `ai-sdk:${typeof model === "string" ? model : model.modelId}`;
   }
@@ -162,47 +163,49 @@ export class AiSdkSlot implements LlmSlot {
         .filter((l) => l.from === name || l.to === name)
         .map((l) => (l.from === name ? `${l.from} -[${Object.keys(config.link_types).find((k) => config.link_types[k] === l)}]-> ${l.to}` : `${l.from} <-[${l.inverse}]- ${l.to}`)),
     }));
-    const { object } = await this.gen({
+    const { output } = await this.gen({
       model: this.model,
-      schema: queryRequestSchema,
+      output: Output.object({ schema: queryRequestSchema }),
       prompt: `你是本体平台的问数编译器。把自然语言问题编译成结构化查询 JSON（schema 已约束形状）。
 本体：${JSON.stringify(classes)}
 规则：object 必须是上面的类名；filter 的键是属性名（派生属性可过滤）；$link 是关系过滤；date 属性可用 now/d 这类日期表达式；
 展开用 expand: [{ relation: 关系名, properties: [...] }]；聚合用 aggregate: { group_by: [...], metrics: [{ count: "*" }] }。
 答不出就返回最保守的空查询。问题：${question}`,
     });
-    return queryRequestSchema.parse(object); // 出槽再验一次
+    return queryRequestSchema.parse(output); // 出槽再验一次
   }
 
   async draftObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
-    const { object } = await this.gen({
+    const { output } = await this.gen({
       model: this.model,
-      schema: draftSchema,
+      output: Output.object({ schema: draftSchema }),
       prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。
 规则：类名=表名的小写下划线形；kind 默 "thing"（记录事件的表用 "event"）；识别字段 identity 选业务编号列（_no/_id 结尾优先）；
 properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
 表：${JSON.stringify(tables.map((t) => ({ connection: t.connection, name: t.table.name, columns: t.table.columns })))}`,
     });
-    return draftSchema.parse(object).object_types;
+    return draftSchema.parse(output).object_types;
   }
 
   async suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
-    const { object } = await this.gen({
+    const { output } = await this.gen({
       model: this.model,
-      schema: pairsSchema,
+      output: Output.object({ schema: pairsSchema }),
       prompt: `你是本体平台的整合顾问。下面是来自不同源的对象（名字、来源连接集合、字段名）。
-找出跨源疑似同义的对，每对给倾向（同一/部分重叠/阶段/仅名称相似）与一句依据。有共同连接的不成对；字段和名字都不像的不进候选。
+找出跨源疑似同义的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。有共同连接的不成对；字段和名字都不像的不进候选。
 对象：${JSON.stringify(classes)}`,
     });
-    return pairsSchema.parse(object).pairs;
+    return pairsSchema.parse(output).pairs;
   }
 }
 
 /** 槽位选择：有 OPENAI_API_KEY 走真模型（OpenAI 兼容协议，通用键同 Claude Code / Codex），否则离线回退。
- *  换接入点/模型用 OPENAI_BASE_URL / OPENAI_MODEL；默认对接 xAI（https://api.x.ai/v1，grok-4.5）。 */
+ *  模型必须显式指定 OPENAI_MODEL，不设默认；接入点用 OPENAI_BASE_URL，不设走 SDK 默认端点。 */
 export function getSlot(): LlmSlot {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return new CannedSlot();
+  const model = process.env.OPENAI_MODEL;
+  if (!model) throw new Error("OPENAI_MODEL 未设置：接真模型必须显式指定模型名");
   const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
-  return new AiSdkSlot(xai.responses(process.env.OPENAI_MODEL ?? "grok-4.5"));
+  return new AiSdkSlot(xai.responses(model));
 }

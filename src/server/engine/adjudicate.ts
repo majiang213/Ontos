@@ -4,8 +4,9 @@
 
 import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../schema/config";
 import { dropClass, mutateDraft } from "./configStore";
+import { Verdict } from "./verdict";
 
-export type Verdict = "同一" | "部分重叠" | "阶段" | "仅名称相似" | "跳过";
+export type { Verdict } from "./verdict";
 
 /** 转化动作骨架（唯一构造点）：前置 = 当前在早阶段 ∧ 还没转化过（$link false），效应 = 记一条转化关系。
  *  「阶段」裁决的产物与 MCP propose_action 的模板都走这里；附录 B 改骨架只动这一个函数。 */
@@ -70,13 +71,13 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
 export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b: string }, verdict: Verdict, stageNames?: { from: string; to: string }): void {
   const { class_a: a, class_b: b } = pair;
   switch (verdict) {
-    case "同一":
+    case Verdict.Same:
       mergeInto(d, a, b);
       break;
-    case "仅名称相似":
-    case "跳过":
+    case Verdict.NameSimilar:
+    case Verdict.Skip:
       break; // 各自独立，互不映射——配置不动
-    case "阶段": {
+    case Verdict.Stage: {
       const from = stageNames?.from ?? `${a}_前`;
       const to = stageNames?.to ?? `${b}_后`;
       const A = d.object_types[a];
@@ -112,7 +113,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       A.actions[`convert_to_${to}`] = conversionAction(`${a}_to_${to}`, d.link_types[`${a}_to_${to}`]);
       break;
     }
-    case "部分重叠": {
+    case Verdict.Overlap: {
       // 公共属性立上位对象：属性移上去，识别字段复制不移动（移了原类悬空）
       const A = d.object_types[a];
       const B = d.object_types[b];

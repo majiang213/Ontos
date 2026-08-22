@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { queryRequestSchema } from "../server/schema/request";
 import { runQuery } from "../server/engine/query";
-import { EngineReject } from "../server/engine/individual";
+import { createEnv, EngineReject, selectIndividuals } from "../server/engine/individual";
 import { runAction } from "../server/engine/action";
 import { freshDriver } from "../server/engine/load";
 import { SqliteFixtureDriver, seedDemo } from "../server/engine/fixture";
@@ -87,6 +87,13 @@ describe("M7 查询", () => {
     const asg = rows[0].assignments as Record<string, unknown>[];
     expect(asg.length).toBe(1);
     expect(asg[0].of_department).toEqual([{ name: "生产一部" }]);
+  });
+
+  it("读个体走 individual，不经过问数", async () => {
+    const env = createEnv(config, freshDriver());
+    const found = await selectIndividuals(env, "equipment", { identity: "SN-40085", allColumns: true });
+    expect(found).toHaveLength(1);
+    expect(found[0].key).toBe("SN-40085");
   });
 });
 
