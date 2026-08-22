@@ -65,7 +65,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
   };
 
   return (
-    <div className="float-card float-tl" style={{ top: 120, width: 360 }}>
+    <div className="float-card float-tl" style={{ top: 120, width: 440 }}>
       <Bezel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
@@ -75,12 +75,9 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
             const t = tagOf(q);
             return (
               <div key={q.id} style={{ fontSize: 12, lineHeight: 2.2 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ flex: 1 }}>
-                    {q.question}
-                    {q.expected ? <span style={{ color: "var(--ink-3)", fontSize: 11 }}>（期望：{q.expected}）</span> : null}
-                  </span>
-                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>{q.question}</span>
+                  <span style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                     {q.detail ? (
                       <button
                         className={t.cls}
@@ -116,6 +113,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
                     </button>
                   </span>
                 </div>
+                {q.expected ? <div style={{ color: "var(--ink-3)", fontSize: 11, lineHeight: 1.6 }}>期望：{q.expected}</div> : null}
                 {openId === q.id && q.detail ? <div style={{ color: "var(--ink-3)", fontSize: 11, lineHeight: 1.6 }}>{q.detail}</div> : null}
               </div>
             );
