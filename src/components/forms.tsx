@@ -3,6 +3,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { isFromOnly } from "../server/schema/valueShape";
 import { apiPost } from "./wsClient";
 
 export const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
@@ -278,8 +279,8 @@ function prefillPre(def: any): PreRow[] {
 }
 
 function prefillVal(v: unknown): Pick<PropVal, "source" | "value"> {
-  if (v !== null && typeof v === "object" && (v as Record<string, unknown>).from === "request") return { source: "request", value: "" };
-  if (v !== null && typeof v === "object" && (v as Record<string, unknown>).from === "identity") return { source: "identity", value: "" };
+  if (isFromOnly(v, "request")) return { source: "request", value: "" };
+  if (isFromOnly(v, "identity")) return { source: "identity", value: "" };
   return { source: "literal", value: String(v) };
 }
 

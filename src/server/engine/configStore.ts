@@ -17,7 +17,8 @@ export interface DraftState {
   draft: OntologyConfig;
   baseVersion: number; // 基于哪个已发布版本
   dirty: boolean; // 与已发布是否有差异（按结构比较，每次操作后重算）
-  layout: Record<string, { x: number; y: number }>; // 画布摆位（存 onto_workspace.layout）
+  layout: Record<string, { x: number; y: number }>; // 画布摆位（存 onto_workspace.layout 的 nodes）
+  edgeBends: Record<string, { dx: number; dy: number }>; // 线的弯折（存同一列的 edges）；界面状态，不算本体改动
 }
 
 export interface Store {
@@ -69,9 +70,10 @@ export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
   const store = storeOf(ws);
   if (!store.draft) {
     const { config, version } = await getPublished(ws);
-    const layout = await metaStore().getLayout(ws);
-    store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout };
+    const { nodes, edges } = await metaStore().getLayout(ws);
+    store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: nodes, edgeBends: edges };
   }
+  store.draft.edgeBends ??= {}; // 热更新前建的内存态没有这字段
   return store.draft;
 }
 
@@ -173,8 +175,14 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
     }
     case "save_layout": {
       state.layout = { ...state.layout, ...input.positions };
-      await metaStore().setLayout(ws, state.layout); // 摆位入库（onto_workspace.layout），重启不丢
+      await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends }); // 摆位入库（onto_workspace.layout），重启不丢
       return state; // 摆位不算本体改动，不碰 dirty
+    }
+    case "save_edge_bend": {
+      if (!state.draft.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
+      if (input.bend) state.edgeBends[input.name] = input.bend; else delete state.edgeBends[input.name]; // null = 拉直
+      await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends });
+      return state; // 与摆位同理：界面状态，不碰 dirty、不过语义校验
     }
     case "create_link": {
       if (!/^[a-z][a-z0-9_]*$/.test(input.name)) throw new DraftReject("关系名必须是小写字母/数字/下划线，字母开头");
@@ -204,6 +212,30 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
     case "update_link": {
       const l = d.link_types[input.name];
       if (!l) throw new DraftReject(`关系不存在：${input.name}`);
+      if (input.from !== undefined || input.to !== undefined) {
+        // 画布拖边改接：先全部校验再落笔，配对字段跟着新端点修——还存在的留，留不下的用两边唯一键（或首个属性）重配
+        const from = input.from ?? l.from;
+        const to = input.to ?? l.to;
+        if (l.transition) throw new DraftReject("转化关系的两端不能改接");
+        if (from === to) throw new DraftReject("关系的两端不能是同一个对象");
+        const refs = linkRefs(d, input.name); // 改端点与改名同理：引用它的动作按 from/to 走线，会静默断
+        if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}，先改引用它的动作再改接`);
+        const fromT = mustType(d, from);
+        const toT = mustType(d, to);
+        let match = l.match;
+        if (match) {
+          match = match.filter((m) => fromT.properties[m.from] && toT.properties[m.to]);
+          if (!match.length) {
+            const f = fromT.identity ?? Object.keys(fromT.properties)[0];
+            const t = toT.identity ?? Object.keys(toT.properties)[0];
+            if (!f || !t) throw new DraftReject("新端点上没有任何属性，配不出配对字段");
+            match = [{ from: f, to: t }];
+          }
+        }
+        l.from = from;
+        l.to = to;
+        if (match) l.match = match;
+      }
       if (input.description !== undefined) l.description = input.description || undefined; // 空串 = 清掉
       if (input.inverse !== undefined) {
         if (input.inverse && !/^[a-z][a-z0-9_]*$/.test(input.inverse)) throw new DraftReject("反向名必须是小写字母/数字/下划线，字母开头");
@@ -269,10 +301,16 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
   }
   // rev += 1 必须在内容写进 Store 之后、下一个 await 之前——晚一拍，监视器带旧 ETag 会 304，把已改的草稿当成没变
   storeOf(ws).rev += 1;
-  // 校验过了再动摆位：被删对象的摆位随内容一起清（校验失败回退时摆位不丢）
-  if (input.op === "delete_object" && state.layout[input.name]) {
-    delete state.layout[input.name];
-    await metaStore().setLayout(ws, state.layout);
+  // 校验过了再清界面状态：对象没了清摆位、关系没了清弯折（校验失败回退时不丢）
+  {
+    let layoutChanged = false;
+    for (const name of Object.keys(state.layout)) {
+      if (!state.draft.object_types[name]) { delete state.layout[name]; layoutChanged = true; }
+    }
+    for (const name of Object.keys(state.edgeBends)) {
+      if (!state.draft.link_types[name]) { delete state.edgeBends[name]; layoutChanged = true; }
+    }
+    if (layoutChanged) await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends });
   }
   // 每次操作后按结构重算：改出去又改回来，dirty 要能收回来
   state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
@@ -310,15 +348,17 @@ export async function mutateDraft(fn: (draft: OntologyConfig) => void, ws: strin
   }
   // rev += 1 必须在内容写进 Store 之后、下一个 await 之前（与 applyOp 同约定）
   storeOf(ws).rev += 1;
-  // 被撤的类顺手清摆位（裁决的 dropClass 不走 delete_object），摆位表不留死键
-  let layoutChanged = false;
-  for (const name of Object.keys(state.layout)) {
-    if (!state.draft.object_types[name]) {
-      delete state.layout[name];
-      layoutChanged = true;
+  // 被撤的类顺手清摆位、被撤的关系清弯折（裁决的 dropClass 不走 delete_object），摆位表不留死键
+  {
+    let layoutChanged = false;
+    for (const name of Object.keys(state.layout)) {
+      if (!state.draft.object_types[name]) { delete state.layout[name]; layoutChanged = true; }
     }
+    for (const name of Object.keys(state.edgeBends)) {
+      if (!state.draft.link_types[name]) { delete state.edgeBends[name]; layoutChanged = true; }
+    }
+    if (layoutChanged) await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends });
   }
-  if (layoutChanged) await metaStore().setLayout(ws, state.layout);
   state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
   return state;
   });
@@ -383,9 +423,9 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
   }
   const newVersion = (await metaStore().latestVersion(ws, seedYamlFor(ws))).version + 1;
   await metaStore().insertVersion(ws, newVersion, dump(config, { lineWidth: 120, noRefs: true }), "rollback", version);
-  const layout = await metaStore().getLayout(ws); // 先取摆位：store 写入要成片完成，中途不夹 await
+  const { nodes, edges } = await metaStore().getLayout(ws); // 先取摆位：store 写入要成片完成，中途不夹 await
   storeOf(ws).published = { config, version: newVersion };
-  storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout };
+  storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: nodes, edgeBends: edges };
   // rev += 1 必须在内容写进 Store 之后、下一个 await 之前（干净草稿 rev=0 时回滚也要 +1，监视器按相等比较）
   storeOf(ws).rev += 1;
   await fillDecisionVersions(newVersion, ws); // 回滚也是一次发布：未绑版本的裁决挂到它

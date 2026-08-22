@@ -3,6 +3,7 @@
 
 import { FILTER_OPS, type OntologyConfig } from "../schema/config";
 import { walkFilter } from "../schema/filterWalk";
+import { FROM_KEY_SET } from "../schema/valueShape";
 
 export function validateSemantics(config: OntologyConfig): void {
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
@@ -148,7 +149,7 @@ export function validateSemantics(config: OntologyConfig): void {
    validateSemantics 管指称（类/属性/关系存在），这里管附录 B 的形状——今天只有运行期才拦的四条：
    ① 效应 link 必须指向已存在的转化关系，且 from/to 都在宿主类上（与 action.ts 运行期同口径）；
    ② 每条 transition 关系必须被至少一条动作的效应 link 引用（孤儿转化关系发布不出去）；
-   ③ 取值来源形状（与 expr.ts resolveValue / individual.ts resolveOperand 同口径）；
+   ③ 取值来源形状（from 词表原语在 schema/valueShape，与 expr.ts / individual.ts 共用）；
    ④ update / delete 必须带 identity 或 filter（认人必须写明）。
    只在草稿写入/发布路径调（applyOp / mutateDraft / publishDraft 的 validateSemantics 之后）；
    loadPublished / rollbackTo 不调——历史已发布的坏配置加载放行，运行期由 action.ts 兜底。 */
@@ -207,9 +208,7 @@ export function validateActionShapes(config: OntologyConfig): void {
   }
 }
 
-const FROM_KEYS = new Set(["identity", "action", "object", "current", "request", "generated"]);
-
-/** 取值来源形状（效应/inform 的 properties 与认人键；与 expr.ts resolveValue 的分支同口径）。 */
+/** 取值来源形状（效应/inform 的 properties 与认人键；from 词表与 expr.ts resolveValue 共用 schema/valueShape）。 */
 function checkValueSource(v: unknown, where: string, opts: { allowCurrent: boolean; allowGenerated: boolean }): void {
   if (v === null || typeof v !== "object") return; // 字面量与 now 系表达式串：运行期 resolveLiteral 管，这里不管
   if (Array.isArray(v)) throw new Error(`配置不合法：${where} 的取值不接受数组`);
@@ -220,7 +219,7 @@ function checkValueSource(v: unknown, where: string, opts: { allowCurrent: boole
     if (from === "current" && !opts.allowCurrent) throw new Error(`配置不合法：${where} 没有当前个体，取值不能来自 current：${JSON.stringify(v)}`);
     return;
   }
-  if (typeof rec.from === "string" && FROM_KEYS.has(rec.from)) {
+  if (typeof rec.from === "string" && FROM_KEY_SET.has(rec.from)) {
     if (rec.from === "current" && !opts.allowCurrent) throw new Error(`配置不合法：${where} 没有当前个体，取值不能来自 current：${JSON.stringify(v)}`);
     if (rec.from === "generated" && !opts.allowGenerated) throw new Error(`配置不合法：${where} 的 from: generated 只许用在 create 效应且目标属性带 generate 列表：${JSON.stringify(v)}`);
     return;

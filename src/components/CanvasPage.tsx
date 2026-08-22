@@ -16,6 +16,7 @@ interface OntologyResp {
   version: number;
   dirty: boolean;
   layout: Record<string, { x: number; y: number }>;
+  edgeBends: Record<string, { dx: number; dy: number }>; // 线的弯折点（界面状态，随摆位存）
   states: Record<string, "new" | "modified" | "same">;
   deleted: string[];
   action_changes: { added: string[]; overwritten: string[]; removed: string[] }; // 类名.动作名
@@ -320,6 +321,7 @@ export default function CanvasPage() {
         objects={objects}
         links={links}
         layout={ont?.layout}
+        edgeBends={ont?.edgeBends}
         selectedLink={card?.kind === "linkDetail" ? card.name : null}
         onSelect={(name) => {
           // 动作表单有未保存改动时，切去别的对象先问一句（切换会收掉表单）
@@ -330,6 +332,11 @@ export default function CanvasPage() {
         }}
         onSelectLink={(name) => setCard({ kind: "linkDetail", name })}
         onConnectRequest={(from, to) => setCard({ kind: "link", from, to })}
+        onReconnectLink={async (name, from, to) => {
+          const ok = await op({ op: "update_link", name, from, to });
+          if (ok) showToast(`关系已改接为 ${from} → ${to}（发布后生效）`);
+        }}
+        onBendChange={(name, bend) => void op({ op: "save_edge_bend", name, bend })} // 拉弯/拉直：静默存，与摆位同理
         onLayoutChange={saveLayout}
       />
 

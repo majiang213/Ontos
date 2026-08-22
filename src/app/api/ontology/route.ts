@@ -43,6 +43,7 @@ export async function GET(req: Request) {
         version: state.baseVersion,
         dirty: state.dirty,
         layout: state.layout,
+        edgeBends: state.edgeBends,
         states,
         deleted,
         action_changes,

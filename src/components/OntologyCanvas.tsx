@@ -2,7 +2,7 @@
 // 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   ConnectionMode,
@@ -16,13 +16,14 @@ import {
   applyNodeChanges,
   useNodesState,
   useReactFlow,
+  type ConnectionLineComponentProps,
   type Edge,
   type Node,
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, type CanvasLink, type CanvasObject } from "./layout";
-import FloatingEdge from "./FloatingEdge";
+import FloatingEdge, { type Bend } from "./FloatingEdge";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 
 // CanvasObject/CanvasLink 定义在同目录 layout.ts（布局是唯一下游定义点）；这里再导出，老调用方不用改
@@ -32,9 +33,9 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
   const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
   return (
     <div className={cls}>
-      {/* 上下各一对连接点：平时透明，悬停节点时浮现；从底部拖出、落到别家身上即连线。
-          顶点只接不出：方向恒为拖出节点 → 落点节点，与连线预览一致 */}
-      <Handle type="target" position={Position.Top} isConnectableStart={false} />
+      {/* 上下各一个连接点：平时透明，悬停节点浮现。两个点都只是抓手——方向恒为 拖出节点 → 落点节点，
+          与从哪个点拖、节点摆在哪无关（顶点拖出在 onConnect 里换回方向）；预览线的箭头就是关系的方向 */}
+      <Handle type="target" position={Position.Top} />
       <Handle type="source" position={Position.Bottom} />
       <div className="node-core">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -78,10 +79,13 @@ export interface CanvasProps {
   objects: CanvasObject[];
   links: CanvasLink[];
   layout?: Record<string, { x: number; y: number }>;
+  edgeBends?: Record<string, Bend>; // 线的弯折点（界面状态，随摆位存）
   selectedLink?: string | null;
   onSelect: (name: string) => void;
   onSelectLink?: (name: string) => void;
   onConnectRequest?: (from: string, to: string) => void;
+  onReconnectLink?: (name: string, from: string, to: string) => void; // 拖着已有边的一头改接到别的对象
+  onBendChange?: (name: string, bend: Bend | null) => void; // 拖线身捏点拉弯/拉直
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
 }
 
@@ -107,7 +111,7 @@ function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["s
   };
 }
 
-function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, onConnectRequest, onLayoutChange }: CanvasProps) {
+function Flow({ objects, links, layout, edgeBends, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange }: CanvasProps) {
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = layoutObjects(objects, links);
     return objects.map((o) => ({
@@ -145,6 +149,15 @@ function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, on
   );
 
   const rf = useReactFlow();
+  const startHandleType = useRef<"source" | "target" | null>(null); // 本次拖拽从哪种点拉出（onConnect 换方向用）
+  const reconnecting = useRef(false); // 正在改接已有线（预览箭头方向用：改接源端时箭头指回固定端）
+  // 组件身份必须稳定（否则拖动中途换类型会重挂预览），方向标记走 ref
+  const ConnectionLinePreview = useCallback(
+    (p: ConnectionLineComponentProps) => (
+      <FloatingConnectionLine {...p} reversed={reconnecting.current && p.fromHandle.type === "target"} />
+    ),
+    []
+  );
   /** 一键理顺：重跑分层布局并取景、记住新摆位。导入一批新表、或拖乱了之后用。 */
   const tidy = useCallback(() => {
     const pos = layoutObjects(objects, links);
@@ -154,6 +167,7 @@ function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, on
     requestAnimationFrame(() => requestAnimationFrame(() => rf.fitView({ padding: 0.2 })));
   }, [objects, links, setNodes, rf, onLayoutChange]);
 
+  const [hoveredEdge, setHoveredEdge] = useState<string | null>(null); // 悬停的边：露出弯折捏点与改接锚点
   const edges: Edge[] = useMemo(
     () =>
       links.map((l) => ({
@@ -164,8 +178,9 @@ function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, on
         label: l.inverse ? `${l.name} / ${l.inverse}` : l.name,
         ...edgeTone(l, selectedLink), // 边色与箭头一处判定
         interactionWidth: 20, // 线的点击热区放宽，细线也好点
+        data: { bend: edgeBends?.[l.name], showKnob: hoveredEdge === l.name || selectedLink === l.name, commitBend: onBendChange },
       })),
-    [links, selectedLink]
+    [links, selectedLink, edgeBends, hoveredEdge, onBendChange]
   );
 
   // 首批对象到达后才取景（挂载时 nodes 恒为空，fitView 等于白做）
@@ -187,18 +202,44 @@ function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, on
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable
       nodesConnectable
-      // 手动连线宽松判定：落在目标对象身上任意位置都算连它（取最近的连接点），方向仍由起点定；
+      // 手动连线宽松判定：落在目标对象身上任意位置都算连它（取最近的连接点）；
       // 严格模式必须命中对方 10px 的顶点，用户拖上去多半落空，表现为「连不上」
       connectionMode={ConnectionMode.Loose}
       connectionRadius={150} // 半径要盖过节点半身位（节点最大 288×~220），落在节点正中也能吸附
       connectOnClick={false} // 点选连线会和节点点击（开编辑卡）打架，只保留拖拽一种手势
-      connectionLineComponent={FloatingConnectionLine} // 预览与最终边同算法：选中的落点就是新建后的落点
+      connectionLineComponent={ConnectionLinePreview} // 预览与最终边同算法：选中的落点就是新建后的落点
       deleteKeyCode={null} // 删除只走编辑卡/详情卡：键盘删节点不过草稿，状态会乱
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}
       onEdgeClick={(_, edge) => onSelectLink?.(edge.id)}
+      onEdgeMouseEnter={(_, edge) => setHoveredEdge(edge.id)}
+      onEdgeMouseLeave={() => setHoveredEdge(null)}
+      onConnectStart={(_, params) => {
+        startHandleType.current = params.handleType ?? null;
+      }}
       onConnect={(c) => {
-        if (c.source && c.target && c.source !== c.target) onConnectRequest?.(c.source, c.target); // 自连不在表单里做
+        if (!c.source || !c.target || c.source === c.target) return; // 自连不在表单里做
+        // 方向恒为 拖出节点 → 落点节点：从顶点（target 点）拖出时 xyflow 会给成反向，换回来
+        const swapped = startHandleType.current === "target";
+        onConnectRequest?.(swapped ? c.target : c.source, swapped ? c.source : c.target);
+      }}
+      onReconnect={(oldEdge, c) => {
+        // 拖回原位或自连都不算改接；走 update_link 改 from/to，配对字段由服务端跟着新端点修
+        if (!c.source || !c.target || c.source === c.target) return;
+        if (c.source === oldEdge.source && c.target === oldEdge.target) return;
+        onReconnectLink?.(oldEdge.id, c.source, c.target);
+      }}
+      reconnectRadius={12} // 改接锚点（钉在节点上/下中点）的可抓半径
+      onReconnectStart={() => {
+        reconnecting.current = true;
+      }}
+      onReconnectEnd={() => {
+        reconnecting.current = false;
+        startHandleType.current = null;
+      }}
+      onConnectEnd={() => {
+        reconnecting.current = false; // 改接结束 onConnectEnd 也会先发一次，兜底清理
+        startHandleType.current = null;
       }}
       proOptions={{ hideAttribution: true }}
     >

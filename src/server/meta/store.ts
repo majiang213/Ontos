@@ -219,6 +219,12 @@ export interface QueryLogRec {
   ok: boolean;
 }
 
+/** 画布界面状态（onto_workspace.layout 的 JSON 形状）：对象摆位 + 线的弯折点。 */
+export interface CanvasLayout {
+  nodes: Record<string, { x: number; y: number }>;
+  edges: Record<string, { dx: number; dy: number }>;
+}
+
 export interface ActionLogRec {
   version?: number;
   action: string;
@@ -296,18 +302,22 @@ export class MetaStore {
 
   /* 摆位 */
 
-  async getLayout(ws: string): Promise<Record<string, { x: number; y: number }>> {
+  /** 画布界面状态：nodes = 对象摆位；edges = 线的弯折（相对两端节点中心连线中点的偏移，0/0 即直线）。 */
+  async getLayout(ws: string): Promise<CanvasLayout> {
     const id = await this.wsId(ws);
     const row = await this.backend.get(`SELECT layout FROM onto_workspace WHERE id = ?`, [id]);
-    if (!row?.layout) return {};
+    if (!row?.layout) return { nodes: {}, edges: {} };
     try {
-      return JSON.parse(String(row.layout));
+      const parsed = JSON.parse(String(row.layout));
+      // 旧格式是平铺的节点摆位（没有 nodes 键），按 nodes 读、edges 置空
+      if (parsed && typeof parsed === "object" && "nodes" in parsed) return { nodes: parsed.nodes ?? {}, edges: parsed.edges ?? {} };
+      return { nodes: parsed ?? {}, edges: {} };
     } catch {
-      return {};
+      return { nodes: {}, edges: {} };
     }
   }
 
-  async setLayout(ws: string, layout: Record<string, { x: number; y: number }>): Promise<void> {
+  async setLayout(ws: string, layout: CanvasLayout): Promise<void> {
     const id = await this.wsId(ws);
     await this.backend.run(`UPDATE onto_workspace SET layout = ? WHERE id = ?`, [JSON.stringify(layout), id]);
   }

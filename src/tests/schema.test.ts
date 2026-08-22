@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { draftOpSchema, mcpDraftOpSchema } from "../server/schema/ops";
+import { EXPR_LIKE, FROM_KEY_SET, isFromOnly, isPlainLiteral, propertyRef } from "../server/schema/valueShape";
 import { actionRequestSchema, queryRequestSchema } from "../server/schema/request";
 import { walkFilter } from "../server/schema/filterWalk";
 
@@ -110,8 +111,7 @@ describe("queryRequestSchema / actionRequestSchema", () => {
   });
 });
 
-describe("walkFilter（过滤树走查器）", () => {
-  const config = configSchema.parse({
+describe("walkFilter（过滤树走查器）", () => {  const config = configSchema.parse({
     object_types: {
       a: { kind: "thing", properties: { x: { type: "string" } } },
       b: { kind: "thing", properties: { y: { type: "string" } } },
@@ -161,5 +161,35 @@ describe("walkFilter（过滤树走查器）", () => {
       prop: (_c, k) => void events.push(`prop:${k}`),
     });
     expect(events).toEqual(["link:ab"]);
+  });
+});
+
+describe("valueShape（取值来源词表的唯一事实源）", () => {
+  it("EXPR_LIKE：now 系与 current./request. 前缀算表达式，普通文本不算", () => {
+    for (const s of ["now", "now/d", "now+1y", "now-1d/d", "current.dept", "request.title"]) expect(EXPR_LIKE.test(s)).toBe(true);
+    for (const s of ["nowadays", "normal", "D01", "2026-01-01"]) expect(EXPR_LIKE.test(s)).toBe(false);
+  });
+  it("FROM_KEY_SET 恰好六个词", () => {
+    expect([...FROM_KEY_SET].sort()).toEqual(["action", "current", "generated", "identity", "object", "request"]);
+  });
+  it("isFromOnly：恰为单键 { from: key } 才真", () => {
+    expect(isFromOnly({ from: "identity" }, "identity")).toBe(true);
+    expect(isFromOnly({ from: "identity" }, "request")).toBe(false);
+    expect(isFromOnly({ from: "identity", extra: 1 }, "identity")).toBe(false); // 多一个键不算
+    expect(isFromOnly("identity", "identity")).toBe(false);
+    expect(isFromOnly(null, "identity")).toBe(false);
+  });
+  it("propertyRef：只认 { property: 字符串 }，from 原样带出", () => {
+    expect(propertyRef({ property: "dept" })).toEqual({ property: "dept", from: undefined });
+    expect(propertyRef({ property: "dept", from: "request" })).toEqual({ property: "dept", from: "request" });
+    expect(propertyRef({ from: "identity" })).toBeNull();
+    expect(propertyRef("dept")).toBeNull();
+  });
+  it("isPlainLiteral：字面量为真，表达式串与对象为假", () => {
+    expect(isPlainLiteral("D01")).toBe(true);
+    expect(isPlainLiteral(1)).toBe(true);
+    expect(isPlainLiteral(null)).toBe(true);
+    expect(isPlainLiteral("now/d")).toBe(false);
+    expect(isPlainLiteral({ from: "request" })).toBe(false);
   });
 });

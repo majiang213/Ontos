@@ -245,7 +245,7 @@ input { font-family: inherit; outline: none; }
   transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
 }
 
-/* 连线锚点：平时隐形，悬停节点时浮现；从节点底部拖出、落到另一节点即建关系 */
+/* 连线锚点：平时隐形，悬停节点时浮现；底点拖出 = 我连着落点，顶点拖出 = 落点连着我 */
 .node-shell .react-flow__handle {
   width: 12px;
   height: 12px;
@@ -257,6 +257,27 @@ input { font-family: inherit; outline: none; }
 .node-shell:hover .react-flow__handle {
   opacity: 1;
 }
+/* 改接锚点：悬停或选中一条边时在其两端（节点的上/下中点）露出，抓住拖到别的对象即改接 */
+.react-flow__edge:hover .react-flow__edgeupdater,
+.react-flow__edge.selected .react-flow__edgeupdater {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+/* 弯折捏点：线的中点处，悬停线身或有弯折时露出；有弯折时常驻并上色 */
+.edge-bend-knob {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid var(--ink-3);
+  cursor: grab;
+  pointer-events: all;
+  z-index: 10; /* 压在关系名标签上，捏点优先抓住 */
+}
+.edge-bend-knob:hover { border-color: var(--accent); cursor: grabbing; }
+.edge-bend-knob.is-bent { background: var(--accent); border-color: var(--panel); }
 .node-shell:hover { border-color: var(--line-strong); box-shadow: var(--shadow-lift); transform: translateY(-2px); }
 /* 草稿态：新对象虚线轮廓；有未发布改动的右上角一个 amber 点 */
 .node-shell.is-new { outline: 2px dashed var(--warn); outline-offset: 2px; }

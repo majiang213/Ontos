@@ -2,6 +2,7 @@
 // 从组件抽出来单测；不依赖 React。规则见《外部Agent编辑画布.md》§6。
 
 import type { ActionDef, OntologyConfig } from "../server/schema/config";
+import { isFromOnly, isPlainLiteral } from "../server/schema/valueShape";
 
 /** 效应摘要：一条效应一行白话，inform 另列。类名/属性名/关系名用配置里的机器名。
  *  不展示 from / 字面量 / filter / identity——同一属性换取值来源或字面量，摘要一行不变（摘要是给人看的告警，不是审计）。 */
@@ -17,25 +18,10 @@ export function effectSummary(def: ActionDef): string[] {
   return lines;
 }
 
-/* 与 expr.ts 同一条：now 系表达式与 current./request. 前缀不算「字面量」。 */
-const EXPR_LIKE = /^(now([+\-/\d]|$)|(current|request)\.)/;
-
-function isPlainLiteral(v: unknown): boolean {
-  if (v === null || typeof v === "number" || typeof v === "boolean") return true;
-  return typeof v === "string" && !EXPR_LIKE.test(v);
-}
-
-/** 恰为 { from: <name> } 单键对象。 */
-function isFromOnly(v: unknown, from: string): boolean {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
-  const keys = Object.keys(v);
-  return keys.length === 1 && (v as Record<string, unknown>).from === from;
-}
-
 /** 表单认不认得出这条动作（认不出则对象卡只展示摘要、只许删——点「编辑」再保存不得把认不出的键丢掉）。
  *  白名单（附录 B 子集）：无 inform；pre 只含本类非派生字段的等于/不等于字面量、或 $link 已发生/未发生；
  *  update/delete 只作用在宿主类、无 filter、必须 identity: { from: identity }；create 取值只许 request/identity/字面量；
- *  link 只许本类上的转化关系。 */
+ *  link 只许本类上的转化关系。取值原语（isPlainLiteral/isFromOnly）来自 schema/valueShape。 */
 export function formCompatible(def: ActionDef, clsName: string, config: Pick<OntologyConfig, "object_types" | "link_types">): boolean {
   const cls = config.object_types[clsName];
   if (!cls) return false;

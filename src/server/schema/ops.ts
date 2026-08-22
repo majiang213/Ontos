@@ -32,6 +32,8 @@ const updatePropertyOp = z.object({
 });
 const setIdentityOp = z.object({ op: z.literal("set_identity"), object: z.string(), name: z.string() }); // name 为空串 = 取消识别字段
 const saveLayoutOp = z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) });
+// 线的弯折点：相对两端节点中心连线中点的偏移；bend=null 拉直。与摆位一样是界面状态
+const saveEdgeBendOp = z.object({ op: z.literal("save_edge_bend"), name: z.string(), bend: z.object({ dx: z.number(), dy: z.number() }).nullable() });
 // 手动连线：from 类 → to 类，必须给配对字段（match）——关系总得说清靠哪两个字段对上
 const createLinkOp = z.object({
   op: z.literal("create_link"),
@@ -44,13 +46,16 @@ const createLinkOp = z.object({
   match: z.object({ from: z.string(), to: z.string() }),
 });
 const deleteLinkOp = z.object({ op: z.literal("delete_link"), name: z.string() });
-// 关系改名/改反向名/改描述（match 与转化不改；改名前扫引用，被引用的关系拒改）
+// 关系改名/改反向名/改描述/改两端/改配对字段（画布拖边改接走 from/to：转化关系与被引用的关系拒改，配对字段跟新端点修）
 const updateLinkOp = z.object({
   op: z.literal("update_link"),
   name: z.string(),
   new_name: z.string().optional(),
   description: z.string().optional(),
   inverse: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  match: z.object({ from: z.string(), to: z.string() }).optional(), // 单对配对，与 create_link 同形
 });
 // 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象；MCP 侧是 propose_ontology 的落地点）
 const importObjectsOp = z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) });
@@ -69,6 +74,7 @@ export const draftOpSchema = z.discriminatedUnion("op", [
   updatePropertyOp,
   setIdentityOp,
   saveLayoutOp,
+  saveEdgeBendOp,
   createLinkOp,
   deleteLinkOp,
   updateLinkOp,
@@ -121,6 +127,7 @@ export function affectedNames(op: DraftOpInput): string[] {
     case "import_objects":
       return Object.keys(op.objects);
     case "save_layout":
+    case "save_edge_bend":
       return [];
   }
 }

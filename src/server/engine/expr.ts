@@ -2,6 +2,7 @@
 // 语义见《ontos-article.md》§6.2 与附录 B「保留字」。
 
 import type { PropertyDef, ValueSource } from "../schema/config";
+import { EXPR_LIKE } from "../schema/valueShape";
 
 /* 求值上下文：一次过滤核对或一条效应赋值能看到的全部来源。 */
 export interface EvalContext {
@@ -71,9 +72,7 @@ function evalNumberExpr(expr: string, ctx: EvalContext): number {
 }
 
 /** 字符串字面量里的日期：ISO 串转 UTC Unix 秒；now 系按表达式求值；形似表达式但不合语法的拒绝。
- *  「形似」收紧为 now 后紧跟运算符/数字/斜杠，或 current./request. 前缀—— nowadays 这类文本不算。 */
-const EXPR_LIKE = /^(now([+\-/\d]|$)|(current|request)\.)/;
-
+ *  「形似」正则 EXPR_LIKE 收在 schema/valueShape（取值来源词表的唯一事实源）。 */
 export function resolveLiteral(v: unknown): unknown {
   if (typeof v !== "string") return v;
   const s: string = v;
