@@ -94,8 +94,8 @@ CREATE TABLE IF NOT EXISTS onto_version (     -- 版本快照：发布/回滚各
   workspace_id INTEGER NOT NULL,
   version INTEGER NOT NULL,                   -- 首版为 1；已发布版 = 该空间 MAX(version)
   yaml TEXT NOT NULL,                         -- 本体 YAML 全量快照（不存增量 diff）
-  origin TEXT NOT NULL DEFAULT 'publish',     -- publish | rollback
-  revert_of INTEGER,                          -- 回滚自哪个版本；origin=rollback 时有值
+  origin TEXT NOT NULL DEFAULT 'publish',     -- 恒 publish：回滚只覆盖工作副本、不插行；rollback 行只见于历史库
+  revert_of INTEGER,                          -- 历史列：早期 revert 语义记的回滚来源，现行语义不写
   note TEXT,                                  -- 发布说明
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, version)
