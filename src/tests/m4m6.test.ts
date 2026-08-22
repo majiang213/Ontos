@@ -263,4 +263,29 @@ describe("MCP 工具端点", () => {
     expect(ghost.error).toBeUndefined();
     expect(ghost.result.structuredContent.sources).toEqual([{ connection: "ghost_db", tables: [], error: "没有这个连接" }]);
   });
+
+  it("set_action 经 apply_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {
+    const s = await import("../server/engine/configStore");
+    const def = { description: "改名", effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
+    const r = await call("apply_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: s.getRev("test") });
+    expect(r.error).toBeUndefined();
+    expect(r.result.structuredContent.names).toEqual(["equipment.rename"]);
+    // 草稿视图：完整动作定义（读回-改-写回闭环）
+    const rc = await call("read_class", { name: "equipment", space: "draft" });
+    const act = rc.result.structuredContent.actions.find((a: { name: string }) => a.name === "rename");
+    expect(act.def).toEqual(def);
+    // 已发布视图：看不见这条动作，且任何动作都不带 def（问数 Agent 不碰写侧）
+    const pub = await call("read_class", { name: "equipment" });
+    expect(pub.result.structuredContent.actions.find((a: { name: string }) => a.name === "rename")).toBeUndefined();
+    expect(pub.result.structuredContent.actions.every((a: { def?: unknown }) => a.def === undefined)).toBe(true);
+    // run_action 只执行已发布快照：草稿里的动作执行不了（业务失败 isError，不是信封错误）
+    const run = await call("run_action", { action: "rename", object: "equipment", identity: "SN-40217" });
+    expect(run.error).toBeUndefined();
+    expect(run.result.isError).toBe(true);
+    // remove_action：names 同样是 类名.动作名
+    const rm = await call("apply_draft", { op: "remove_action", object: "equipment", name: "rename", base_rev: s.getRev("test") });
+    expect(rm.error).toBeUndefined();
+    expect(rm.result.structuredContent.names).toEqual(["equipment.rename"]);
+    expect((await s.getDraft("test")).draft.object_types.equipment.actions!.rename).toBeUndefined();
+  });
 });

@@ -37,7 +37,7 @@ describe("configSchema", () => {
 });
 
 describe("draftOpSchema", () => {
-  it("十三种操作各收一例", () => {
+  it("十五种操作各收一例", () => {
     const ops: unknown[] = [
       { op: "create_object", name: "vendor", kind: "thing" },
       { op: "delete_object", name: "vendor" },
@@ -52,12 +52,20 @@ describe("draftOpSchema", () => {
       { op: "update_link", name: "supplies", new_name: "supplied_by", description: "供应关系" },
       { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } } },
       { op: "replace_object", name: "vendor", def: { kind: "thing", properties: {} } },
+      { op: "set_action", object: "vendor", name: "rename", def: { effect: [{ update: { object: "vendor", identity: { from: "identity" }, properties: { vendor_no: { from: "request" } } } }] } },
+      { op: "remove_action", object: "vendor", name: "rename" },
     ];
     for (const op of ops) expect(draftOpSchema.parse(op)).toBeTruthy();
   });
   it("未知操作被拒；save_layout 的坐标必须是数值", () => {
     expect(() => draftOpSchema.parse({ op: "fly_to_moon" })).toThrow();
     expect(() => draftOpSchema.parse({ op: "save_layout", positions: { equipment: { x: "10", y: 20 } } })).toThrow();
+  });
+  it("set_action 的 def 必须过 actionSchema：缺 effect、效应形状不合法都拒", () => {
+    expect(() => draftOpSchema.parse({ op: "set_action", object: "vendor", name: "a", def: { description: "没效应" } })).toThrow();
+    expect(() => draftOpSchema.parse({ op: "set_action", object: "vendor", name: "a", def: { effect: [] } })).toThrow(); // effect 非空
+    expect(() => draftOpSchema.parse({ op: "set_action", object: "vendor", name: "a", def: { effect: [{ update: { object: "vendor", properties: {} } }] } })).toThrow(); // 空 SET
+    expect(() => draftOpSchema.parse({ op: "set_action", object: "vendor", name: "a", def: { effect: [{ fly: {} }] } })).toThrow(); // 未知效应
   });
   it("replace_object：def 是单个类体；缺 def / 把 object 当类体都拒", () => {
     expect(() => draftOpSchema.parse({ op: "replace_object", name: "vendor" })).toThrow();

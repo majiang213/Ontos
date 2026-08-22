@@ -67,7 +67,7 @@ const TOOLS = [
   },
   {
     name: "read_class",
-    description: "读一个类的字段、关系、动作。缺省已发布（不含来源表）。改画布请传 space: \"draft\"，会带上来源对照和能不能整份替换（replaceable）。入参：{ name, space? }。",
+    description: "读一个类的字段、关系、动作。缺省已发布（不含来源表）。改画布请传 space: \"draft\"，会带上来源对照、能不能整份替换（replaceable）和完整动作定义（可读回-改-写回）。入参：{ name, space? }。",
     inputSchema: { type: "object", properties: { name: { type: "string" }, space: spaceEnum }, required: ["name"] },
   },
   {
@@ -83,7 +83,7 @@ const TOOLS = [
   {
     name: "apply_draft",
     description:
-      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）。不能发布、放弃、裁决、回滚，也不能改节点位置。不接受 space。",
+      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（set_action / remove_action）。不能发布、放弃、裁决、回滚，也不能改节点位置。不接受 space。",
     inputSchema: applyDraftInputSchema,
   },
 ];

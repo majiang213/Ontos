@@ -26,6 +26,17 @@ export async function GET(req: Request) {
     }
     // 已发布但草稿里删掉的对象：给画布一个「待删除」名单
     const deleted = Object.keys(published.object_types).filter((name) => !(name in state.draft.object_types));
+    // 动作差集（类名.动作名）：只在草稿=新增；两边都有但结构不同=已修改；只在已发布=去掉。发布条与 toast 只读这个
+    const action_changes = { added: [] as string[], overwritten: [] as string[], removed: [] as string[] };
+    for (const cls of new Set([...Object.keys(state.draft.object_types), ...Object.keys(published.object_types)])) {
+      const da = state.draft.object_types[cls]?.actions ?? {};
+      const pa = published.object_types[cls]?.actions ?? {};
+      for (const n of Object.keys(da)) {
+        if (!(n in pa)) action_changes.added.push(`${cls}.${n}`);
+        else if (!sameConfig(da[n], pa[n])) action_changes.overwritten.push(`${cls}.${n}`);
+      }
+      for (const n of Object.keys(pa)) if (!(n in da)) action_changes.removed.push(`${cls}.${n}`);
+    }
     return NextResponse.json(
       {
         rev,
@@ -34,7 +45,8 @@ export async function GET(req: Request) {
         layout: state.layout,
         states,
         deleted,
-        object_types: state.draft.object_types,
+        action_changes,
+        object_types: state.draft.object_types, // actions 保持完整 ActionDef——对象卡从 def 在前端算摘要
         link_types: state.draft.link_types,
         outlets: state.draft.outlets ?? {},
       },

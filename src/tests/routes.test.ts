@@ -115,6 +115,27 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
     expect(r3.data.rev).toBe(s.getRev(TEST));
     expect(r3.data.object_types.vendor).toBeDefined();
   });
+
+  it("action_changes：未动过动作时三数组全空；新增/同名改内容/删除各就各位", async () => {
+    const s = await import("../server/engine/configStore");
+    const r1 = await get("ontology", undefined, TEST);
+    expect(r1.data.action_changes).toEqual({ added: [], overwritten: [], removed: [] }); // 种子有 convert 等动作，但没改就不算
+    const def = { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
+    await s.applyOp({ op: "set_action", object: "equipment", name: "rename", def }, TEST);
+    const convertDef = structuredClone((await s.getDraft(TEST)).draft.object_types.equipment.actions!.convert);
+    convertDef.description = "改过的验收入库";
+    await s.applyOp({ op: "set_action", object: "equipment", name: "convert", def: convertDef }, TEST);
+    await s.applyOp({ op: "remove_action", object: "equipment", name: "scrap" }, TEST);
+    const r2 = await get("ontology", undefined, TEST);
+    expect(r2.data.action_changes.added).toEqual(["equipment.rename"]);
+    expect(r2.data.action_changes.overwritten).toEqual(["equipment.convert"]);
+    expect(r2.data.action_changes.removed).toEqual(["equipment.scrap"]);
+    // 同名同内容写回不算 overwritten
+    const seed = structuredClone((await s.getPublished(TEST)).config.object_types.equipment.actions!.transfer);
+    await s.applyOp({ op: "set_action", object: "equipment", name: "transfer", def: seed }, TEST);
+    const r3 = await get("ontology", undefined, TEST);
+    expect(r3.data.action_changes.overwritten).not.toContain("equipment.transfer");
+  });
 });
 
 describe("裁决走真路由：草稿变更 + 留痕一体", () => {

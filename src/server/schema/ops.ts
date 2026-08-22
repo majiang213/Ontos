@@ -2,7 +2,7 @@
 // MCP 侧抽掉 save_layout（摆位是界面状态，Agent 不写）。
 
 import { z } from "zod";
-import { objectTypeSchema } from "./config";
+import { actionSchema, objectTypeSchema } from "./config";
 
 /** 草稿路径的类体剥掉 actions / axioms：动作只走 set_action，公理本期没有写入 op。
  *  Zod 默认丢弃多余键——带进来不报错，但也不落地。派生字段（derived）保留（允许经导入进入新类）。 */
@@ -56,6 +56,9 @@ const updateLinkOp = z.object({
 const importObjectsOp = z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) });
 // 整份替换一个未锁定的类（def 是单个类体，不是整张 map）：锁定规则见 configStore.replaceBlockers
 const replaceObjectOp = z.object({ op: z.literal("replace_object"), name: z.string(), def: draftObjectSchema });
+// 动作写入（人和 Agent 同权）：def 过 actionSchema（附录 B 那份），与种子配置、conversionAction 同形；单条 upsert
+const setActionOp = z.object({ op: z.literal("set_action"), object: z.string(), name: z.string(), def: actionSchema });
+const removeActionOp = z.object({ op: z.literal("remove_action"), object: z.string(), name: z.string() });
 
 export const draftOpSchema = z.discriminatedUnion("op", [
   createObjectOp,
@@ -71,6 +74,8 @@ export const draftOpSchema = z.discriminatedUnion("op", [
   updateLinkOp,
   importObjectsOp,
   replaceObjectOp,
+  setActionOp,
+  removeActionOp,
 ]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
 
@@ -88,6 +93,8 @@ export const mcpDraftOpSchema = z.discriminatedUnion("op", [
   updateLinkOp,
   importObjectsOp,
   replaceObjectOp,
+  setActionOp,
+  removeActionOp,
 ]);
 
 /** apply_draft 返回的 names：类名、关系名或「类名.动作名」（不收字段名）。画布 toast/发布条不读它，读 GET 的 action_changes。 */
@@ -105,6 +112,9 @@ export function affectedNames(op: DraftOpInput): string[] {
     case "set_identity":
     case "update_property":
       return [op.object]; // 这里的 object 是类名
+    case "set_action":
+    case "remove_action":
+      return [`${op.object}.${op.name}`]; // 类名.动作名
     case "create_link":
     case "delete_link":
       return [op.name];

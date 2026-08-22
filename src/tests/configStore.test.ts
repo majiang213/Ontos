@@ -2,6 +2,7 @@
 // 每个用例在独立临时目录里跑：复制种子配置进去，元库（共享 SQLite）从无到有，不污染仓库。
 // B 方案：版本链在 onto_version 表里，不再落版本文件——断言直接查库。
 
+import { dump } from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, restartRuntime, setupRuntime } from "./helpers";
 import { Verdict } from "../server/engine/verdict";
@@ -437,5 +438,127 @@ describe("整份替换（replace_object）与 base_rev", () => {
     // base_rev 对上了又能写（队列没被拒绝拖死）
     await s.applyOp({ op: "add_property", object: "vendor", name: "v3", type: "string" }, WS, { base_rev: s.getRev(WS) });
     expect((await s.getDraft(WS)).draft.object_types.vendor.properties.v3).toBeDefined();
+  });
+});
+
+describe("动作写入（set_action / remove_action）与动作形状四查", () => {
+  const renameDef = { description: "改名", effect: [{ update: { object: "vendor", identity: { from: "identity" }, properties: { vendor_no: { from: "request" } } } }] };
+
+  it("set_action 新增/同名覆盖；remove_action 删除；删最后一个动作后 actions 键消失", async () => {
+    const s = await freshStore();
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.applyOp({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    // 新增
+    await s.applyOp({ op: "set_action", object: "vendor", name: "rename", def: renameDef }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.vendor.actions!.rename.description).toBe("改名");
+    // 同名覆盖（与画布编辑同权）
+    await s.applyOp({ op: "set_action", object: "vendor", name: "rename", def: { ...renameDef, description: "改名单" } }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.vendor.actions!.rename.description).toBe("改名单");
+    // 删除
+    await s.applyOp({ op: "remove_action", object: "vendor", name: "rename" }, WS);
+    const t = (await s.getDraft(WS)).draft.object_types.vendor;
+    expect("actions" in t).toBe(false); // 空 map 不留：sameConfig 才能收回 dirty
+    // 再删一次 → 动作不存在
+    await expect(s.applyOp({ op: "remove_action", object: "vendor", name: "rename" }, WS)).rejects.toThrow("动作不存在");
+    // set_action 到不存在的类 → 类不存在
+    await expect(s.applyOp({ op: "set_action", object: "ghost", name: "a", def: renameDef }, WS)).rejects.toThrow("类不存在");
+  });
+
+  it("对已发布类 set_action 再 remove_action 还原后 dirty 收回", async () => {
+    const s = await freshStore();
+    await s.applyOp({ op: "set_action", object: "equipment", name: "temp_act", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "request" } } } }] } }, WS);
+    expect((await s.getDraft(WS)).dirty).toBe(true);
+    await s.applyOp({ op: "remove_action", object: "equipment", name: "temp_act" }, WS);
+    expect((await s.getDraft(WS)).dirty).toBe(false); // 改出去又改回来，dirty 收得回
+  });
+
+  it("效应 link 指向不存在或非转化关系：整步回退", async () => {
+    const s = await freshStore();
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ link: "ghost_link" }] } }, WS)
+    ).rejects.toThrow(/不存在的转化关系/);
+    // match 关系不是转化关系，同样拦
+    await s.applyOp({ op: "create_link", name: "eq_self", from: "equipment", to: "equipment", match: { from: "serial_no", to: "serial_no" } }, WS);
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ link: "eq_self" }] } }, WS)
+    ).rejects.toThrow(/不存在的转化关系/);
+    expect((await s.getDraft(WS)).draft.object_types.equipment.actions!.bad).toBeUndefined();
+  });
+
+  it("删掉转化关系的唯一引用动作被拦，message 带逃生指引；先写替代动作就能删", async () => {
+    const s = await freshStore();
+    await expect(s.applyOp({ op: "remove_action", object: "equipment", name: "convert" }, WS)).rejects.toThrow(/先写一条同样 link 该转化关系的替代动作，再删旧的/);
+    // 逃生路径：先 set_action 一条同样 link converted 的替代动作，再删 convert
+    await s.applyOp({ op: "set_action", object: "equipment", name: "convert_v2", def: { description: "替代", pre: { status: "in_transit" }, effect: [{ link: "converted" }] } }, WS);
+    await s.applyOp({ op: "remove_action", object: "equipment", name: "convert" }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.equipment.actions!.convert).toBeUndefined();
+    expect((await s.getDraft(WS)).draft.object_types.equipment.actions!.convert_v2).toBeDefined();
+  });
+
+  it("认人必须写明：update/delete 缺 identity 与 filter 被拒；非法取值来源被拒", async () => {
+    const s = await freshStore();
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", properties: { dept: "x" } } }] } }, WS)
+    ).rejects.toThrow(/缺 identity 或 filter/);
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ delete: { object: "equipment" } }] } }, WS)
+    ).rejects.toThrow(/缺 identity 或 filter/);
+    // from: generated 不许用在 update（只许 create 且目标属性带 generate）
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "generated" } } } }] } }, WS)
+    ).rejects.toThrow(/from: generated/);
+    // create 没有 current 上下文
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ create: { object: "warranty_card", properties: { serial_no: { from: "current" } } } }] } }, WS)
+    ).rejects.toThrow(/current/);
+    // 不认识的取值来源
+    await expect(
+      s.applyOp({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "yesterday" } } } }] } }, WS)
+    ).rejects.toThrow(/取值来源不认识/);
+  });
+
+  it("set_action 之后再 replace_object 被「含动作」锁拒", async () => {
+    const s = await freshStore();
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.applyOp({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    await s.applyOp({ op: "set_action", object: "vendor", name: "rename", def: renameDef }, WS);
+    await expect(s.applyOp({ op: "replace_object", name: "vendor", def: { kind: "thing", properties: {} } }, WS)).rejects.toThrow(/含动作/);
+  });
+
+  it("先阶段后合并的多跳裁决不炸：转化动作随被吸收类的转化关系一起消亡（不复制）", async () => {
+    const s = await freshStore();
+    const { adjudicate } = await import("../server/engine/adjudicate");
+    await s.applyOp({
+      op: "import_objects",
+      objects: {
+        eq_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", fields: { sn: "sn" } } } },
+        eq_b: { kind: "thing", identity: "serial_no", properties: { serial_no: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", fields: { serial_no: "serial_no" } } } },
+        main: { kind: "thing", identity: "sn2", properties: { sn2: { type: "string" } }, sources: { sc: { connection: "asset_sys", table: "asset", fields: { sn2: "sn" } } } },
+      },
+    }, WS);
+    // 先「阶段」：eq_b 并进 eq_a，产出转化关系 eq_a_to_在役 + 转化动作 convert_to_在役
+    await adjudicate({ class_a: "eq_a", class_b: "eq_b" }, Verdict.Stage, { from: "在途", to: "在役" }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.eq_a.actions!.convert_to_在役).toBeDefined();
+    // 再「同一」：eq_a 并进 main——convert_to_在役 引用将随 eq_a 消亡的转化关系，必须跳过不复制
+    await adjudicate({ class_a: "main", class_b: "eq_a" }, Verdict.Same, undefined, WS);
+    const d = (await s.getDraft(WS)).draft;
+    expect(d.object_types.eq_a).toBeUndefined();
+    expect(d.link_types.eq_a_to_在役).toBeUndefined();
+    expect(d.object_types.main.actions?.convert_to_在役).toBeUndefined(); // 没跟过来：跟过来会被校验①整步回退
+    expect(d.object_types.main.properties.status).toBeDefined(); // 派生阶段正常并入
+  });
+
+  it("历史已发布配置违反动作形状校验也能加载（loadPublished 不查）；但草稿写入会拦", async () => {
+    const s = await freshStore();
+    // 手工塞一个 v2：转化关系 orphan_tr 没有任何动作引用（② 违例）
+    const bad = structuredClone((await s.getPublished(WS)).config);
+    bad.link_types.orphan_tr = { from: "equipment", to: "equipment", transition: { property: "status", from: "in_transit", to: "in_service" } };
+    await (await meta()).insertVersion(WS, 2, dump(bad, { lineWidth: 120, noRefs: true }), "publish");
+    await restartRuntime(tmp);
+    const p = await s.getPublished(WS); // 加载放行：validateSemantics 跑、validateActionShapes 不跑
+    expect(p.version).toBe(2);
+    expect(p.config.link_types.orphan_tr).toBeDefined();
+    // 但草稿路径被拦：任何一步写入都会因孤儿转化关系整步回退（再回滚到合法版本才恢复）
+    await expect(s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS)).rejects.toThrow(/orphan_tr/);
   });
 });

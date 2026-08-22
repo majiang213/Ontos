@@ -3,6 +3,7 @@
 // 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
 
 import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../schema/config";
+import { resolveLink, walkFilter } from "../schema/filterWalk";
 import { dropClass, mutateDraft } from "./configStore";
 import { Verdict } from "./verdict";
 
@@ -56,16 +57,47 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
       }
     }
   }
-  // B 的动作与公理带过来（同名跳过）
+  // B 的动作与公理带过来（同名跳过；引用了将随 B 消亡的关系的动作跳过——先阶段后合并的多跳裁决下，
+  // B 的 convert_to_* 随 B 的转化关系一起消亡，跟过去会被 validateActionShapes ① 整步回退，人的裁决关卡无解）
   if (B.actions) {
     A.actions = A.actions ?? {};
-    for (const [name, act] of Object.entries(B.actions)) if (!A.actions[name]) A.actions[name] = act;
+    for (const [name, act] of Object.entries(B.actions)) {
+      if (A.actions[name]) continue;
+      if (actionRefsDyingLink(d, b, act, b)) continue;
+      A.actions[name] = act;
+    }
   }
   if (B.axioms) {
     A.axioms = A.axioms ?? {};
     for (const [name, ax] of Object.entries(B.axioms)) if (!A.axioms[name]) A.axioms[name] = ax;
   }
   dropClass(d, b);
+}
+
+/** 动作是否引用了将随 dying 类消亡的关系（pre / 效应 filter 的 $link、效应 link 项）：
+ *  dropClass 撤掉 from/to 含 dying 的全部关系；引用已不存在的关系同样视为消亡（跟着过去必炸校验）。 */
+function actionRefsDyingLink(d: OntologyConfig, owner: string, act: ActionDef, dying: string): boolean {
+  let hit = false;
+  const collect = (clsName: string, f: Record<string, unknown> | undefined) => {
+    if (!f || hit) return;
+    walkFilter(d, clsName, f, {
+      link: (cls, ln) => {
+        const r = resolveLink(d, cls, ln);
+        if (!r || r.link.from === dying || r.link.to === dying) hit = true;
+      },
+    });
+  };
+  collect(owner, act.pre as Record<string, unknown> | undefined);
+  for (const item of act.effect ?? []) {
+    if ("link" in item) {
+      const l = d.link_types[item.link];
+      if (!l || l.from === dying || l.to === dying) return true;
+      continue;
+    }
+    const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
+    if (op?.filter) collect(op.object, op.filter as Record<string, unknown>);
+  }
+  return hit;
 }
 
 export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b: string }, verdict: Verdict, stageNames?: { from: string; to: string }): void {

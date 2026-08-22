@@ -8,7 +8,7 @@ import { draftObjectSchema, type DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
 import { linkRefs, referencesOf } from "./refs";
 import { runtime } from "../runtime";
-import { validateSemantics } from "./validate";
+import { validateActionShapes, validateSemantics } from "./validate";
 import { DEFAULT_WS, seedYamlFor } from "./workspace";
 
 /* ---------- 已发布 ---------- */
@@ -240,12 +240,29 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
       d.object_types[input.name] = input.def; // Zod 已在 schema 层 parse（并剥掉 actions/axioms）
       break;
     }
+    case "set_action": {
+      // 单条 upsert：同名覆盖、不同名新增。def 已在 schema 层过 actionSchema；形状四查在 validateActionShapes
+      const t = d.object_types[input.object];
+      if (!t) throw new DraftReject(`类不存在：${input.object}，新建类请先 import_objects`);
+      t.actions ??= {};
+      t.actions[input.name] = input.def;
+      break;
+    }
+    case "remove_action": {
+      const t = mustType(d, input.object);
+      if (!t.actions?.[input.name]) throw new DraftReject(`动作不存在：${input.name}`);
+      delete t.actions[input.name];
+      if (Object.keys(t.actions).length === 0) delete t.actions; // 空 map 会让 sameConfig 的 dirty 收不回来，删干净
+      break;
+    }
     default:
       throw new DraftReject(`未知操作：${JSON.stringify(input)}`);
   }
   // 每步操作后立即语义校验，不合法整体回退——坏草稿（如 fields 指向不存在属性的导入）不能攒到发布一刻才炸
   try {
-    validateSemantics(configSchema.parse(structuredClone(state.draft)));
+    const parsed = configSchema.parse(structuredClone(state.draft));
+    validateSemantics(parsed);
+    validateActionShapes(parsed); // 动作形状四查只走草稿写入/发布路径；loadPublished/rollbackTo 不查（历史坏配置加载放行）
   } catch (e) {
     state.draft = backup;
     throw new DraftReject(e instanceof Error ? e.message : String(e));
@@ -286,6 +303,7 @@ export async function mutateDraft(fn: (draft: OntologyConfig) => void, ws: strin
     fn(state.draft);
     const parsed = configSchema.parse(structuredClone(state.draft));
     validateSemantics(parsed);
+    validateActionShapes(parsed); // 与 applyOp 同闸：裁决产物也得过动作形状四查
   } catch (e) {
     state.draft = backup; // 回退
     throw new DraftReject(e instanceof Error ? e.message : String(e));
@@ -315,6 +333,7 @@ export async function publishDraft(ws: string = DEFAULT_WS): Promise<{ version: 
   const config = configSchema.parse(structuredClone(state.draft)); // 结构校验
   try {
     validateSemantics(config); // 语义校验
+    validateActionShapes(config); // 动作形状四查（效应 link/转化成对/取值来源/认人写明）
   } catch (e) {
     throw new DraftReject(e instanceof Error ? e.message : String(e)); // 归一到类型，路由不用嗅探文案
   }
