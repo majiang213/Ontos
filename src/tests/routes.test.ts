@@ -24,6 +24,12 @@ async function post(path: string, body?: string, headers?: Record<string, string
   return { status: res.status, data: await res.json() };
 }
 
+async function get(path: string, headers?: Record<string, string>, ws?: string) {
+  const mod = await import(`../app/api/${path}/route`);
+  const res = await mod.GET(new Request(`http://x/api/${path}${ws ? `?ws=${ws}` : ""}`, { headers }) as never);
+  return { status: res.status, headers: res.headers, data: res.status === 304 ? null : await res.json() };
+}
+
 const TEST = "test";
 
 describe("写端点令牌闸（ONTOS_TOKEN）", () => {
@@ -85,6 +91,29 @@ describe("错误分层：400 / 422 / 500", () => {
     const r = await post("connections", JSON.stringify({ name: "rel_db", type: "sqlite", db_name: "rel_demo.db", test: false }));
     expect(r.status).toBe(200);
     expect(r.data.saved).toBe(true);
+  });
+});
+
+describe("GET /api/ontology：rev + ETag 监视器口径", () => {
+  it("200 带 rev/ETag/no-store；If-None-Match 命中回 304（也带 no-store）；内容变后旧 ETag 失效", async () => {
+    const s = await import("../server/engine/configStore");
+    const r1 = await get("ontology", undefined, TEST);
+    expect(r1.status).toBe(200);
+    expect(r1.data.rev).toBe(s.getRev(TEST));
+    const etag = r1.headers.get("etag");
+    expect(etag).toBe(`"test-${s.getRev(TEST)}"`);
+    expect(r1.headers.get("cache-control")).toBe("no-store");
+    // 命中：304 空体，同样带 no-store 与同一 ETag
+    const r2 = await get("ontology", { "if-none-match": etag! }, TEST);
+    expect(r2.status).toBe(304);
+    expect(r2.headers.get("cache-control")).toBe("no-store");
+    expect(r2.headers.get("etag")).toBe(etag);
+    // 写一步之后 rev +1，旧 ETag 不再命中
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, TEST);
+    const r3 = await get("ontology", { "if-none-match": etag! }, TEST);
+    expect(r3.status).toBe(200);
+    expect(r3.data.rev).toBe(s.getRev(TEST));
+    expect(r3.data.object_types.vendor).toBeDefined();
   });
 });
 

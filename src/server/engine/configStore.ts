@@ -22,17 +22,34 @@ export interface DraftState {
 
 export interface Store {
   published?: { config: OntologyConfig; version: number };
-  draft?: DraftState;
+  draft?: DraftState; // DraftState 不加 rev：discard 会清空、rollback 会整份换 draft 对象，rev 挂 Store 上才能只加不回零
+  rev: number; // 进程内单调，只加不回零；新建 Store 为 0。画布监视器与 MCP base_rev 都读它
 }
 // 每个工作空间一份内存态（已发布快照 + 工作副本），互不串；挂运行态（runtime.ts）
 function storeOf(ws: string): Store {
   const stores = (runtime().stores ??= new Map());
   let s = stores.get(ws);
   if (!s) {
-    s = {};
+    s = { rev: 0 };
     stores.set(ws, s);
   }
   return s;
+}
+
+/** 草稿修订号：内容每变一次 +1（含发布/放弃/回滚），只加不回零；save_layout 不算。GET /api/ontology、list_classes space=draft、apply_draft 与 base_rev 比较一律读它。 */
+export function getRev(ws: string = DEFAULT_WS): number {
+  return storeOf(ws).rev;
+}
+
+/* 每工作空间一条写队列：applyOp 校验之后有 await（摆位/取已发布），两个请求在 await 处交错时备份回退会对错对象。
+   失败也续链（prev.then(task, task)）：前一次 DraftReject 不拖死后续写入。全仓只有这一层队列——MCP / REST 不许再套。 */
+const tails = new Map<string, Promise<void>>();
+
+function enqueue<T>(ws: string, task: () => Promise<T>): Promise<T> {
+  const prev = tails.get(ws) ?? Promise.resolve();
+  const run = prev.then(task, task); // 前一次拒绝也跑这一次
+  tails.set(ws, run.then(() => undefined, () => undefined)); // 只续链，吞掉结果；拒绝仍传给调用方
+  return run;
 }
 
 async function loadPublished(ws: string): Promise<{ config: OntologyConfig; version: number }> {
@@ -63,6 +80,7 @@ export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
 export class DraftReject extends Error {} // 操作不合法：名字重了、对象不存在等
 
 export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<DraftState> {
+  return enqueue(ws, async () => {
   const state = await getDraft(ws);
   const backup = structuredClone(state.draft);
   const d = state.draft;
@@ -200,6 +218,8 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<
     state.draft = backup;
     throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
+  // rev += 1 必须在内容写进 Store 之后、下一个 await 之前——晚一拍，监视器带旧 ETag 会 304，把已改的草稿当成没变
+  storeOf(ws).rev += 1;
   // 校验过了再动摆位：被删对象的摆位随内容一起清（校验失败回退时摆位不丢）
   if (input.op === "delete_object" && state.layout[input.name]) {
     delete state.layout[input.name];
@@ -208,6 +228,7 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<
   // 每次操作后按结构重算：改出去又改回来，dirty 要能收回来
   state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
   return state;
+  });
 }
 
 function mustType(d: OntologyConfig, name: string) {
@@ -226,6 +247,7 @@ export function dropClass(d: OntologyConfig, name: string): void {
 
 /** 直接改草稿（裁决应用等成组改动走这里）：改完立即校验，不合法就回退并抛 DraftReject——不让坏草稿攒到发布一刻才炸。 */
 export async function mutateDraft(fn: (draft: OntologyConfig) => void, ws: string = DEFAULT_WS): Promise<DraftState> {
+  return enqueue(ws, async () => {
   const state = await getDraft(ws);
   const backup = structuredClone(state.draft);
   try {
@@ -236,6 +258,8 @@ export async function mutateDraft(fn: (draft: OntologyConfig) => void, ws: strin
     state.draft = backup; // 回退
     throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
+  // rev += 1 必须在内容写进 Store 之后、下一个 await 之前（与 applyOp 同约定）
+  storeOf(ws).rev += 1;
   // 被撤的类顺手清摆位（裁决的 dropClass 不走 delete_object），摆位表不留死键
   let layoutChanged = false;
   for (const name of Object.keys(state.layout)) {
@@ -247,11 +271,13 @@ export async function mutateDraft(fn: (draft: OntologyConfig) => void, ws: strin
   if (layoutChanged) await metaStore().setLayout(ws, state.layout);
   state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
   return state;
+  });
 }
 
 /* ---------- 发布与放弃 ---------- */
 
 export async function publishDraft(ws: string = DEFAULT_WS): Promise<{ version: number }> {
+  return enqueue(ws, async () => {
   const state = await getDraft(ws);
   if (!state.dirty) return { version: state.baseVersion }; // 无改动不产空版本
   const config = configSchema.parse(structuredClone(state.draft)); // 结构校验
@@ -265,17 +291,24 @@ export async function publishDraft(ws: string = DEFAULT_WS): Promise<{ version: 
   storeOf(ws).published = { config, version }; // 换掉已发布快照：引擎下一次 getPublished 即读新版
   state.baseVersion = version;
   state.dirty = false;
+  // rev += 1：store 写完、下一个 await（fillDecisionVersions）之前——给监视器与 base_rev 留的窗口在这里收掉
+  storeOf(ws).rev += 1;
   await fillDecisionVersions(version, ws); // 裁决留痕的生效版本随发布回填
   return { version };
+  });
 }
 
 export async function discardDraft(ws: string = DEFAULT_WS): Promise<void> {
+  return enqueue(ws, async () => {
   storeOf(ws).draft = undefined; // 回到已发布快照；摆位在库里，不随草稿丢
+  // rev += 1 必须在内容写进 Store 之后、下一个 await 之前（放弃也是内容变化：监视器要靠它刷回已发布）
+  storeOf(ws).rev += 1;
   try {
     await metaStore().abandonPendingDecisions(ws); // 草稿里裁过又没发布的留痕标记「已放弃」，不挂到无关的下一次发布上
   } catch {
     // 留痕是附属，不挡放弃
   }
+  });
 }
 
 /* ---------- 版本历史与回滚 ---------- */
@@ -286,6 +319,7 @@ export function listVersions(ws: string = DEFAULT_WS): Promise<{ version: number
 
 /** 回滚 = Git revert 语义：把旧版本内容作为新版本插入，历史链不断。草稿有未发布改动时拒绝，先发布或放弃。 */
 export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Promise<{ version: number }> {
+  return enqueue(ws, async () => {
   if ((await getDraft(ws)).dirty) throw new DraftReject("有未发布的改动，先发布或放弃再回滚");
   const yaml = await metaStore().versionYaml(ws, version);
   if (yaml === undefined) throw new DraftReject(`版本不存在：v${version}`);
@@ -298,10 +332,14 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
   }
   const newVersion = (await metaStore().latestVersion(ws, seedYamlFor(ws))).version + 1;
   await metaStore().insertVersion(ws, newVersion, dump(config, { lineWidth: 120, noRefs: true }), "rollback", version);
+  const layout = await metaStore().getLayout(ws); // 先取摆位：store 写入要成片完成，中途不夹 await
   storeOf(ws).published = { config, version: newVersion };
-  storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout: await metaStore().getLayout(ws) };
+  storeOf(ws).draft = { draft: structuredClone(config), baseVersion: newVersion, dirty: false, layout };
+  // rev += 1 必须在内容写进 Store 之后、下一个 await 之前（干净草稿 rev=0 时回滚也要 +1，监视器按相等比较）
+  storeOf(ws).rev += 1;
   await fillDecisionVersions(newVersion, ws); // 回滚也是一次发布：未绑版本的裁决挂到它
   return { version: newVersion };
+  });
 }
 
 /** 发布成功后回填：把还没绑版本的裁决留痕挂上这个版本。回填失败不影响发布。 */

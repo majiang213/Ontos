@@ -130,4 +130,48 @@ describe("MCP 工具端点", () => {
     expect((await call("query", { query: { object: "ghost" } })).error?.code).toBe(-32000);
     expect((await rpc("tools/list", undefined, "not json")).error?.code).toBe(-32700);
   });
+
+  it("发现工具说明点明已发布/草稿；space 非法值 -32602；query/run_action/propose_ontology 不接受 space", async () => {
+    const list = await rpc("tools/list");
+    const descOf = (n: string) => list.result.tools.find((t: { name: string }) => t.name === n).description as string;
+    for (const n of ["list_classes", "read_class", "search", "propose_action"]) {
+      expect(descOf(n)).toMatch(/已发布|草稿/); // 钉死：说明必须点明两个世界，防回归成「全部的类」
+    }
+    expect((await call("list_classes", { space: "Draft" })).error?.code).toBe(-32602);
+    expect((await call("search", { text: "设备", space: "working" })).error?.code).toBe(-32602);
+    expect((await call("query", { query: { object: "equipment" }, space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("run_action", { action: "convert", object: "equipment", identity: "SN-40217", space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("propose_ontology", { tables: [{ connection: "device_sys", table: "department" }], space: "draft" })).error?.code).toBe(-32602);
+  });
+
+  it("space=draft 看见未发布类（带状态与 rev）；缺省看不见；query/propose_action 不受草稿影响", async () => {
+    const s = await import("../server/engine/configStore");
+    await s.applyOp({ op: "create_object", name: "vendor", description: "供应商", kind: "thing" }, "test");
+    // 缺省已发布：看不见 vendor
+    const pub = await call("list_classes", {});
+    expect(pub.result.structuredContent.classes.map((c: { name: string }) => c.name)).not.toContain("vendor");
+    // 草稿：看得见，带 state / dirty / rev / base_version
+    const d = await call("list_classes", { space: "draft" });
+    const sc = d.result.structuredContent;
+    expect(sc.space).toBe("draft");
+    expect(sc.dirty).toBe(true);
+    expect(sc.rev).toBe(s.getRev("test"));
+    expect(sc.base_version).toBe(1);
+    expect(sc.classes.find((c: { name: string }) => c.name === "vendor").state).toBe("new");
+    expect(sc.classes.find((c: { name: string }) => c.name === "equipment").state).toBe("same");
+    // read_class 草稿视图带来源对照；已发布视图不带
+    const rd = await call("read_class", { name: "equipment", space: "draft" });
+    expect(rd.result.structuredContent.state).toBe("same");
+    expect(rd.result.structuredContent.sources.length).toBeGreaterThan(0);
+    expect(rd.result.structuredContent.sources[0].connection).toBeDefined();
+    expect((await call("read_class", { name: "equipment" })).result.structuredContent.sources).toBeUndefined();
+    // search 草稿里能搜到新类；缺省搜不到
+    expect((await call("search", { text: "供应商", space: "draft" })).result.structuredContent.classes).toContain("vendor");
+    expect((await call("search", { text: "供应商" })).result.structuredContent.classes).not.toContain("vendor");
+    // query 仍只读已发布：未发布类查不到
+    expect((await call("query", { query: { object: "vendor" } })).error?.code).toBe(-32000);
+    // propose_action 缺省在已发布里找（草稿新类找不到）；space=draft 找得到
+    expect((await call("propose_action", { object: "vendor" })).error?.code).toBe(-32000);
+    expect((await call("propose_action", { object: "vendor", space: "draft" })).result.structuredContent.action).toBeDefined();
+  });
 });

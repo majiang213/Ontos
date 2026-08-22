@@ -136,6 +136,37 @@ describe("配置存储（工作副本与发布）", () => {
     expect(state.draft.object_types.vendor).toBeUndefined();
   });
 
+  it("rev：内容变更 +1；摆位不加；放弃后变且不为 0；干净草稿上回滚也 +1", async () => {
+    const s = await freshStore();
+    expect(s.getRev(WS)).toBe(0);
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    expect(s.getRev(WS)).toBe(1);
+    await s.applyOp({ op: "save_layout", positions: { vendor: { x: 1, y: 2 } } }, WS);
+    expect(s.getRev(WS)).toBe(1); // 摆位不算本体改动，不催监视器
+    const before = s.getRev(WS);
+    await s.discardDraft(WS);
+    expect(s.getRev(WS)).toBe(before + 1); // 放弃也 +1：草稿内容变了（且永远不归零）
+    expect(s.getRev(WS)).not.toBe(0);
+    // 干净草稿（rev 可能为正）上回滚也 +1——监视器按相等比较，少了这拍另一标签页会漏刷新
+    await s.rollbackTo(1, WS);
+    expect(s.getRev(WS)).toBe(before + 2);
+  });
+
+  it("rev=0 的干净草稿上 rollbackTo 仍 +1", async () => {
+    const s = await freshStore();
+    expect(s.getRev(WS)).toBe(0);
+    expect((await s.getDraft(WS)).dirty).toBe(false);
+    await s.rollbackTo(1, WS);
+    expect(s.getRev(WS)).toBe(1);
+  });
+
+  it("写队列失败续链：前一次 DraftReject 之后，后续写入仍成功", async () => {
+    const s = await freshStore();
+    await expect(s.applyOp({ op: "create_object", name: "equipment", kind: "thing" }, WS)).rejects.toThrow("类已存在");
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS); // 不能被上一次拒绝拖死
+    expect((await s.getDraft(WS)).draft.object_types.vendor).toBeDefined();
+  });
+
   it("编辑操作守卫：删识别字段被拒；派生属性不能当识别字段；摆位不置 dirty", async () => {
     const s = await freshStore();
     await expect(s.applyOp({ op: "remove_property", object: "equipment", name: "serial_no" }, WS)).rejects.toThrow("认出同一对象靠的字段");

@@ -1,8 +1,21 @@
 // 配置三视图 —— Agent 编请求前按需读取，不读整份配置（《ontos-article.md》§5.3）。
 // 列出类 / 读取一个类 / 检索。description 供阅读；填进 JSON 的是 name。
+// 已发布视图不返回 sources/pk（问数 Agent 不绑表）；草稿视图（space=draft）带状态与来源对照，供改画布。
 
 import type { OntologyConfig } from "../schema/config";
+import { sameConfig } from "./configStore";
 import { EngineReject } from "./individual";
+
+/** 类相对已发布快照的状态（与 GET /api/ontology 的 states 同一算法）。 */
+export type ClassState = "new" | "modified" | "same";
+
+/** 草稿/已发布对照算状态：已发布没有 → new；结构不同 → modified；否则 same。 */
+export function classState(draft: OntologyConfig, published: OntologyConfig, name: string): ClassState {
+  const pub = published.object_types[name];
+  const t = draft.object_types[name];
+  if (!t) throw new EngineReject(`配置中没有类：${name}`);
+  return !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
+}
 
 export interface ClassListItem {
   name: string;
@@ -69,5 +82,33 @@ export function search(config: OntologyConfig, text: string): { classes: string[
     relations: Object.entries(config.link_types)
       .filter(([name, l]) => hit(name) || hit(l.description) || hit(l.inverse))
       .map(([name]) => name),
+  };
+}
+
+/* ---------- 草稿视图（space=draft）：给改画布的 Agent 看，带状态与来源对照 ---------- */
+
+export interface DraftClassListItem extends ClassListItem {
+  state: ClassState;
+}
+
+/** 草稿版「列出类」：每个类带相对已发布的状态。 */
+export function listClassesDraft(draft: OntologyConfig, published: OntologyConfig): DraftClassListItem[] {
+  return Object.entries(draft.object_types).map(([name, t]) => ({ name, description: t.description, state: classState(draft, published, name) }));
+}
+
+export interface DraftClassView extends ClassView {
+  state: ClassState;
+  /** 来源对照（连接名/表名/主键/字段映射）：逐步改画布必须看见；不含连接密码。 */
+  sources: { name: string; connection: string; table: string; pk?: string; fields: Record<string, string> }[];
+}
+
+/** 草稿版「读取一个类」：在 ClassView 上补状态与来源对照。 */
+export function readClassDraft(draft: OntologyConfig, published: OntologyConfig, name: string): DraftClassView {
+  const base = readClass(draft, name);
+  const t = draft.object_types[name]; // readClass 已保证存在
+  return {
+    ...base,
+    state: classState(draft, published, name),
+    sources: Object.entries(t.sources ?? {}).map(([srcName, s]) => ({ name: srcName, connection: s.connection, table: s.table, pk: s.pk, fields: s.fields })),
   };
 }
