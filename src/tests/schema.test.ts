@@ -6,7 +6,7 @@ import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
-import { draftOpSchema } from "../server/schema/ops";
+import { draftOpSchema, mcpDraftOpSchema } from "../server/schema/ops";
 import { actionRequestSchema, queryRequestSchema } from "../server/schema/request";
 import { walkFilter } from "../server/schema/filterWalk";
 
@@ -37,7 +37,7 @@ describe("configSchema", () => {
 });
 
 describe("draftOpSchema", () => {
-  it("十二种操作各收一例", () => {
+  it("十三种操作各收一例", () => {
     const ops: unknown[] = [
       { op: "create_object", name: "vendor", kind: "thing" },
       { op: "delete_object", name: "vendor" },
@@ -51,12 +51,38 @@ describe("draftOpSchema", () => {
       { op: "delete_link", name: "supplies" },
       { op: "update_link", name: "supplies", new_name: "supplied_by", description: "供应关系" },
       { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } } },
+      { op: "replace_object", name: "vendor", def: { kind: "thing", properties: {} } },
     ];
     for (const op of ops) expect(draftOpSchema.parse(op)).toBeTruthy();
   });
   it("未知操作被拒；save_layout 的坐标必须是数值", () => {
     expect(() => draftOpSchema.parse({ op: "fly_to_moon" })).toThrow();
     expect(() => draftOpSchema.parse({ op: "save_layout", positions: { equipment: { x: "10", y: 20 } } })).toThrow();
+  });
+  it("replace_object：def 是单个类体；缺 def / 把 object 当类体都拒", () => {
+    expect(() => draftOpSchema.parse({ op: "replace_object", name: "vendor" })).toThrow();
+    expect(() => draftOpSchema.parse({ op: "replace_object", name: "vendor", object: { kind: "thing", properties: {} } })).toThrow();
+    expect(() => draftOpSchema.parse({ op: "replace_object", name: "vendor", def: { vendor: { kind: "thing", properties: {} } } })).toThrow(); // 整张 map 不是类体
+  });
+  it("replace_object 的类体剥掉 actions / axioms（不报错、也不进解析结果）", () => {
+    const op = draftOpSchema.parse({
+      op: "replace_object",
+      name: "vendor",
+      def: {
+        kind: "thing",
+        properties: {},
+        actions: { a: { effect: [{ delete: { object: "vendor", identity: { from: "identity" } } }] } },
+        axioms: { x: { type: "mutex", property: "p" } },
+      },
+    });
+    if (op.op !== "replace_object") throw new Error("unreachable");
+    expect("actions" in op.def).toBe(false);
+    expect("axioms" in op.def).toBe(false);
+    expect(op.def.kind).toBe("thing");
+  });
+  it("mcpDraftOpSchema 没有 save_layout；其余与 REST 同套", () => {
+    expect(() => mcpDraftOpSchema.parse({ op: "save_layout", positions: {} })).toThrow();
+    expect(mcpDraftOpSchema.parse({ op: "replace_object", name: "vendor", def: { kind: "thing", properties: {} } })).toBeTruthy();
   });
 });
 

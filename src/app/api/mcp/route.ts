@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import { actionRequestSchema, queryRequestSchema } from "@/server/schema/request";
+import { affectedNames, mcpDraftOpSchema } from "@/server/schema/ops";
 import { runQuery } from "@/server/engine/query";
 import { runAction } from "@/server/engine/action";
 import { EngineReject } from "@/server/engine/individual";
@@ -14,20 +15,77 @@ import { conversionAction } from "@/server/engine/adjudicate";
 import { getSlot } from "@/server/engine/llmSlot";
 import { listClasses, listClassesDraft, readClass, readClassDraft, search } from "@/server/engine/views";
 import { getDriverRegistry, resolveTableInfos } from "@/server/engine/load";
-import { getDraft, getPublished, getRev } from "@/server/engine/configStore";
+import { applyOp, DraftReject, getDraft, getPublished, getRev } from "@/server/engine/configStore";
 import type { OntologyConfig } from "@/server/schema/config";
 import { metaStore } from "@/server/meta/store";
 import { withActionLog, withQueryLog } from "@/server/engine/logging";
 import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
 
+const spaceEnum = { type: "string", enum: ["published", "draft"] } as const;
+/** apply_draft 的 inputSchema：op 联合由 mcpDraftOpSchema 生成（天然没有 save_layout），再并上必填的 base_rev。 */
+const applyDraftInputSchema = {
+  ...(z.toJSONSchema(mcpDraftOpSchema) as Record<string, unknown>),
+  properties: { base_rev: { type: "integer", minimum: 0, description: "先 list_classes space=draft 拿到的 rev" } },
+  required: ["base_rev"],
+};
+
 const TOOLS = [
-  { name: "query", description: "按已发布本体查业务数据（只读）。入参：{ query: 查询 JSON }。不接受 space。" },
-  { name: "run_action", description: "执行一条已发布动作。入参：{ action, object, identity, request? }。不接受 space。" },
-  { name: "propose_ontology", description: "对选中的表产对象建议（不落到画布）。入参：{ tables: [{ connection, table }] }。不接受 space。" },
-  { name: "propose_action", description: "对某个类产一条动作建议（不发布、不落到画布）。入参：{ object, space? }。space 缺省 published（已发布）；草稿里尚未发布的类请传 draft。" },
-  { name: "list_classes", description: "列出类的名字和说明。缺省看已发布；要看画布上还没发布的草稿，必须传 space: \"draft\"。入参：{ space? }。" },
-  { name: "read_class", description: "读一个类的字段、关系、动作。缺省已发布（不含来源表）。改画布请传 space: \"draft\"，会带上来源对照。入参：{ name, space? }。" },
-  { name: "search", description: "按文本找类名、关系名。缺省已发布；找草稿里的名字请传 space: \"draft\"。入参：{ text, space? }。" },
+  {
+    name: "query",
+    description: "按已发布本体查业务数据（只读）。入参：{ query: 查询 JSON }。不接受 space。",
+    inputSchema: { type: "object", properties: { query: { type: "object", description: "查询 JSON" } }, required: ["query"] },
+  },
+  {
+    name: "run_action",
+    description: "执行一条已发布动作。入参：{ action, object, identity, request? }。不接受 space。",
+    inputSchema: {
+      type: "object",
+      properties: { action: { type: "string" }, object: { type: "string" }, identity: { description: "识别字段的取值" }, request: { type: "object" } },
+      required: ["action", "object", "identity"],
+    },
+  },
+  {
+    name: "propose_ontology",
+    description: "对选中的表产对象建议（不落到画布）。入参：{ tables: [{ connection, table }] }。不接受 space。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tables: { type: "array", items: { type: "object", properties: { connection: { type: "string" }, table: { type: "string" } }, required: ["connection", "table"] } },
+      },
+      required: ["tables"],
+    },
+  },
+  {
+    name: "propose_action",
+    description: "对某个类产一条动作建议（不发布、不落到画布）。入参：{ object, space? }。space 缺省 published（已发布）；草稿里尚未发布的类请传 draft。",
+    inputSchema: { type: "object", properties: { object: { type: "string" }, space: spaceEnum }, required: ["object"] },
+  },
+  {
+    name: "list_classes",
+    description: "列出类的名字和说明。缺省看已发布；要看画布上还没发布的草稿，必须传 space: \"draft\"（返回里带 outlets——告知要发去的系统名列表）。入参：{ space? }。",
+    inputSchema: { type: "object", properties: { space: spaceEnum } },
+  },
+  {
+    name: "read_class",
+    description: "读一个类的字段、关系、动作。缺省已发布（不含来源表）。改画布请传 space: \"draft\"，会带上来源对照和能不能整份替换（replaceable）。入参：{ name, space? }。",
+    inputSchema: { type: "object", properties: { name: { type: "string" }, space: spaceEnum }, required: ["name"] },
+  },
+  {
+    name: "search",
+    description: "按文本找类名、关系名。缺省已发布；找草稿里的名字请传 space: \"draft\"。入参：{ text, space? }。",
+    inputSchema: { type: "object", properties: { text: { type: "string" }, space: spaceEnum }, required: ["text"] },
+  },
+  {
+    name: "list_tables",
+    description: "列出已连接库里的表和列（只读列定义，没有采样行，不保存连接）。入参：{ connection? }。不接受 space。",
+    inputSchema: { type: "object", properties: { connection: { type: "string" } } },
+  },
+  {
+    name: "apply_draft",
+    description:
+      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）。不能发布、放弃、裁决、回滚，也不能改节点位置。不接受 space。",
+    inputSchema: applyDraftInputSchema,
+  },
 ];
 
 const rpcOk = (id: unknown, result: unknown) => NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result });
@@ -44,6 +102,11 @@ const requestSchema = z.object({
   id: z.union([z.string(), z.number(), z.null()]).optional(),
   method: z.string(),
   params: z.record(z.string(), z.unknown()).optional(),
+});
+
+/** apply_draft 的信封：base_rev 必填数字（缺了、或 "12" 这种字符串都 -32602）；其余键原样留给 op 联合 parse。 */
+const applyDraftEnvelope = z.looseObject({
+  base_rev: z.number().int().nonnegative(),
 });
 
 /** 接受 space 的只有这四个发现类工具；其余工具 arguments 里出现 space 键即 -32602（不能假装查了草稿却返回已发布世界）。 */
@@ -141,6 +204,7 @@ export async function POST(req: Request) {
             rev: getRev(ws),
             base_version: state.baseVersion,
             classes: listClassesDraft(state.draft, published),
+            outlets: Object.keys(state.draft.outlets ?? {}), // 全局出站名（inform 的合法去向），只读——没有写入 op
           })
         );
       }
@@ -156,11 +220,41 @@ export async function POST(req: Request) {
       return rpcOk(id, toolResult(readClass((await getPublished(ws)).config, clsName)));
     }
     if (name === "search") return rpcOk(id, toolResult(search(await loadConfig(), String(args.text ?? ""))));
+    if (name === "list_tables") {
+      // 只读列定义（不下发采样行）；按连接 try/catch，一个连接失败不让整个工具变成信封错误
+      const conn = args.connection !== undefined ? String(args.connection) : undefined;
+      if (conn !== undefined && !driver.has(conn)) {
+        return rpcOk(id, toolResult({ sources: [{ connection: conn, tables: [], error: "没有这个连接" }] }));
+      }
+      const sources = [];
+      for (const connection of conn ? [conn] : driver.connectionNames()) {
+        try {
+          const tables = await driver.introspect(connection);
+          sources.push({
+            connection,
+            tables: tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type, pk: c.pk })) })),
+          });
+        } catch {
+          sources.push({ connection, tables: [], error: "连接失败或读取表结构失败" }); // 与 GET /api/introspect 同口径：驱动内部主机/路径不出网
+        }
+      }
+      return rpcOk(id, toolResult({ sources }));
+    }
+    if (name === "apply_draft") {
+      const denied = requireWriteAuth(req);
+      if (denied) return rpcErr(id, -32001, "未授权：写操作需要有效的令牌");
+      const { base_rev, ...rest } = applyDraftEnvelope.parse(args); // 先剥信封再 parse op（判别联合不收信封字段）
+      const op = mcpDraftOpSchema.parse(rest); // 无 save_layout；Zod 失败 -32602
+      // 不在路由里比 getRev、不再套一层队列：base_rev 的比较在 applyOp 的 enqueue task 开头
+      const next = await applyOp(op, ws, { base_rev });
+      return rpcOk(id, toolResult({ ok: true, dirty: next.dirty, rev: getRev(ws), base_version: next.baseVersion, op: op.op, names: affectedNames(op) }));
+    }
     return rpcErr(id, -32601, `未知工具：${name}`);
   } catch (e) {
     if (e instanceof ZodError) return rpcErr(id, -32602, "入参形状不合法");
     if (e instanceof BadRequest) return rpcErr(id, -32602, e.message);
     if (e instanceof EngineReject) return rpcErr(id, -32000, e.message);
+    if (e instanceof DraftReject) return rpcErr(id, -32000, e.message); // 与 EngineReject 同档（REST 侧是 422）
     return rpcErr(id, -32603, e instanceof Error ? e.message : String(e));
   }
 }

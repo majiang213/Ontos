@@ -3,8 +3,8 @@
 // 发布 = 校验 + 插入新版行（git revert 语义，历史链不断）。摆位存 onto_workspace.layout。
 
 import { dump, load } from "js-yaml";
-import { configSchema, objectTypeSchema, type OntologyConfig } from "../schema/config";
-import type { DraftOpInput as DraftOp } from "../schema/ops";
+import { configSchema, type OntologyConfig, type ObjectType } from "../schema/config";
+import { draftObjectSchema, type DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore } from "../meta/store";
 import { linkRefs, referencesOf } from "./refs";
 import { runtime } from "../runtime";
@@ -79,8 +79,30 @@ export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
 
 export class DraftReject extends Error {} // 操作不合法：名字重了、对象不存在等
 
-export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<DraftState> {
+/** 整份替换（replace_object）的锁定规则，与 read_class space=draft 的 replaceable/replace_blockers 共用——读路径和写路径不写两份文案。
+ *  命中一条即锁定。集合非空一律用 Object.keys 计数：actions: {} / axioms: {} 在 JS 里为真，LLM 草稿常带空 map，不能当真值误锁。 */
+export function replaceBlockers(existing: ObjectType, publishedHasClass: boolean): string[] {
+  const reasons: string[] = [];
+  if (publishedHasClass) reasons.push("已经发布过");
+  if (Object.values(existing.properties).some((p) => p.derived)) reasons.push("含派生字段");
+  if (Object.keys(existing.actions ?? {}).length > 0) reasons.push("含动作");
+  if (Object.keys(existing.axioms ?? {}).length > 0) reasons.push("含公理");
+  const sources = Object.values(existing.sources ?? {});
+  if (sources.length > 1) reasons.push("挂了多个来源");
+  if (sources.length >= 1) {
+    // 「未对照到表列的字段」只锁挂了来源的类：没挂来源的残缺生成（猜不到识别字段时不写 sources）正是整份替换要救的
+    const mapped = new Set(sources.flatMap((s) => Object.keys(s.fields)));
+    if (Object.entries(existing.properties).some(([p, def]) => !def.derived && !mapped.has(p))) reasons.push("含有未对照到表列的字段");
+  }
+  return reasons;
+}
+
+export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { base_rev?: number }): Promise<DraftState> {
   return enqueue(ws, async () => {
+  // base_rev 只在 MCP 信封出现（REST 画布不传，队列里后到的写入赢）；比较必须在同一个 task 开头——比在队列外会被并发吞掉
+  if (opts?.base_rev !== undefined && opts.base_rev !== getRev(ws)) {
+    throw new DraftReject(`草稿已变（rev=${getRev(ws)}），请重新读取再改`);
+  }
   const state = await getDraft(ws);
   const backup = structuredClone(state.draft);
   const d = state.draft;
@@ -203,9 +225,19 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<
       for (const [name, raw] of Object.entries(input.objects)) {
         if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new DraftReject(`类名必须是小写字母/数字/下划线，字母开头：${name}`);
         if (d.object_types[name]) throw new DraftReject(`类已存在：${name}`);
-        staged.push([name, objectTypeSchema.parse(raw)]); // 逐类过结构校验
+        staged.push([name, draftObjectSchema.parse(raw)]); // 逐类过结构校验；草稿路径剥掉 actions/axioms（动作只走 set_action）
       }
       for (const [name, obj] of staged) d.object_types[name] = obj;
+      break;
+    }
+    case "replace_object": {
+      // 整份替换未锁定的类：关系留在 link_types（不走 dropClass），摆位不动；替换后 match 断了由 validateSemantics 整步回退
+      const cur = d.object_types[input.name];
+      if (!cur) throw new DraftReject(`类不存在：${input.name}，新建请用 import_objects`);
+      const publishedHas = Boolean((await getPublished(ws)).config.object_types[input.name]);
+      const blockers = replaceBlockers(cur, publishedHas);
+      if (blockers.length) throw new DraftReject(`${input.name} 不能整对象替换：${blockers.join("；")}。请用增删字段等逐步操作`);
+      d.object_types[input.name] = input.def; // Zod 已在 schema 层 parse（并剥掉 actions/axioms）
       break;
     }
     default:
