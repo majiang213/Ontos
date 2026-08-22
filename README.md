@@ -61,9 +61,10 @@ src/
 │                           connections / workspaces、ontology / versions、
 │                           questions、mcp（外部 Agent 入口）
 ├── components/             CanvasPage（构建页）、
-│                           OntologyCanvas（画布）、PairCard（裁决面板）、
-│                           QuestionsCard、forms（连接/新建对象表单）、Bezel（卡面壳）、
-│                           layout.ts（dagre 自动分层布局）、wsClient（API 适配器）
+│                           OntologyCanvas（画布）、FloatingEdge / FloatingConnectionLine（浮动边与拖线）、
+│                           PairCard（裁决面板）、QuestionsCard（验收问题集卡）、
+│                           forms（连接/新建对象/字段/动作表单）、actionView（动作区纯函数）、
+│                           Bezel（卡面壳）、layout.ts（dagre 自动分层布局）、wsClient（API 适配器）
 ├── server/                 后端：引擎、校验、元库、运行态、种子配置
 │   ├── engine/             引擎：
 │   │                       driver（源驱动接口 + 方言）、fixture / sqlDriver（两种实现）、
@@ -71,7 +72,7 @@ src/
 │   │                       action（动作执行）、individual（个体组装、下推对齐、派生、过滤）、
 │   │                       filterOp（过滤运算符表：内存比较与下推 Condition）、
 │   │                       adjudicate（裁决落地 + 转化骨架）、pairs（裁决流水线：候选/交集率/定案）、
-│   │                       overlap / normalize（交集率与归一化）、
+│   │                       verdict（五关系类型枚举与倾向文案）、overlap / normalize（交集率与归一化）、
 │   │                       configStore（工作副本与已发布的唯一出入口）、
 │   │                       refs（删除前的引用扫描）、eligibility（候选对资格谓词）、
 │   │                       workspace（工作空间）、llmSlot（模型槽位 + 离线回退）、
@@ -102,26 +103,26 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码）、保存（先测连通再落库）、删除 | `forms.tsx:126`（仅 POST） |
-| `/api/introspect` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释） + 3 行脱敏采样，源表只读 | `CanvasPage.tsx:77`、`:390` |
+| `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码）、保存（先测连通再落库）、删除 | `forms.tsx`（仅 POST） |
+| `/api/introspect` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释） + 3 行脱敏采样，源表只读 | `CanvasPage.tsx`（两处） |
 
 ### 本体构建（画布页）
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/generate` POST | 逆向建模：选中的表 → 内省 → LLM 产草稿 → 对象以草稿态上画布 | `CanvasPage.tsx:153` |
+| `/api/generate` POST | 逆向建模：选中的表 → 内省 → LLM 产草稿 → 对象以草稿态上画布 | `CanvasPage.tsx` |
 | `/api/ontology` GET | 本体视图：画布读工作副本，`states` 标出新增/改过/一致；带 `rev` 与 `action_changes`（动作差集），支持 ETag/304——画布每 2 秒轮询它当监视器 | `CanvasPage.tsx` |
-| `/api/draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx:85` |
-| `/api/publish` POST/DELETE | 发布草稿（升版本、立即可查）/ 放弃草稿回退到已发布快照 | `CanvasPage.tsx:107` / `:120` |
-| `/api/versions` GET/POST | 版本历史列表 / 回滚到指定版（Git revert 语义） | `CanvasPage.tsx:242` / `:319` |
+| `/api/draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx` |
+| `/api/publish` POST/DELETE | 发布草稿（升版本、立即可查）/ 放弃草稿回退到已发布快照 | `CanvasPage.tsx` |
+| `/api/versions` GET/POST | 版本历史列表 / 把指定版覆盖到当前工作副本（不插入新版本） | `CanvasPage.tsx` |
 
 ### 跨源整合（裁决三步，画布上的卡片）
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/candidates` GET | 候选对：已上画布对象之间找跨源候选配对，附倾向与依据 | `CanvasPage.tsx:72` |
-| `/api/overlap` POST | 交集率：归一化后算两类识别字段的集合重合度，只读采样 | `PairCard.tsx:77` |
-| `/api/decisions` POST | 裁决：人对候选对定案（五种结论），写草稿 + 留痕（含证据快照） | `PairCard.tsx:20` |
+| `/api/candidates` GET | 候选对：已上画布对象之间找跨源候选配对，附倾向与依据 | `CanvasPage.tsx` |
+| `/api/overlap` POST | 交集率：归一化后算两类识别字段的集合重合度，只读采样 | `PairCard.tsx` |
+| `/api/decisions` POST | 裁决：人对候选对定案（五种结论），写草稿 + 留痕（含证据快照） | `PairCard.tsx` |
 
 ### 问数与动作（对外执行入口，前端不调）
 
@@ -134,13 +135,13 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/questions` GET/POST/DELETE | 验收问题集：增删查，GET 带当前已发布版本；POST `?run=1` 全量跑一遍（body `{ id }` 只跑一条）。期望结果两种写法：纯数字（比对行数）或 `字段=值`；失败分阶段记（编译失败/执行出错/答案不符），原因落 `detail` | `QuestionsCard.tsx:31` / `:129` / `:106` / `:161` / `:56` |
+| `/api/questions` GET/POST/DELETE | 验收问题集：增删查，GET 带当前已发布版本；POST `?run=1` 全量跑一遍（body `{ id }` 只跑一条）。期望结果两种写法：纯数字（比对行数）或 `字段=值`；失败分阶段记（编译失败/执行出错/答案不符），原因落 `detail` | `QuestionsCard.tsx` |
 
 ### 空间管理
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/workspaces` GET/POST | 空间列表 / 从空白模板新建空间，版本链按空间隔离 | `app/page.tsx:59` / `:75` |
+| `/api/workspaces` GET/POST | 空间列表 / 从空白模板新建空间，版本链按空间隔离 | `app/page.tsx` |
 
 
 
@@ -167,7 +168,7 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 | 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llmSlot` 的三个槽位出现；不设 key 走离线确定性回退 |
 | 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；演示 fixture 与平台元库走 node:sqlite |
 | 状态 | React 自带 useState / useRef | 无状态库 |
-| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，150 个用例 |
+| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，218 个用例 |
 | 图标 | @phosphor-icons/react | |
 
 ## 运行
