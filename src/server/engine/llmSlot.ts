@@ -73,7 +73,7 @@ export class CannedSlot implements LlmSlot {
         if (col.pk) continue; // 表主键只定位行，不进属性——除非它就是识别字段（见下）
         const t = col.type.toUpperCase(); // mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判
         const type = t.includes("INT") ? "number" : t.includes("DATE") || t.includes("TIME") ? "date" : "string";
-        properties[col.name] = { type };
+        properties[col.name] = { type, ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
         fields[col.name] = col.name;
         if (!identity && /_no$|_id$/.test(col.name)) identity = col.name; // 识别字段先猜编号列
       }
@@ -81,7 +81,7 @@ export class CannedSlot implements LlmSlot {
       if (!identity && pkCol) {
         identity = pkCol.name;
         const t = pkCol.type.toUpperCase();
-        properties[pkCol.name] = { type: t.includes("INT") ? "number" : "string" };
+        properties[pkCol.name] = { type: t.includes("INT") ? "number" : "string", ...(pkCol.comment ? { description: pkCol.comment } : {}) };
         fields[pkCol.name] = pkCol.name;
       }
       // 跨连接同名表是裁决主场景：撞名带连接前缀，不静默覆盖
@@ -182,6 +182,7 @@ export class AiSdkSlot implements LlmSlot {
       prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。
 规则：类名=表名的小写下划线形；kind 默 "thing"（记录事件的表用 "event"）；识别字段 identity 选业务编号列（_no/_id 结尾优先）；
 properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
+列带 comment 时把它的意思写进属性的 description（中文白话，别抄英文列名）。
 表：${JSON.stringify(tables.map((t) => ({ connection: t.connection, name: t.table.name, columns: t.table.columns })))}`,
     });
     return draftSchema.parse(output).object_types;

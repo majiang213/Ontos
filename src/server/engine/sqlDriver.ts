@@ -28,10 +28,11 @@ pg.types.setTypeParser(1184, (v: string) => {
   return Number.isNaN(ms) ? v : new Date(ms).toISOString();
 });
 
-const INTROSPECT_MYSQL = `SELECT TABLE_NAME AS name, COLUMN_NAME AS \`column\`, COLUMN_TYPE AS type, COLUMN_KEY AS keyflag
+const INTROSPECT_MYSQL = `SELECT TABLE_NAME AS name, COLUMN_NAME AS \`column\`, COLUMN_TYPE AS type, COLUMN_KEY AS keyflag, COLUMN_COMMENT AS comment
   FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`;
 const INTROSPECT_PG = `SELECT c.table_name AS name, c.column_name AS column, c.data_type AS type,
-    CASE WHEN kcu.column_name IS NULL THEN '' ELSE 'PRI' END AS keyflag
+    CASE WHEN kcu.column_name IS NULL THEN '' ELSE 'PRI' END AS keyflag,
+    pg_catalog.col_description((quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass::oid, c.ordinal_position) AS comment
   FROM information_schema.columns c
   LEFT JOIN information_schema.table_constraints tc ON tc.table_name = c.table_name AND tc.table_schema = c.table_schema AND tc.constraint_type = 'PRIMARY KEY'
   LEFT JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = c.table_name AND kcu.column_name = c.column_name
@@ -42,7 +43,7 @@ function groupColumns(rows: Record<string, unknown>[]): TableInfo[] {
   for (const r of rows) {
     const name = String(r.name);
     const t = map.get(name) ?? { name, columns: [] };
-    t.columns.push({ name: String(r.column), type: String(r.type), pk: r.keyflag === "PRI" });
+    t.columns.push({ name: String(r.column), type: String(r.type), pk: r.keyflag === "PRI", ...(r.comment ? { comment: String(r.comment) } : {}) });
     map.set(name, t);
   }
   return [...map.values()];

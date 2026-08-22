@@ -13,6 +13,7 @@ const bind = (params: unknown[]) => params.map((v) => (typeof v === "boolean" ? 
 export class SqliteFixtureDriver implements SourceDriver {
   readonly dialect: "sqlite" | "mysql" | "pg" = "sqlite"; // 测试可覆写模拟他种方言的写回行为
   private dbs = new Map<string, DatabaseSync>();
+  private comments = new Map<string, Map<string, Record<string, string>>>(); // connection → table → 列名 → 中文注释（SQLite 没有列注释，演示注释由种子手写）
 
   /** 注册一个连接，返回它的内存库（建表、插种子用）。同名覆盖先关旧句柄。 */
   register(connection: string): DatabaseSync {
@@ -20,6 +21,13 @@ export class SqliteFixtureDriver implements SourceDriver {
     const db = new DatabaseSync(":memory:");
     this.dbs.set(connection, db);
     return db;
+  }
+
+  /** 给某张表的列挂中文注释（SQLite 无列注释，演示数据靠这里补）。 */
+  setComments(connection: string, table: string, map: Record<string, string>): void {
+    const perTable = this.comments.get(connection) ?? new Map<string, Record<string, string>>();
+    perTable.set(table, map);
+    this.comments.set(connection, perTable);
   }
 
   /** 注册一个 SQLite 文件库作为连接（连接表单里的 sqlite 类型走这里）。同名覆盖先关旧句柄。 */
@@ -87,7 +95,7 @@ export class SqliteFixtureDriver implements SourceDriver {
     return tables.map((t) => ({
       name: t.name,
       columns: (db.prepare(`PRAGMA table_info("${t.name}")`).all() as { name: string; type: string; pk: number }[]).map(
-        (c) => ({ name: c.name, type: c.type, pk: c.pk === 1 })
+        (c) => ({ name: c.name, type: c.type, pk: c.pk === 1, ...(this.comments.get(connection)?.get(t.name)?.[c.name] ? { comment: this.comments.get(connection)!.get(t.name)![c.name] } : {}) })
       ),
     }));
   }
@@ -138,4 +146,15 @@ export function seedDemo(d: SqliteFixtureDriver) {
   hr.prepare(`INSERT INTO person (person_no, name) VALUES (?, ?)`).run("P001", "张三");
   hr.prepare(`INSERT INTO appointment (appt_no, person_no, title, dept_id, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
     .run("P001-20250101-0001", "P001", "专员", "D01", now - 500 * 86400, null); // 一条在任
+
+  // 演示列注释（SQLite 无列注释，种子手写）：内省时随列下发，生成对象时进字段说明
+  d.setComments("purchase_sys", "po_item", { item_name: "采购条目名称", sn: "设备序列号" });
+  d.setComments("device_sys", "device", { name: "设备名称", serial_no: "设备序列号", dept_id: "所属部门编号", status: "台账状态" });
+  d.setComments("device_sys", "department", { dept_id: "部门编号", dept_name: "部门名称" });
+  d.setComments("device_sys", "repair", { repair_no: "维修单号", serial_no: "设备序列号", started_at: "维修开始时间", ended_at: "维修结束时间" });
+  d.setComments("device_sys", "assignment", { asgn_no: "履历编号", sn: "设备序列号", dept_id: "部门编号", valid_from: "生效时间", valid_to: "失效时间" });
+  d.setComments("asset_sys", "asset", { asset_name: "资产名称", sn: "设备序列号" });
+  d.setComments("asset_sys", "warranty_card", { card_id: "保修卡号", sn: "设备序列号", expiry: "保修到期时间" });
+  d.setComments("hr_sys", "person", { person_no: "人员编号", name: "姓名" });
+  d.setComments("hr_sys", "appointment", { appt_no: "任职编号", person_no: "人员编号", title: "职务", dept_id: "部门编号", valid_from: "生效时间", valid_to: "失效时间" });
 }

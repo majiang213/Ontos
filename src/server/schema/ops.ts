@@ -15,6 +15,16 @@ export const draftOpSchema = z.discriminatedUnion("op", [
     values: z.array(z.union([z.string(), z.number()])).optional(),
   }),
   z.object({ op: z.literal("remove_property"), object: z.string(), name: z.string() }),
+  // 改字段说明/类型/枚举值/改名（description 空串 = 清掉；改名前扫引用，被引用的属性拒改）
+  z.object({
+    op: z.literal("update_property"),
+    object: z.string(),
+    name: z.string(),
+    new_name: z.string().optional(),
+    type: z.enum(["string", "number", "boolean", "date", "enum"]).optional(),
+    values: z.array(z.union([z.string(), z.number()])).optional(),
+    description: z.string().optional(),
+  }),
   z.object({ op: z.literal("set_identity"), object: z.string(), name: z.string() }), // name 为空串 = 取消识别字段
   z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) }),
   // 手动连线：from 类 → to 类，必须给配对字段（match）——关系总得说清靠哪两个字段对上
@@ -29,6 +39,14 @@ export const draftOpSchema = z.discriminatedUnion("op", [
     match: z.object({ from: z.string(), to: z.string() }),
   }),
   z.object({ op: z.literal("delete_link"), name: z.string() }),
+  // 关系改名/改反向名/改描述（match 与转化不改；改名前扫引用，被引用的关系拒改）
+  z.object({
+    op: z.literal("update_link"),
+    name: z.string(),
+    new_name: z.string().optional(),
+    description: z.string().optional(),
+    inverse: z.string().optional(),
+  }),
   // 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象）
   z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) }),
 ]);

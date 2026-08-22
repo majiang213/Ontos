@@ -93,10 +93,31 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<
     case "remove_property": {
       const t = mustType(d, input.object);
       if (!t.properties[input.name]) throw new DraftReject(`属性不存在：${input.name}`);
-      if (t.identity === input.name) throw new DraftReject("识别字段不能直接删，先换识别字段");
+      if (t.identity === input.name) throw new DraftReject("认出同一对象靠的字段不能直接删，先换一个");
       const refs = referencesOf(d, input.object, input.name);
       if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}`);
       delete t.properties[input.name];
+      break;
+    }
+    case "update_property": {
+      const t = mustType(d, input.object);
+      const prop = t.properties[input.name];
+      if (!prop) throw new DraftReject(`属性不存在：${input.name}`);
+      if (input.description !== undefined) prop.description = input.description || undefined; // 空串 = 清掉
+      if (input.type !== undefined && input.type !== prop.type) {
+        prop.type = input.type;
+        if (input.type !== "enum") delete prop.values; // 类型离开 enum，枚举值跟着清
+      }
+      if (input.values !== undefined) prop.values = input.values.length ? input.values : undefined; // 空数组 = 清掉
+      if (input.new_name && input.new_name !== input.name) {
+        if (!/^[a-z][a-z0-9_]*$/.test(input.new_name)) throw new DraftReject("属性名必须是小写字母/数字/下划线，字母开头");
+        if (t.properties[input.new_name]) throw new DraftReject(`属性已存在：${input.new_name}`);
+        const refs = referencesOf(d, input.object, input.name); // 被引用（源映射/关系/派生/动作）的属性改名会断链，拒
+        if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}，先解除引用再改名`);
+        t.properties[input.new_name] = prop;
+        delete t.properties[input.name];
+        if (t.identity === input.name) t.identity = input.new_name; // 唯一键指针跟着走
+      }
       break;
     }
     case "set_identity": {
@@ -138,6 +159,24 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS): Promise<
       const refs = linkRefs(d, input.name);
       if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}`);
       delete d.link_types[input.name];
+      break;
+    }
+    case "update_link": {
+      const l = d.link_types[input.name];
+      if (!l) throw new DraftReject(`关系不存在：${input.name}`);
+      if (input.description !== undefined) l.description = input.description || undefined; // 空串 = 清掉
+      if (input.inverse !== undefined) {
+        if (input.inverse && !/^[a-z][a-z0-9_]*$/.test(input.inverse)) throw new DraftReject("反向名必须是小写字母/数字/下划线，字母开头");
+        l.inverse = input.inverse || undefined; // 空串 = 清掉
+      }
+      if (input.new_name && input.new_name !== input.name) {
+        if (!/^[a-z][a-z0-9_]*$/.test(input.new_name)) throw new DraftReject("关系名必须是小写字母/数字/下划线，字母开头");
+        if (d.link_types[input.new_name]) throw new DraftReject(`关系已存在：${input.new_name}`);
+        const refs = linkRefs(d, input.name); // 改名即引用断链——被动作/派生引用的关系拒改
+        if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}，先改引用它的动作再改名`);
+        d.link_types[input.new_name] = l;
+        delete d.link_types[input.name];
+      }
       break;
     }
     case "import_objects": {

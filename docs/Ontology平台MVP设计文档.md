@@ -9,6 +9,7 @@
 > V2.3 变更：前缀 ont_ 改 onto_；补字段——conn_source 加 options 与 updated_at，onto_version 加 note 与 revert_of，adj_decision 加 source_a / source_b，log_query 加 session_id 与 model，log_action 加 error 与 duration_ms。
 > V2.3.1 变更：DDL 定为 MySQL 8 方言（AUTO_INCREMENT、MEDIUMTEXT、ENGINE/CHARSET 后缀、ON UPDATE CURRENT_TIMESTAMP），PG/SQLite 适配见方言注记。
 > V2.4 变更：裁决分级——合并类永远人定案，仅名称相似类可升级为机器定案、人抽检，升级节奏由裁决接受率决定（§2、§3 M3）。
+> V2.5 变更：工作空间 B 方案落地，元库表清单定稿为 9 张（onto_workspace、onto_version、conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）——onto_ontology 与 onto_draft 取消（草稿是进程内存态、不落库；本体锚点不再需要，版本链直接挂 workspace_id）。演示数据填充改到 `test` 空间（default 与新建空间一样空白起步，与是否配置 LLM Key 无关）。界面术语：「识别字段」改叫「唯一键」。
 
 ## 1. 产品定位
 
@@ -81,7 +82,7 @@
 
 配置的完整键定义以《ontos-article.md》附录 B 为准，这里只定骨架。配置文本由两棵树加一份出站清单组成：`object_types` 下每个键是一个类，`link_types` 下每个键是一条关系，`outlets` 下每个键是一个出站（告知的接收方，见下文「动作」）。有名字的条目在 YAML 里一律写成映射，键就是机器名；列表只用于四处：`when` 规则、效应操作、告知条目、`match` 的配对。各层都可写 `description`，给人和 Agent 读，引擎不读；下面的键清单从略。
 
-- **类**：`kind`（thing 或 event）/ `identity` / `properties` / `sources` / `axioms` / `actions`。`identity` 是同一性标准：取值为该类的一个源列属性的名。跨源对齐、问数认人、动作认人三处共用这条标准；界面上它叫识别字段。某源没有这一列时，该源条目写 `key`。
+- **类**：`kind`（thing 或 event）/ `identity` / `properties` / `sources` / `axioms` / `actions`。`identity` 是同一性标准：取值为该类的一个源列属性的名。跨源对齐、问数认人、动作认人三处共用这条标准；界面上它叫「唯一键」。某源没有这一列时，该源条目写 `key`。
 - **属性**：`type` / `description` / `values` / `generate`，以及可选的 `derived`。有 `derived` 就是派生属性：不对应源列，读时现算，不得出现在任何源的 `fields` 里。派生只有两种形状，没有第三种专用键。`when` 规则列表谈源：按个体出现在哪些源、已映射属性取什么值定值，从上到下取第一条命中。一条过滤取布尔：当前个体满足这条过滤则为真，过滤可含 `$link`。
 - **源映射**：`connection` / `table` / `pk` / `fields` / `key`。`fields` 把源列属性对到列名。`pk` 只定位行，不是同一性标准。
 - **关系**：`from` / `to` / `inverse` / `card`，外加 `match` 或 `transition` 二选一。`match`：两端各出一个属性配成一对，值相等则关系成立；可多对并列。`transition`：同一个体的阶段转化，块内 `property` 是派生属性名，`from` / `to` 是两个阶段值；判定规则见《ontos-article.md》§6.4。
@@ -256,6 +257,8 @@ link_types:
 | `adj_` | 裁决 | adj_decision、adj_overlap |
 | `log_` | 留痕 | log_query、log_action |
 
+> 本节 DDL 是工作空间 B 方案前的形态，仅作历史记录。B 方案落地后：ontology_id 外键全部换成 workspace_id；onto_ontology 与 onto_draft 取消；onto_question 改名 ont_question；adj_overlap 的 computed_at 即 created_at；二级索引本期未建（代码里只有唯一约束）。最终实现以 §6「工作空间」节与 `src/server/meta/store.ts` 为准（SQLite 单文件 DDL，MySQL 由同一份文本换方言生成）。
+
 ```sql
 -- 接入
 CREATE TABLE conn_source (                     -- 数据源连接
@@ -407,9 +410,9 @@ CREATE TABLE onto_workspace (                  -- 工作空间注册表
 - **本体配置与版本链入库**：`onto_version` 增加 `workspace_id`，YAML 全量快照按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`，回滚照旧是 revert 语义（旧内容作为新版本插入）。摆位挂在 `onto_workspace.layout`。
 - **其余 7 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）全部增加 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列；`meta_seq` 主键改 `(workspace_id, name)`。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。
 - **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 即本章 MySQL 8 方言。PG 同理（方言注记见上节）。
-- **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `default` 的 `onto_version` v1 行，此后不再被读；新建空间空白起步（v1 是空本体），演示 fixture 连接也只注入 `default`——切换空间要看得出是另一套。
+- **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `test` 的 `onto_version` v1 行，此后不再被读；`default` 与新建空间一样空白起步（v1 是空本体），演示 fixture 连接也只注入 `test`——切换空间要看得出是另一套。
 
-**语义。** 默认空间 `default`，首次访问时若注册表里没有，自动建行并把演示模板插成 v1。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。
+**语义。** 默认空间 `default`（空白起步），测试空间 `test`（首次访问时若注册表里没有，自动建行并把演示模板插成 v1，常驻空间列表；演示数据按空间名填充，与是否配置 LLM Key 无关）。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。
 
 **迁移。** 文件制（`workspaces/<name>/` 目录 + 每空间 SQLite 文件）被本方案取代；迁移是把每个空间的最新 YAML 与版本链插入共享库对应 `workspace_id` 的行，元数据各行补写 `workspace_id`。
 
@@ -457,7 +460,7 @@ CREATE TABLE onto_workspace (                  -- 工作空间注册表
 | 类（对象类型） | 领域里有哪些种东西 | 已落地。`object_types`，画布节点 |
 | 属性 | 一类有哪些特征 | 已落地。界面上叫字段 |
 | 关系 | 类与类怎么连 | 已落地。`link_types`：`match` 或 `transition`，含 `inverse`、`card` |
-| 同一性标准 | 两条记录何时指向同一个体 | 已落地。`identity`，源条目可写 `key`；交集验证、跨源对齐、动作认人共用；界面上叫识别字段 |
+| 同一性标准 | 两条记录何时指向同一个体 | 已落地。`identity`，源条目可写 `key`；交集验证、跨源对齐、动作认人共用；界面上叫「唯一键」 |
 | 个体（ABox） | 具体某台设备、某个人 | 不做。数据留源库，平台不存个体 |
 | 类等价 | 两个名字指同一类 | 已落地。同一 → 单类挂多源 |
 | 上位对象 | 部分重叠时抽出的公共类 | 已落地。属性上移，不带继承语义 |

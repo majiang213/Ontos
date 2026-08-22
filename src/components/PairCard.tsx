@@ -87,7 +87,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
             {rateBusy ? "算着…" : "算一算交集率"}
           </button>
         )}
-        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>交集率 = 两边识别字段的取值有多少对得上号（内存里算，不搬数据出库）。</span>
+        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>交集率 = 两边唯一键的取值有多少对得上号（内存里算，不搬数据出库）。</span>
       </div>
       {/* 结论：整宽行卡，名字在左、说明跟随，整行可点 */}
       <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "14px 0 6px" }}>是同一批现实对象吗？选一个结论：</div>

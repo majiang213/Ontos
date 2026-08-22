@@ -8,7 +8,7 @@ export interface CanvasObject {
   name: string;
   description?: string;
   kind: "thing" | "event";
-  properties: { name: string; type: string; derived: boolean; values?: (string | number)[] }[];
+  properties: { name: string; type: string; derived: boolean; values?: (string | number)[]; description?: string }[];
   sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
   actions: string[];
   state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动

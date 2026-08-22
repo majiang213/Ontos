@@ -72,7 +72,7 @@ export default function QuestionsCard({ onClose, showToast }: { onClose: () => v
             style={{ display: "flex", gap: 6, marginTop: 8 }}
           >
             <input className="text-in" style={{ flex: 1, fontSize: 12, padding: "6px 10px" }} placeholder="加一条业务问题" value={text} onChange={(e) => setText(e.target.value)} />
-            <button type="submit" className="btn" style={{ fontSize: 12 }} disabled={acting}>加</button>
+            <button type="submit" className="btn" style={{ fontSize: 12 }} disabled={acting}>加一条</button>
           </form>
           <button
             className="btn-cta"

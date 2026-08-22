@@ -115,6 +115,25 @@ describe("LLM 槽位离线回退", () => {
     expect(draft.meter.sources?.mes_sys.table).toBe("meter");
   });
 
+  it("逆向建模：列注释存成字段说明，没注释的字段说明为空", async () => {
+    const draft = await slot.draftObjects([
+      {
+        connection: "mes_sys",
+        table: {
+          name: "meter",
+          columns: [
+            { name: "meter_no", type: "TEXT", pk: true, comment: "表编号" },
+            { name: "reading", type: "INTEGER", pk: false, comment: "读数" },
+            { name: "note", type: "TEXT", pk: false }, // 无注释
+          ],
+        },
+      },
+    ]);
+    expect(draft.meter.properties.meter_no.description).toBe("表编号"); // 主键是业务编号时破格进属性，注释跟上
+    expect(draft.meter.properties.reading.description).toBe("读数");
+    expect(draft.meter.properties.note.description).toBeUndefined();
+  });
+
   it("候选对建议：跨源且字段重合才成对，同源不成对", async () => {
     const pairs = await slot.suggestPairs([
       { name: "a", sources: ["s1"], fields: ["sn", "name"] },

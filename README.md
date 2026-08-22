@@ -101,7 +101,7 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
 | `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码）、保存（先测连通再落库）、删除 | `forms.tsx:126`（仅 POST） |
-| `/api/introspect` GET | 表结构内省：每个连接的表定义 + 3 行脱敏采样，源表只读 | `CanvasPage.tsx:77`、`:390` |
+| `/api/introspect` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释） + 3 行脱敏采样，源表只读 | `CanvasPage.tsx:77`、`:390` |
 
 ### 本体构建（画布页）
 

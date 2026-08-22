@@ -73,6 +73,59 @@ describe("配置存储（工作副本与发布）", () => {
     await expect(s.publishDraft(WS)).rejects.toThrow();
   });
 
+  it("update_link：改名/改描述/改反向名；被引用的关系改名被拒", async () => {
+    const s = await freshStore();
+    // 未引用关系：建一条再改
+    await s.applyOp({ op: "create_link", name: "covers_x", from: "warranty_card", to: "equipment", match: { from: "serial_no", to: "serial_no" } }, WS);
+    await s.applyOp({ op: "update_link", name: "covers_x", new_name: "covers_y", description: "测试改名", inverse: "covered_by_y" }, WS);
+    const l = (await s.getDraft(WS)).draft.link_types.covers_y;
+    expect(l.description).toBe("测试改名");
+    expect(l.inverse).toBe("covered_by_y");
+    expect((await s.getDraft(WS)).draft.link_types.covers_x).toBeUndefined();
+    // 不存在 / 撞名 / 非法名
+    await expect(s.applyOp({ op: "update_link", name: "ghost" }, WS)).rejects.toThrow("关系不存在");
+    await expect(s.applyOp({ op: "update_link", name: "covers_y", new_name: "belongs_to" }, WS)).rejects.toThrow("已存在");
+    await expect(s.applyOp({ op: "update_link", name: "covers_y", new_name: "Bad Name" }, WS)).rejects.toThrow();
+    // 被引用：converted 被 convert 动作的效应引用，改名被拒
+    await expect(s.applyOp({ op: "update_link", name: "converted", new_name: "converted2" }, WS)).rejects.toThrow(/仍被引用/);
+    // 空串清掉描述与反向名
+    await s.applyOp({ op: "update_link", name: "covers_y", description: "", inverse: "" }, WS);
+    const l2 = (await s.getDraft(WS)).draft.link_types.covers_y;
+    expect(l2.description).toBeUndefined();
+    expect(l2.inverse).toBeUndefined();
+  });
+
+  it("update_property：改说明/类型/枚举值/改名；被引用改名被拒；唯一键指针跟随", async () => {
+    const s = await freshStore();
+    // 改类型 + 枚举值
+    await s.applyOp({ op: "update_property", object: "equipment", name: "name", type: "enum", values: ["a", "b"] }, WS);
+    const p1 = (await s.getDraft(WS)).draft.object_types.equipment.properties.name;
+    expect(p1.type).toBe("enum");
+    expect(p1.values).toEqual(["a", "b"]);
+    // 类型离开 enum：枚举值跟着清掉
+    await s.applyOp({ op: "update_property", object: "equipment", name: "name", type: "string" }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.equipment.properties.name.values).toBeUndefined();
+    // 改说明与空串清掉
+    await s.applyOp({ op: "update_property", object: "equipment", name: "name", description: "设备名称" }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.equipment.properties.name.description).toBe("设备名称");
+    await s.applyOp({ op: "update_property", object: "equipment", name: "name", description: "" }, WS);
+    expect((await s.getDraft(WS)).draft.object_types.equipment.properties.name.description).toBeUndefined();
+    // 不存在被拒
+    await expect(s.applyOp({ op: "update_property", object: "equipment", name: "ghost", description: "x" }, WS)).rejects.toThrow("属性不存在");
+    // equipment.name 被源映射引用 → 改名被拒
+    await expect(s.applyOp({ op: "update_property", object: "equipment", name: "name", new_name: "dev_name" }, WS)).rejects.toThrow(/仍被引用/);
+    // 手工对象的字段改名成功 + 唯一键指针跟随
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.applyOp({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    await s.applyOp({ op: "set_identity", object: "vendor", name: "vendor_no" }, WS);
+    await s.applyOp({ op: "update_property", object: "vendor", name: "vendor_no", new_name: "vendor_code" }, WS);
+    const v = (await s.getDraft(WS)).draft.object_types.vendor;
+    expect(v.properties.vendor_no).toBeUndefined();
+    expect(v.properties.vendor_code).toBeDefined();
+    expect(v.identity).toBe("vendor_code");
+    await expect(s.applyOp({ op: "update_property", object: "vendor", name: "vendor_code", new_name: "Bad Name" }, WS)).rejects.toThrow();
+  });
+
   it("放弃：草稿回退到已发布快照", async () => {
     const s = await freshStore();
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
@@ -85,7 +138,7 @@ describe("配置存储（工作副本与发布）", () => {
 
   it("编辑操作守卫：删识别字段被拒；派生属性不能当识别字段；摆位不置 dirty", async () => {
     const s = await freshStore();
-    await expect(s.applyOp({ op: "remove_property", object: "equipment", name: "serial_no" }, WS)).rejects.toThrow("识别字段");
+    await expect(s.applyOp({ op: "remove_property", object: "equipment", name: "serial_no" }, WS)).rejects.toThrow("认出同一对象靠的字段");
     await expect(s.applyOp({ op: "set_identity", object: "equipment", name: "status" }, WS)).rejects.toThrow("派生属性");
     await s.applyOp({ op: "save_layout", positions: { equipment: { x: 10, y: 20 } } }, WS);
     expect((await s.getDraft(WS)).dirty).toBe(false);

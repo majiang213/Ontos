@@ -14,7 +14,7 @@
 
 今天外部 Agent 能问数、能跑已发布动作，也能让 `propose_ontology` / `propose_action` 给出建议，但建议**不进工作副本**。画布上的改动只走 UI → `POST /api/draft` → `applyOp`。人在画布上看着、Agent 在 MCP 里写着——这两条路还没接上。`list_classes` / `read_class` / `search` 读的是已发布快照，Agent 若按这份配置改画布，会盖掉人尚未发布的编辑。
 
-本设计补上这一条路：给 MCP 增加与 `draftOpSchema` **同一套**编辑语言的写入工具 `apply_draft`（与画布共用 `applyOp` 同一判别联合），并让发现类工具能显式读工作副本。动作定义也走同一条路：`propose_action` 仍只产建议，Agent 把它落成 `set_action` 写进草稿；画布不加动作**编辑器**，但加**只读动作审查面**（对象卡列出动作摘要、发布条点名动作变化）——人发布前看得见内容。画布继续当**监视器**：轮询工作副本的 `rev`，有外部改动就刷新并 toast。发布、放弃、裁决、回滚、连接数据源、画布上的「生成对象」仍是人的关卡，不做成 MCP 写工具。循环、推理、多步拼装全部在 Ontos 之外；Ontos 内部保持一次调用、一次确定性结果（既有 LLM 槽位仍是一次 `generateObject`）。
+本设计补上这一条路：给 MCP 增加与 `draftOpSchema` **同一套**编辑语言的写入工具 `apply_draft`（与画布共用 `applyOp` 同一判别联合），并让发现类工具能显式读工作副本。动作定义也走同一套 op：人在对象卡上新建/改/删，Agent 经 `set_action` / `remove_action` 写入，两端都进草稿。对象卡列出动作摘要（含「删除某某」），发布条点名动作变化。画布继续当**监视器**：轮询工作副本的 `rev`，有外部改动就刷新并 toast。发布、放弃、裁决、回滚、连接数据源、画布上的「生成对象」仍是人的关卡，不做成 MCP 写工具。循环、推理、多步拼装全部在 Ontos 之外；Ontos 内部保持一次调用、一次确定性结果（既有 LLM 槽位仍是一次 `generateObject`）。
 
 ---
 
@@ -54,9 +54,9 @@
 
 ### Goals
 
-1. 外部 Agent 能对**当前工作空间**的工作副本做逐步编辑（与画布共用 `applyOp` 同一判别联合）：对象/字段/关系与画布同权；动作定义只走 MCP——画布不提供动作**编辑**入口，但提供**只读审查面**。
+1. 外部 Agent 能对**当前工作空间**的工作副本做逐步编辑（与画布共用 `applyOp` 同一判别联合）：对象、字段、关系与画布同权；动作两端走同一套 `set_action` / `remove_action`。**本期对象卡表单只覆盖附录 B 动作定义的一个子集**（见 §6）：前置里本类非派生字段等于/不等于字面量、关系已发生/未发生；效应里 `update` 与 `delete`（请求点名的那个体）、`create`、转化 `link`。编号不在表单里填，在执行请求的 `identity` 里点。**只有 `update` / `delete` 保存时自动带上**附录 B 的 `object` + `identity: { from: identity }`；`create` 与 `link` 没有这个认人键（新建没有已有个体可认，转化用 `link: 关系名`）。控件上不出现认人。演示里验收入库（`now+1y`）、调拨、登记、结束维修、以及前置读阶段的报废，超出这个子集——先做出子集给人看，再决定要不要加格子。
 2. Agent 能**显式**读工作副本，且默认读已发布——`query` / `run_action` 绝不改口。
-3. `propose_ontology` 仍只建议；Agent 自己把建议落成 `import_objects` 或 `replace_object`。`propose_action` 同样只建议，Agent 把它落成 `set_action`——动作定义由 Agent 生成，画布不加动作编辑入口，但加只读审查面：对象卡列出动作摘要、发布条点名动作变化，人发布前看得见内容。
+3. `propose_ontology` 仍只建议；Agent 自己把建议落成 `import_objects` 或 `replace_object`。`propose_action` 同样只建议，落地走 `set_action`。人在对象卡上也能新建/编辑/删除**简单动作**（同一套 op，范围见 Goal 1）。对象卡列出动作摘要、发布条点名动作变化。
 4. 开着的画布在 Agent 写入后于约 2 秒内显示新草稿，并给一句白话 toast。
 5. 写工具走 `requireWriteAuth`；空间仍由 `?ws=` / `x-ontos-ws` 决定，工具入参不带空间名。
 6. Skill 拆成四个，按「世界 × 读写」分工：`ontos-query`（已发布·只读：查数）、`ontos-action-run`（已发布·写：执行已发布动作）、`ontos-canvas`（草稿：表→对象、逐步编辑画布）、`ontos-action`（草稿：写动作定义）。任何 skill 不得教 Agent 发布、放弃、裁决、回滚。
@@ -65,7 +65,7 @@
 
 - 页内聊天列、Copilot 侧栏、「再说一句」/ `reviseObject` 浮卡。
 - 把 `generate`（内省 + 槽位 + `import_objects` 一次完成）暴露为 MCP 工具。
-- 为画布加动作**编辑器**（人不能在画布上改动作定义）。动作的创建/修改/删除由 Agent 经 `apply_draft` 的 `set_action` / `remove_action` 完成；画布只加**只读审查面**（对象卡动作摘要 + 发布条点名），人发布前看得见内容。
+- 在画布上做动作的 YAML / JSON 编辑器。对象卡白话表单只覆盖简单动作（见 Goal 1）；表单填不全的动作只展示摘要、只许删除，避免点「编辑」再保存把结构弄丢。告知（`inform`）本期表单不做。演示五条完整规矩是否加进表单，看过简单表单效果再定，不挡本期。
 - 第四个 LLM 槽位（NL → 动作）。生成动作的是外部 Agent 自己；`propose_action` 仍给确定性模板，不开新的 `generateObject` 槽。
 - 按 skill 裁剪 MCP 工具列表。`tools/list` 全量暴露九个工具（PR 2 起），分工由 skill 文档承担（§13）——skill 是提示不是沙箱：红线靠模型守；引擎真没有的是发布/裁决等关卡工具。
 - Agent 写摆位（`save_layout`）。
@@ -209,9 +209,9 @@ const mcpDraftOpSchema = z.discriminatedUnion("op", draftOpVariantsWithoutSaveLa
 
 | `op` | `names` |
 |---|---|
-| `create_object` / `delete_object` / `update_object` / `replace_object` | `[name]` |
-| `add_property` / `remove_property` / `set_identity` | `[object]`（这里的 `object` 是类名，与现有 op 相同） |
-| `set_action` / `remove_action` | `[object + "." + name]`（类名 + 动作名，如 `equipment.convert`）——MCP 返回与画布 toast 点名动作靠它 |
+| `create_object` / `delete_object` / `update_object` / `replace_object` / `update_link` | `[name]`（`update_link` 改名时给新名） |
+| `add_property` / `remove_property` / `set_identity` / `update_property` | `[object]`（这里的 `object` 是类名，与现有 op 相同） |
+| `set_action` / `remove_action` | `[object + "." + name]`（类名 + 动作名，如 `equipment.convert`）。画布 toast / 发布条不读这个字段，读 GET 的 `action_changes` |
 | `create_link` / `delete_link` | `[name]`（关系名） |
 | `import_objects` | `Object.keys(objects)`（可多个类名） |
 
@@ -228,12 +228,12 @@ Zod 失败：`-32602`。领域拒绝（重名、不存在、被引用、锁定�
 | `propose_ontology` | 对选中的表产对象建议（**不落到画布**）。入参：`{ tables: [{ connection, table }] }`。不接受 `space`。 |
 | `propose_action` | 对某个类产一条动作建议（**不发布、不落到画布**）。入参：`{ object, space? }`。`space` 缺省 `published`（已发布）；草稿里尚未发布的类请传 `draft`。 |
 | `list_classes` | 列出类的名字和说明。**缺省看已发布**；要看画布上还没发布的草稿，必须传 `space: "draft"`（返回里带 `outlets`——告知要发去的系统名列表）。入参：`{ space? }`。 |
-| `read_class` | 读一个类的字段、关系、动作。**缺省已发布**（不含来源表）。改画布请传 `space: "draft"`，会带上来源对照。入参：`{ name, space? }`。**PR 2 起**补一句：草稿视图还会告诉你这个类能不能整份替换（`replaceable`），并返回**完整动作定义**（读回-改-写回）。PR 1 的 description 写到「来源对照」为止，测试不钉「整份替换」与「完整动作定义」。 |
+| `read_class` | 读一个类的字段、关系、动作。**缺省已发布**（不含来源表）。改画布请传 `space: "draft"`，会带上来源对照。入参：`{ name, space? }`。**PR 2 起**补「能不能整份替换（`replaceable`）」；**PR 3 起**再补「完整动作定义」（读回-改-写回）。PR 1 的 description 写到「来源对照」为止，测试不钉「整份替换」与「完整动作定义」。 |
 | `search` | 按文本找类名、关系名。**缺省已发布**；找草稿里的名字请传 `space: "draft"`。入参：`{ text, space? }`。 |
 | `list_tables` | 列出已连接库里的表和列（只读列定义，**没有采样行**，不保存连接）。入参：`{ connection? }`。不接受 `space`。 |
-| `apply_draft` | 改画布上的草稿，一次只改一步。草稿还没发布，问数和动作看不见。入参与画布编辑相同：`{ op, ... }`，**必带 `base_rev`**（先 `list_classes space=draft` 拿 `rev`）。`op` 可以是创建/删除对象、增删字段、设识别字段、创建/删除关系、导入对象、整份替换一个还没发布、也没有派生字段/动作/多来源的对象（已挂来源、且有字段没对照到表上的列，也不能整份换）。不能用这个工具发布、放弃、裁决、回滚，也不能改节点位置。不接受 `space`。 |
+| `apply_draft` | 改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 `{ op, ... }`，**必带 `base_rev`**（先 `list_classes space=draft` 拿 `rev`）。`op` 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（`set_action` / `remove_action`）。不能发布、放弃、裁决、回滚，也不能改节点位置。不接受 `space`。 |
 
-`inputSchema`：对 `apply_draft` 用 **Zod 4 的实例方法** `mcpDraftOpSchema.toJSONSchema()`（或 `import { toJSONSchema } from "zod"`），再并上可选的 `base_rev`。测试只断言「有 `inputSchema`、其中没有 `save_layout`」，不要钉死某一个生成函数的符号。现有工具可以在同一 PR 补 `inputSchema`（纯加字段）；不是阻断项。
+`inputSchema`：对 `apply_draft` 用 **Zod 4 的实例方法** `mcpDraftOpSchema.toJSONSchema()`（或 `import { toJSONSchema } from "zod"`），再并上**必填**的 `base_rev`。测试只断言「有 `inputSchema`、其中没有 `save_layout`、`base_rev` 不是 optional」，不要钉死某一个生成函数的符号。现有工具可以在同一 PR 补 `inputSchema`（纯加字段）；不是阻断项。
 
 ---
 
@@ -256,7 +256,7 @@ z.object({
 })
 ```
 
-`import_objects` 与 `replace_object` 的类体统一剥掉 `actions` / `axioms`（多余键按 Zod 默认丢弃）——「写动作只走 `set_action`」由此成为**引擎形状，不是 skill 红线**；REST 画布的「生成对象」（`import_objects`）同口径剥离：画布没有动作编辑器，生成对象也不该携带动作。派生字段（`derived`）保留在类体里（派生允许经导入进入新类，见 §2.2 末段）。
+`import_objects` 与 `replace_object` 的类体统一剥掉 `actions` / `axioms`（多余键按 Zod 默认丢弃）——「写动作只走 `set_action`」由此成为**引擎形状，不是 skill 红线**；REST 画布的「生成对象」（`import_objects`）同口径剥离：生成对象不携带动作，动作只走 `set_action`。派生字段（`derived`）保留在类体里（派生允许经导入进入新类，见 §2.2 末段）。
 
 `def` **只**来自 `propose_ontology` 返回的 `object_types[name]`（从 map 里取出那一个类体）。禁止把 `read_class` 的视图塞回去：那份视图的 `properties` / `sources` 是数组，派生被压成 `"when" | "filter"`，过不了 `objectTypeSchema`。`read_class` 带的 `pk` / `sources` 只给逐步 `add_property` 看对照，不给整份替换当原料。
 
@@ -297,16 +297,21 @@ DraftReject("equipment 不能整对象替换：已经发布过；含派生字段
 
 **引擎不闭合「先删再导入」。** `delete_object` 仍允许删已发布类（与画布危险区同权）；删完后草稿里没有这个名字，`import_objects` 按今天的「类已存在」规则会放行。画布「删掉再点生成对象」走的也是这条路，引擎不能改口去拒。闭合只靠 skill 红线 + 人点发布/放弃。`replace_object` 的锁定表管的是「这个名字还在草稿里的时候能不能整份盖」，不管绕开路径。
 
-#### 2.2 `set_action` / `remove_action`：动作由 Agent 写，画布不加编辑器
+#### 2.2 `set_action` / `remove_action`：人和 Agent 都能写动作
 
-画布今天没有任何动作编辑入口（对象卡只改字段/关系/描述），动作定义只来自种子配置、阶段裁决生成的转化动作、以及 `import_objects` 携带的完整类体。`propose_action` 一直在产模板，但模板没有落地点——Agent 拿到建议只能念出来。本设计补上落地点：`draftOpSchema` 再扩两个判别值 `set_action` / `remove_action`，Agent 把 `propose_action` 的模板完善成动作定义后写进草稿，写错的动作也能删掉重来：
+动作的形状以《ontos-article.md》第 6 节和附录 B 为准，本设计不另开一套键。两层不能混：
+
+- **写入请求**（执行时）：`{ action, object, identity, request? }`。只负责点名：哪个类、哪个个体、哪条动作。编号在入参里。
+- **动作定义**（配置里 `actions` 的一条）：`description` / `pre` / `effect` / `inform`。改什么、怎么改，写在定义里。请求点名的那个体，效应写成 `object` + `identity: { from: identity }`；其他已有个体写成 `object` + `filter`。不许省略 `object`，不许 `$root`。`effect` 是列表，四项：`update` / `create` / `delete` / `link`（`link` 只用于转化，作用在请求点名的个体上，没有另一端）。
+
+画布今天没有任何动作编辑入口。定义今天只来自种子配置和阶段裁决生成的转化动作。本设计只补落地点：`set_action` / `remove_action` 写入的 `def` 必须过现有 `actionSchema`（就是附录 B 那份）。人在对象卡上点「新建动作」/「编辑」/「删除」，走 `POST /api/draft`；Agent 走 `apply_draft`。表单是附录 B 的**子集**，保存结果仍是合法 `ActionDef`，不是新语言。表单形状见 §6。
 
 ```ts
 z.object({
   op: z.literal("set_action"),
   object: z.string(), // 类名，与 add_property 的 object 同义
   name: z.string(), // 动作名，就是 actions map 的键（actionSchema 里没有 name 字段）
-  def: actionSchema, // 与种子配置、conversionAction、import_objects 携带的 actions 同一个 schema
+  def: actionSchema, // 与种子配置、conversionAction 同一个 schema；不从 import_objects 带进来
 });
 z.object({
   op: z.literal("remove_action"),
@@ -319,7 +324,7 @@ z.object({
 
 1. **`def` 来自三处：`propose_action` 的返回、`read_class space=draft` 返回的完整动作定义（读回-改-写回，见 §3）、或按动作骨架拼的等价形状。** `propose_action` 返回的 `{ action }` 就是 `actionSchema` 的一份实例（`adjudicate.ts` 的 `conversionAction` 与改属性模板同形），建议与落地之间没有第二套形状。draft 视图的 `read_class` 必须返回完整 `ActionDef`（`effect` / `inform` 原样），否则 Agent 改现有动作只能盲覆盖——published 视图维持今天的 `name/description/pre`（问数 Agent 不碰写侧）。类上已有转化关系时 `propose_action` 只给转化模板（`conversionAction`），改属性动作要按附录 B 骨架拼——骨架内嵌在 `ontos-action`（§13）。
 2. **`set_action` 是单条 upsert：同名覆盖、不同名新增。** 不做类级 merge、不整份替换 `actions` map。写错的动作用 `remove_action` 删掉重来，不靠 `delete_object` 再 `import_objects`（那条路拆关系，且 `replace_object` 对含动作的类锁定）。
-3. **校验是「Zod + 语义校验」两道闸，语义校验本期补三处缺口（PR 2 随 `set_action` 一起合入 `validate.ts`）。** `actionSchema` 的 Zod 保证机器可读（动作语言 = `{ action, object, identity }`，`pre` / `effect` / `project` 必须机器可读，禁止 `$root`，动作上不写 `write` 名单，插入生编号走 `generate` 列表——附录 B 的规则就是 `actionSchema` 的规则）。`validateSemantics` 保证引用合法（前置与效应过滤的键必须是类属性、`$link` 可解析，效应指向的类必须存在，效应写的属性必须存在且非派生，`$request` 与 `inform` 指向的类/出站必须存在）。三个今天漏掉的形状由**独立函数 `validateActionShapes`**（仍在 `validate.ts`）补上，`applyOp` / `mutateDraft` / `publishDraft` 在 `validateSemantics` 之后调用它——`loadPublished` / `rollbackTo` **不调**，历史已发布的坏配置加载放行（运行期 `action.ts` 兜底，见 §14 与 Risks）：①**效应 `link` 项**必须指向 `link_types` 里已存在的 `transition` 关系，且 `from` / `to` 都在动作宿主类上（与 `action.ts:211-216` 运行期口径一致——今天只有运行期拦，草稿期不拦）；②**转化成对**：每条 `transition` 关系必须被至少一条动作的效应 `link` 引用（防孤儿转化关系，见规则 4）；③**取值来源形状**：效应与 `inform` 的 `properties` 取值、`update.identity` / `delete.identity`、效应 `filter` 的取值一律过形状校验——`from` 只许 `identity` / `action` / `object` / `current` / `request` / `generated`；`{ property, from? }` 组合里 from 缺省即 `current`（与 `expr.ts` 的求值分支一致），给了 from 则只许 `current` / `request`；`generated` 只许出现在 `create` 效应且目标属性带 `generate` 列表；`current` 只许出现在 `update` 效应的 `properties` 与 `update` / `delete` 效应的 `filter` 取值（逐个体求值有 current 上下文），`identity` 字段与 `create` / `inform` 不可用（create 投影没有 current 上下文，运行期必炸）——与 `expr.ts` 的 `resolveValue` 分支一致，今天非法形状要运行期才炸。前置（`pre`）的取值本期**不在** ③ 范围——前置求值失败只是业务失败（`stage: "pre"`），不写库。任一失败整步回退（`configStore.ts` 每步操作后都跑）。Zod 失败 → `-32602`（REST 422）；类不存在 → `DraftReject` → `-32000`。注意：这两道闸保证的是**能跑**（形状与指称合法），不管**该不该跑**——业务毒性（前置被掏空、效应多挂 `delete`）能过形状闸，业务审查面在画布：对象卡只读动作区 + 发布条点名（§6）。
+3. **校验是「Zod + 语义校验」两道闸，语义校验本期补三处缺口（PR 3 随 `set_action` 与对象卡动作区一起合入 `validate.ts`）。** `actionSchema` 校验的是**定义**（`pre` / `effect` / `inform`），不是写入请求。写入请求仍是 `{ action, object, identity, request? }`。附录 B：禁止 `$root`，动作上不写 `write` 名单，插入生编号走 `generate` 列表，认人必须写明。`actionSchema` 就是这份规则。`validateSemantics` 保证引用合法（前置与效应过滤的键必须是类属性、`$link` 可解析，效应指向的类必须存在，效应写的属性必须存在且非派生，`$request` 与 `inform` 指向的类/出站必须存在）。四处今天漏掉的形状由**独立函数 `validateActionShapes`**（仍在 `validate.ts`）补上，`applyOp` / `mutateDraft` / `publishDraft` 在 `validateSemantics` 之后调用它——`loadPublished` / `rollbackTo` **不调**，历史已发布的坏配置加载放行（运行期 `action.ts` 兜底，见 §14 与 Risks）：①**效应 `link` 项**必须指向 `link_types` 里已存在的 `transition` 关系，且 `from` / `to` 都在动作宿主类上（与 `action.ts:211-216` 运行期口径一致——今天只有运行期拦，草稿期不拦）；②**转化成对**：每条 `transition` 关系必须被至少一条动作的效应 `link` 引用（防孤儿转化关系，见规则 4）；③**取值来源形状**：效应与 `inform` 的 `properties` 取值、`update.identity` / `delete.identity`、效应 `filter` 的取值一律过形状校验——`from` 只许 `identity` / `action` / `object` / `current` / `request` / `generated`；`{ property, from? }` 组合里 from 缺省即 `current`（与 `expr.ts` 的求值分支一致），给了 from 则只许 `current` / `request`；`generated` 只许出现在 `create` 效应且目标属性带 `generate` 列表；`current` 只许出现在 `update` 效应的 `properties` 与 `update` / `delete` 效应的 `filter` 取值（逐个体求值有 current 上下文），`identity` 字段与 `create` / `inform` 不可用（create 投影没有 current 上下文，运行期必炸）——与 `expr.ts` 的 `resolveValue` 分支一致，今天非法形状要运行期才炸。④**认人必须写明**（附录 B）：每条 `update` / `delete` 必须有 `identity` 或 `filter`（二选一，不许都缺）。表单路径保存时自动写 `identity: { from: identity }`；Agent 缺了 → `DraftReject`，不要等发布后执行才拒。前置（`pre`）的取值本期**不在** ③ 范围——前置求值失败只是业务失败（`stage: "pre"`），不写库。任一失败整步回退（`configStore.ts` 每步操作后都跑）。Zod 失败 → `-32602`（REST 422）；类不存在 → `DraftReject` → `-32000`。注意：这两道闸保证的是**能跑**（形状与指称合法），不管**该不该跑**——业务毒性（前置被掏空、效应多挂 `delete`）能过形状闸。人自己在对象卡上写的，人看着摘要决定发不发；Agent 写来的，同样靠对象卡摘要 + 发布条点名（§6）。
 4. **转化关系由裁决独占；转化动作的名字与内容不独占。** `create_link` 仍只收 `match`——Agent 无法用草稿 op 造出转化关系、冒充「阶段」定案；`stage` 裁决的 `mutateDraft` 生成的 `convert_to_*` 是转化动作的默认构造点，但动作本身可被同名覆盖/替代（与画布编辑同权，见规则 5；画布审查面让人看得见内容变化）。`set_action` 写出的动作若在效应里 `link` 一条关系，该关系必须已在 `link_types` 里（草稿期就拦，见规则 3①）。反过来（规则 3②）：`remove_action` 删掉一条转化关系的唯一引用动作会整步回退——孤儿转化关系（有关系、没有动作推进它）发布不出去。**逃生路径**：先 `set_action` 一条同样 `link` 该转化关系的替代动作，再 `remove_action` 删旧的——转化关系本身被 `linkRefs` 当引用保护（`refs.ts`），`delete_link` 删不掉。
 5. **覆盖既有动作与画布编辑同权。** 覆盖种子配置的动作（demo 里的 `convert` 验收入库）或裁决生成的转化动作都允许：草稿可放弃；人点发布才进已发布，`run_action` 只执行已发布快照上的动作。
 6. **`inform` 的出站必须已声明，而 `outlets` 没有写入 op。** 空白空间（`default` 与新建空间）的种子配置没有出站（`workspace.ts`；演示模板里的出站只在 `test` 空间），Agent 在那种空间写不出带 `inform` 的合法动作——去掉 `inform`，或由人在种子配置里声明出站。发现路径：`list_classes space=draft` 返回 `outlets` 名列表（§3）。
@@ -384,7 +389,7 @@ z.enum(["published", "draft"]).optional()
 }
 ```
 
-draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），因为逐步改画布必须看见对照。仍不返回连接密码。**类的**这些字段**不能** round-trip 进 `replace_object.def`：`def` 只从 `propose_ontology.object_types[name]` 取。**动作是例外**：draft 视图的 `actions[].def` 是完整 `ActionDef`（`effect` / `inform` 原样，视图不压扁），Agent 改完直接塞回 `set_action.def`——这是动作的读回-改-写回闭环；published 视图维持今天的 `{ name, description, pre }`（问数 Agent 不碰写侧）。`replaceable` / `replace_blockers` 由与 `applyOp` 共用的 `replaceBlockers` 计算（PR 2 才接线；PR 1 的 draft `read_class` 只加 `state` / `sources` / `pk`）。
+draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），因为逐步改画布必须看见对照。仍不返回连接密码。**类的**这些字段**不能** round-trip 进 `replace_object.def`：`def` 只从 `propose_ontology.object_types[name]` 取。**动作是例外**：draft 视图的 `actions[].def` 是完整 `ActionDef`（`effect` / `inform` 原样，视图不压扁），Agent 改完直接塞回 `set_action.def`——这是动作的读回-改-写回闭环；published 视图维持今天的 `{ name, description, pre }`（问数 Agent 不碰写侧）。`replaceable` / `replace_blockers` 由与 `applyOp` 共用的 `replaceBlockers` 计算（PR 2 接线）。完整 `actions[].def` 在 PR 3 才返回（与 `set_action` 同 PR）。PR 1 的 draft `read_class` 只加 `state` / `sources` / `pk`。
 
 `search` 在草稿的类名、说明、关系名上做与今天相同的子串匹配。
 
@@ -441,7 +446,7 @@ draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），�
 | `create_link`（仅 `match`）/ `delete_link` | 同上 | 同上 | 允许。`transition` 仍只有裁决能写 |
 | `import_objects` | generate 内部；draft 也可 | `apply_draft` | 允许。这是 `propose_ontology` 的落地点；类体剥掉 `actions` / `axioms`（动作只走 `set_action`） |
 | `replace_object`（新判别值） | `POST /api/draft` 可用，UI 无按钮 | `apply_draft` | 允许，受锁定规则约束；类体同样剥掉 `actions` / `axioms` |
-| `set_action` / `remove_action`（新判别值） | `POST /api/draft` 可用，UI 无按钮 | `apply_draft` | 允许。动作的创建/修改/删除由 Agent 完成；人发布前经画布只读审查面把关（§6）；删掉转化关系的唯一引用动作会被语义校验拦下（§2.2 规则 4） |
+| `set_action` / `remove_action`（新判别值） | 对象卡「新建动作」/「编辑」/「删除」→ `POST /api/draft` | `apply_draft` | 允许。人与 Agent 同权。删掉转化关系的唯一引用动作会被语义校验拦下（§2.2 规则 4） |
 | `save_layout` | 画布拖动 / 「整理布局」 | **禁止** | 摆位是界面状态；新节点走 dagre |
 | 勾表并「生成对象」 | `POST /api/generate` | **禁止** | 画布关卡。拆成 propose + import，循环在外 |
 | `propose_ontology` / `propose_action` | 无 | 保持，只建议 | 建议；落地分别走 `import_objects` / `set_action` |
@@ -542,24 +547,97 @@ async function withLocalWrite(fn: () => Promise<void>): Promise<boolean> {
    - 开着且人没碰描述时，若实现忘了无焦点重挂，卡内会留着旧 `defaultValue`，节点上的说明已经新了。这是已知限制，不要靠关卡来「解决」。
 8. `OntologyCanvas` 已在 `initialNodes` 变化时保留当前节点坐标（正在拖的不被回包弹回）。新节点没有当前坐标，走 dagre 回退（`layout?.[name] ?? pos.get(name)`）。**外部改动不 `fitView`。** 例外：现有 `fittedOnce` 在本页观察到 `objects.length` 从 0 变成非 0 时取景一次（空画布 + Agent 第一次 `import_objects` 要能看见节点）。取过这一次之后，再有外部新增不取景。人可用已有的「整理布局」。
 
-Toast 文案（大白话，不出现 MCP / draft op / working copy / 工作副本）。对象名集合用本页上次 `ont.object_types` 的键与新 JSON 做差集（**不是** MCP 返回的 `names`）：
+Toast 文案（大白话，不出现 MCP / draft op / working copy / 工作副本）。对象名集合用本页上次 `ont.object_types` 的键与新 JSON 做差集；动作差集读本次 JSON 的 `action_changes`（**不是** MCP 返回的 `names`）。判定顺序必须如下，禁止「对象键不变 → 默认句」把动作句做成死代码：
 
-- 默认（对象集合没变，只改了字段/关系/描述）：「草稿有更新，已刷新」
-- 只有新增：「草稿有更新，已刷新（新对象：vendor、site）」
-- 只有去掉：「草稿有更新，已刷新（已去掉：vendor）」
-- **新增和去掉都有**（一句里拼完，多个名字用顿号）：「草稿有更新，已刷新（新对象：vendor；已去掉：site）」
-- 动作有变化（同名类的动作名增删，或同名动作内容不同——按 `sameConfig` 比对该类 `actions` 条目；「删了再导入同名」在这种比较下也会现形，因为内容必然不同）：「草稿有更新，已刷新（动作有更新：equipment.convert）」
-- 轮询连续失败一次即可（不要每 2 秒弹）：「没法自动刷新画布，请重新打开本页」
+1. 对象键有增减 **且** `action_changes` 三个数组不全空：一句拼完。「草稿有更新，已刷新（新对象：vendor；动作有更新：equipment.convert）」
+2. 只有 `action_changes` 非空（对象键不变，含同名覆盖、只改 `pre` / `effect`）：「草稿有更新，已刷新（动作有更新：equipment.convert）」。名字取 `added ∪ overwritten ∪ removed`，多个用顿号。
+3. 只有对象键增减：沿用下面三句。
+   - 只有新增：「草稿有更新，已刷新（新对象：vendor、site）」
+   - 只有去掉：「草稿有更新，已刷新（已去掉：vendor）」
+   - 新增和去掉都有：「草稿有更新，已刷新（新对象：vendor；已去掉：site）」
+4. 对象键不变 **且** `action_changes` 三个数组都空（只改了字段/关系/描述）：「草稿有更新，已刷新」
+5. 轮询连续失败一次即可（不要每 2 秒弹）：「没法自动刷新画布，请重新打开本页」
 
-#### 只读动作审查面（人发布前看得见内容，不加编辑器）
+「删了再导入同名」：对象键差集可能为空，但类体与已发布不同，`action_changes` 或类级 `states: modified` 仍会现形；若动作也被剥掉再另写，走第 2 句。
 
-动作的创建/修改/删除由 Agent 完成（§2.2），人发布前必须看得见内容，否则发布是闭眼签字。三处展示，全是只读：
+#### 动作区（看 + 改）
 
-1. **对象卡动作区**：字段区之下加只读「动作」区，列出该类每条动作的名字 + 描述 + 前置（`pre`）+ 效应摘要（如「update equipment.dept」「link converted」）。数据来自 `GET /api/ontology`：JSON 里每个类带动作完整摘要（见 API 变更）。
-2. **发布条点名动作差集**：发布按钮的 `title` 除了「将删除的类」，再对照草稿与已发布的 `actions`（名字增删 + 同名内容不同都算）点名：「将新增/覆盖/删除的动作：equipment.convert」。
-3. **toast 点名动作变化**：见上表「动作有变化」行。
+人和 Agent 都能写动作（§2.2）。对象卡要能新建、编辑、删除；Agent 写来的也要看得见（新增 / 已修改标记、发布条、toast）。下面先钉展示契约，再钉表单。这与对象卡上「加字段 / 删字段」不是一件事：加字段是给这类东西多一个特征；动作里「把字段写成某值」是将来对**某一个体**（某一台设备、某一个人）改源库里已有的那一列。
 
-「放弃」是整份丢弃未发布改动，会连坐人手改的字段——放弃按钮的确认句要写清：「放弃会连 Agent 写的动作和你改的字段一起没」。
+**`GET /api/ontology` 不改 `object_types[cls].actions` 的形状**——今天已是完整 `ActionDef`（`effect` / `inform` 原样）。对象卡从这份 def **在前端算出展示**；不要把 GET 的 `actions` 换成摘要数组（`Object.keys` 会变成 `"0"`、`"1"`，节点动作名标签会坏）。另给顶层差集，与 `deleted` 同模式（服务端算好再下发）：
+
+```ts
+action_changes: {
+  added: string[];       // "equipment.transfer"
+  overwritten: string[]; // 同名且 sameConfig(已发布动作, 草稿动作) === false
+  removed: string[];     // 已发布有、草稿没有
+}
+```
+
+计算：遍历草稿与已发布的每一类 `actions`。名字只在草稿 → `added`；只在已发布 → `removed`；两边都有且 `sameConfig` 失败 → `overwritten`。元素一律 `类名.动作名`。
+
+**效应摘要**是画布纯函数，入参一条 `ActionDef`，出 `string[]`（每条效应一行，`inform` 另行列出）。四种效应和告知都必须覆盖——缺「撤走」一行就不许写「多挂 delete 能被人看见」：
+
+| 效应 | 展示（白话；类名/属性名/关系名用配置里的机器名） |
+|---|---|
+| `update` | `把 <object> 的 <属性名顿号连接> 写成新值` |
+| `delete` | `撤走 <object>`（毒性关卡底线，不能省；列表按钮仍叫「删除」，效应摘要用「撤走」，避免两个「删除」） |
+| `create` | `新建 <object>` |
+| `link` | `转化 <关系名>` |
+| `inform`（可选，每条一行） | `告知 <to 里的名字顿号连接>（<object>）` |
+
+不展示 `from`、字面量、`filter`、`identity`。同一属性换取值来源或字面量，摘要一行不变——写进 Risks。表单认得出的动作，人点「编辑」能看见取值；认不出的只有摘要。不要假装列表已经审完函数体。
+
+前置：`pre` 缺省或 `{}` 时**显式写「无前置」**，不要把这一栏藏起来（掏空前置必须看得见）。非空则把 `pre` 的 JSON 原样列出，不再摘要。
+
+1. **对象卡动作区**：字段区之下加「动作」区。顶部「新建动作」。每条动作：名字、若在 `action_changes.added` 标「新增」、若在 `overwritten` 标「已修改」、描述、前置、效应摘要（`effectSummary`）；后接「编辑」「删除」（能否「编辑」见下面表单兼容）。数据：`object_types[name].actions`（完整 def）+ 顶层 `action_changes`。列表按钮跟常见后台一致：编辑 / 删除；不要用「改」（会和「把字段写成某值」撞名）。
+2. **发布条点名动作差集**：发布按钮的 `title` 除了「将删除的类」，只印 `action_changes` 里**实际发生**的子集，三个动词不要永远并排：
+   - 只有新增：「将新增的动作：equipment.transfer」
+   - 只有内容变了：「将更新的动作：equipment.convert」
+   - 只有去掉：「将删除的动作：equipment.scrap」
+   - 多类变化用分号拼：「将新增的动作：equipment.transfer；将更新的动作：equipment.convert」
+3. **toast 点名动作变化**：见上表第 1、2 句。人手在对象卡上保存动作也走 `op()` → `withLocalWrite`，不 toast 成「外部改动」。
+
+「放弃」今天是一键生效、无确认。改为点「放弃」先 `window.confirm("放弃会连别人刚写的动作和你改的字段一起没。确定放弃？")`：否 → 不发 `DELETE /api/publish`；是 → 再发。不要只写在按钮 `title` 上冒充确认。文案不出现「Agent」。
+
+##### 对象卡上怎么加 / 改动作
+
+仍是右侧那张对象卡，不新开 `Card` 种类（同一时间一张卡）。点「新建动作」或「编辑」时，动作区换成表单；保存或取消回到列表。保存走 `op({ op: "set_action", object, name, def })`；删除走 `op({ op: "remove_action", object, name })`，先 `window.confirm("删除这条动作？进草稿，发布后才从已发布里拿掉")`。引擎拒绝（例如删掉转化关系的唯一引用）走现成 `failToast`。
+
+表单是附录 B **动作定义**的子集，不是写入请求的编辑器（请求仍是第 6 节的 `{ action, object, identity }`）。控件不出现配置键名；保存拼出的 `def` 必须过 `actionSchema`。编号不出现在表单上。
+
+表单白话字段：
+
+| 栏 | 控件 | 写成配置 |
+|---|---|---|
+| 名字 | 文本。新建可改；已有动作改名字本期不做（没有改名 op，要删了再建） | `set_action.name` |
+| 说明 | 多行文本 | `description` |
+| 这条动作要先满足 | 可空列表，「加一条」。两种行：① 选本类非派生字段 + 等于/不等于 + 字面量；② 选从本类出发的关系 + 「必须已经发生」/「必须还没发生」 | ① `pre[字段]=值` 或 `{ ne: 值 }`；② `pre.$link[关系]=true/false` |
+| 做完会 | 非空列表，「加一条」。对应附录 B 效应四项的子集：① `update` 把本类**非派生**源列属性写成某值（值=`{ from: request }` 或字面量，不要 `now` 系）；② `link` 转化（下拉本类上已有的 `transition` 关系；`link` 没有另一端）；③ `create` 新生某个已有类（属性值：`{ from: request }` / `{ from: identity }`＝请求顶上的识别值 / 字面量）；④ `delete` 撤走本类、请求点名的那个体。①④ 控件不出现「哪一台」；保存时按附录 B 自动写 `object` + `identity: { from: identity }`，无 `filter`。不是给类加字段、删字段 | `update` / `link` / `create` / `delete` |
+
+「请求里来的」= `{ from: "request" }`。不做 `$request` 认人、`$exists`、跨类 `update.filter`、告知、派生字段当前置、日期表达式。演示里这几条表单加不出原样：报废（前置要阶段）、验收入库（一年保修）、调拨、登记、结束维修。Agent 仍能写；列表只展示、只许删。
+
+**表单认不出的动作**：列表里照常展示摘要；**不出现「编辑」**，只留「删除」。点「编辑」再保存不得把认不出的键丢掉。谓词必须与从表单控件重拼出的 `def` 一致，签名 `formCompatible(def, cls, config)`。白名单：
+
+- 无 `inform`
+- `pre`：键只能是本类**非派生**字段（值为字面量或 `{ ne: 字面量 }`）或 `$link`（值为 true/false，不能嵌套过滤）
+- `update`：`object` 是宿主类、无 `filter`、**必须** `identity: { from: identity }`（附录 B：请求点名的那个体必须这样写；缺了不是「入参里有编号就行」，引擎不补）、属性名非派生源列属性、属性值只许 `{ from: "request" }` 或字面量（字符串不得是 `now` / `now/d` / `now+1y` / `now-1d/d`）
+- `create`：属性值只许 `{ from: "request" }` / `{ from: identity }` / 字面量（不要表达式、不要 `{ from: generated }`）
+- `delete`：`object` **必须是宿主类**（本类、请求点名的那一个；Agent 写的跨类删除不算表单能编辑的）、无 `filter`、**必须** `identity: { from: identity }`；下拉只给本类
+- `link`：关系必须是配置里从本类出发的转化关系
+
+不满足则无「编辑」。PR 3 用演示动作钉测试：`convert` / `transfer` / `scrap` / `register` / `finish_repair` 必须为假（列表无「编辑」）。为真用例必须带 `identity: { from: identity }`；`expiry: now/d` 的 create 必须为假。
+
+新建默认：名字空、说明空、前置空、做完会一条「把字段写成某值」占位（保存前必须选出属性；写出的 `update` 按附录 B 带 `object` 与 `identity: { from: identity }`）。有转化关系时，「做完会」的种类里才出现「转化」。效应种类文案用「把字段写成某值」，不要和列表按钮「编辑」撞名。
+
+表单开着时（与描述框同级，避免未保存被冲掉）：
+
+- 视为 `formBusy`：轮询 `rev` 变了也不 `setOnt` 冲表单；保存或取消后再拉一次。可用 toast「草稿有更新，保存会盖掉外面刚写的」提醒，不要偷偷重挂。
+- Esc：焦点在输入框里不关卡（已有）；焦点在表单里、不在输入框 = 取消表单回到列表，不是关掉整张对象卡。有未保存改动则 `confirm`。
+- 点另一个对象 / 关卡 / 对象被删：有未保存改动则 `confirm`。
+- 保存仍不带 `base_rev`；若 `getRev()` 已不是打开表单时的值，先 `confirm`「外面已经改过这份草稿，还要按表单覆盖吗？」
+
+不在画布上调 `propose_action`（那是 MCP 槽位/模板）。转化动作的默认骨架仍只由裁决生成；人可以在表单里加一条「转化」效应，规则 3① 会拦指向不存在的转化关系。
 
 不加常驻「直播中」指示灯。关卡区已有「发布 vN+1 / 放弃」随 `dirty` 出现，足够表示草稿未发布。
 
@@ -677,7 +755,7 @@ Skill 写明：端点 `POST <host>/api/mcp?ws=<空间名>`，省略即 `default`
 3. 外部 Agent 的对话抄本（循环本就不在 Ontos 里）。
 4. `apply_draft` 返回的 `{ op, names, rev }`，调用方可在 MCP 客户端里看见。
 
-**本期不新建 `log_draft` 表。** 理由：工作副本在发布前是易失的；发布后的事实源是 `onto_version` 快照。草稿留痕若没有产品界面去读，只会变成第二份没人看的日志，且与外部 Agent 的工具抄本重复。`discardDraft` 的语义就是丢掉未发布改动——再持久化一份草稿流水，和「放弃」打架。动作内容的审查面不在流水，在画布（对象卡只读动作区 + 发布条点名 + toast，§6）——人问「为什么 convert 变了」时，对象卡就能看见。
+**本期不新建 `log_draft` 表。** 理由：工作副本在发布前是易失的；发布后的事实源是 `onto_version` 快照。草稿留痕若没有产品界面去读，只会变成第二份没人看的日志，且与外部 Agent 的工具抄本重复。`discardDraft` 的语义就是丢掉未发布改动——再持久化一份草稿流水，和「放弃」打架。动作内容的审查面不在流水，在画布（对象卡动作区 + 发布条点名 + toast，§6）——人问「为什么 convert 变了」时，对象卡就能看见。
 
 若以后要查「是画布点的还是 MCP 写的」，再加表不迟，列至少包括 `workspace_id, rev, op, names, source, created_at`，不存整份配置。不在本设计预建。
 
@@ -755,7 +833,7 @@ flowchart TD
 
 `ontos-action`：
 
-- 写动作只走 `set_action` / `remove_action`（新类可经 `import_objects` 携带 `actions`）；不臆造 `set_actions`、不整份塞 `actions` map。
+- 写动作只走 `set_action` / `remove_action`。`import_objects` / `replace_object` 的类体会被剥掉 `actions`，新类也要另走 `set_action`。不臆造 `set_actions`、不整份塞 `actions` map。
 - 动作写进草稿不等于生效：`run_action` 只执行已发布快照上的动作，人发布后才可见。
 - 转化关系由裁决独占：`create_link` 不收 `transition`，别想造转化关系；删掉转化关系的唯一引用动作会被引擎拦——**逃生路径：先 `set_action` 一条同样 `link` 该转化关系的替代动作，再 `remove_action` 删旧的**（转化关系本身被引用保护，`delete_link` 删不掉）。
 - 写带 `inform` 的动作前，先从 `list_classes space=draft` 的 `outlets` 确认出站已声明；没出站就去掉 `inform`，不编造出站名。
@@ -834,7 +912,7 @@ case "remove_action": {
 }
 ```
 
-`validate.ts` 随本 PR 补三处动作校验（§2.2 规则 3 的 ①②③；种子配置与单跳裁决产物都满足，多跳合并场景靠 `mergeInto` 配套修改，见下）：
+`validate.ts` 随本 PR 补四处动作校验（§2.2 规则 3 的 ①②③④；种子配置与单跳裁决产物都满足，多跳合并场景靠 `mergeInto` 配套修改，见下）：
 
 ```ts
 // 动作效应循环里：link 项必须指向已存在的转化关系，且 from/to 都在宿主类上（与 action.ts 运行期同口径）
@@ -847,11 +925,11 @@ if ("link" in item) {
 // from ∈ identity|action|object|current|request|generated；{ property, from? } 缺省 from = current、给了只许 current|request；
 // generated 只许 create 且目标属性带 generate 列表；current 只许 update 的 properties 与 update/delete 的 filter（identity 与 create/inform 不可用）
 // link_types 循环之后：每条 transition 关系必须被至少一条动作的效应 link 引用，孤儿转化关系发布不出去
-// 执行时机：①②③ 放进独立函数 validateActionShapes，只在草稿写入路径（applyOp / mutateDraft / 发布校验）的
+// 执行时机：①②③④ 放进独立函数 validateActionShapes，只在草稿写入路径（applyOp / mutateDraft / 发布校验）的
 // validateSemantics 之后调用；loadPublished / rollbackTo 加载历史版本不执行，避免历史坏配置让工作空间加载即炸——运行期由 action.ts 兜底
 ```
 
-**裁决侧的配套修改（同一 PR）**：`mergeInto`（`adjudicate.ts`）复制被吸收类的 `actions` 时，跳过 `pre` / 效应 `filter` 的 `$link` 引用、或效应 `link` 项指向将被 `dropClass` 移除的关系的动作——三种引用随 B 的关系消亡全部失效，整步复制必然回退——「先阶段、后合并」的多跳裁决下，B 的 `convert_to_*` 随 B 的转化关系一起消亡，不能跟着复制进 A，否则校验① 整步回退，人的裁决关卡被引擎拒绝且画布无解。多效应动作（update + link）整体跳过会连 update 部分一起丢，可接受——它服务的转化结构已随 B 消亡。阶段裁决本身的产物（`conversionAction`）不受影响。
+**裁决侧的配套修改（PR 3，与 `set_action` 同一 PR）**：`mergeInto`（`adjudicate.ts`）复制被吸收类的 `actions` 时，跳过 `pre` / 效应 `filter` 的 `$link` 引用、或效应 `link` 项指向将被 `dropClass` 移除的关系的动作——三种引用随 B 的关系消亡全部失效，整步复制必然回退——「先阶段、后合并」的多跳裁决下，B 的 `convert_to_*` 随 B 的转化关系一起消亡，不能跟着复制进 A，否则校验① 整步回退，人的裁决关卡被引擎拒绝且画布无解。多效应动作（update + link）整体跳过会连 update 部分一起丢，可接受——它服务的转化结构已随 B 消亡。阶段裁决本身的产物（`conversionAction`）不受影响。
 
 `remove_action` 删掉转化关系唯一引用动作的 `-32000` message 必须带逃生指引：「先写一条同样 link 该转化关系的替代动作，再删旧的」——转化关系本身被 `linkRefs`（`refs.ts`）当引用保护，`delete_link` 删不掉。
 
@@ -879,8 +957,8 @@ if ("link" in item) {
 
 | 接口 | 变更 |
 |---|---|
-| `POST /api/draft` | 因 `draftOpSchema` 增加 `replace_object` / `set_action` / `remove_action` 而能接受这三个 op；画布不调用 |
-| `GET /api/ontology` | JSON 增加 `rev`（= `getRev(ws)`）；`ETag` / `If-None-Match` / 304；200 与 304 均 `Cache-Control: no-store`；每个类的 `actions` 带完整摘要（名字 + `description` + `pre` + 效应摘要）——对象卡只读动作区的数据源 |
+| `POST /api/draft` | 因 `draftOpSchema` 增加 `replace_object` / `set_action` / `remove_action` 而能接受这三个 op；对象卡「新建动作」/「编辑」/「删除」调用后两个 |
+| `GET /api/ontology` | JSON 增加 `rev`（= `getRev(ws)`）；`ETag` / `If-None-Match` / 304；200 与 304 均 `Cache-Control: no-store`。`object_types[cls].actions` **保持完整 `ActionDef`**（不改成摘要）。另增顶层 `action_changes: { added, overwritten, removed }`（`类名.动作名`，对照已发布算好，与 `deleted` 同模式）。对象卡用完整 def 算效应摘要，发布条 / toast 只读 `action_changes`。 |
 | 其余 | 无 |
 
 ### Skill / README
@@ -920,8 +998,8 @@ if ("link" in item) {
 无 feature flag。行为全是加工具、加可选字段、加轮询。
 
 1. 后端先合：`rev` + MCP 读 `space=draft`（旧客户端不传 `space`，行为与今天相同）。
-2. 再合 `apply_draft` + `replace_object`（无 UI 也能用 MCP 改草稿；开着的旧画布仍不刷新，直到监视器 PR）。
-3. 再合画布轮询。
+2. 再合 `apply_draft` + `replace_object` + `list_tables`（**不含** `set_action` / `remove_action`）。无 UI 也能用 MCP 改对象/字段/关系；开着的旧画布仍不刷新，直到监视器 PR。
+3. 监视器、对象卡动作表单、`set_action` / `remove_action` **同一 PR 合入**。禁止「先能写动作、后才看得见」的中间态接到有人会点发布的环境。
 4. 最后合 skill / README，避免文档早于工具。
 
 回滚：撤 MCP 新工具即可；`rev` 对旧前端是多一个 JSON 字段，可留。画布轮询撤掉 `useEffect` 即回到「只在本页写入后刷新」。`replace_object` 若需撤回：从 `draftOpSchema` 去掉判别值，旧调用变成未知 op，Zod 拒绝。
@@ -947,16 +1025,17 @@ if ("link" in item) {
 | `list_tables` 泄露表名与列名 | 低 | 连接本就为人而配；无密码、无采样行；不比 introspect 抽屉更多 |
 | 把 `read_class` 默默改成读草稿，问数 Agent 看见未发布字段并拿去 `query`，引擎拒绝或查到旧世界 | 高（若选错方案） | **缺省 published**；`query` 带 `space` 直接 `-32602` |
 | Agent 写出的动作引用不存在的关系/类、写派生属性、取值来源非法 | 中 | `actionSchema` Zod 机器可读 + 每步 `validateSemantics` 整步回退（含效应 `link`、转化成对、取值来源形状三项新校验）；人发布闸；`run_action` 只执行已发布 |
-| `set_action` 同名覆盖种子/裁决动作 | 低 | 发布条点名动作差集 + 对象卡只读动作区 + toast 点名（§6）；草稿可放弃；发布前不生效；`ontos-action` 红线要求覆盖前先 `read_class space=draft` 读回完整定义 |
+| `set_action` 同名覆盖种子/裁决动作 | 低 | 发布条点名 `action_changes.overwritten` + 对象卡标「已修改」+ toast 点名（§6）；草稿可放弃（`window.confirm`）；发布前不生效；`ontos-action` 红线要求覆盖前先 `read_class space=draft` 读回完整定义 |
+| 同一属性换取值来源或字面量，效应摘要一行不变 | 低 | 摘要不展示 `from` / 字面量。表单认得出的动作，人点「编辑」能看见取值；认不出的只有摘要。不假装列表已经审完函数体。 |
 | `remove_action` 删掉转化关系的唯一引用动作 | 低 | 语义校验成对约束整步回退（§2.2 规则 4）；`-32000` message 带逃生指引「先写替代动作再删」；`ontos-action` 红线写明 |
 | 多跳裁决（先阶段、后合并）复制出指向已删关系的动作 | 低 | `mergeInto` 跳过这类动作（§14）；PR 2 测试钉「合并带转化动作的类不炸」 |
-| 历史已发布配置违反新校验（N1 路径） | 低 | ①②③ 只在草稿写入/发布路径生效，加载历史版本放行；运行期由 `action.ts` 兜底。回滚出坏版本后草稿编辑会被拦，**再回滚到合法版本**才恢复（放弃没用——草稿回的也是坏版本） |
+| 历史已发布配置违反新校验（N1 路径） | 低 | ①②③④ 只在草稿写入/发布路径生效，加载历史版本放行；运行期由 `action.ts` 兜底。回滚出坏版本后草稿编辑会被拦，**再回滚到合法版本**才恢复（放弃没用——草稿回的也是坏版本） |
 
 ---
 
 ## Key Decisions
 
-1. **一个 MCP 写工具 `apply_draft`，入参 = `mcpDraftOpSchema`（`draftOpSchema` 去掉 `save_layout`）+ 信封 `base_rev`（必填，parse op 前剥离）。** 不为每个 op 做工具。一次调用一条 op。与 `POST /api/draft` 同骨架，避免第二套编辑语言。不写「与画布等价」：对象/字段/关系与画布同权，动作定义是画布没有的能力——只走 MCP，画布配只读审查面（§6）。
+1. **一个 MCP 写工具 `apply_draft`，入参 = `mcpDraftOpSchema`（`draftOpSchema` 去掉 `save_layout`）+ 信封 `base_rev`（必填，parse op 前剥离）。** 不为每个 op 做工具。一次调用一条 op。与 `POST /api/draft` 同骨架。对象、字段、关系与画布同权；动作两端走同一 op，对象卡表单本期只覆盖简单动作（Goal 1）。
 2. **`propose_*` 继续只建议。** Agent 用 `import_objects` 落地新类，用 `replace_object` 覆盖未锁定类。`def` 只来自 `propose_ontology.object_types[name]`。不增加 `apply_proposal` / `upsert_objects`。
 3. **草稿语言的两处扩展：整类替换 `replace_object` 与动作写入 `set_action` / `remove_action`（字段名 `def`）。** 锁定用 `Object.keys` 计数；「未对照到表列的字段」**只锁已挂来源的类**（残缺生成没挂来源，必须能整份换）。未锁定类的识别字段/描述后写赢。`delete_object` + `import_objects` 引擎放行，skill 禁止。`import_objects` / `replace_object` 的类体剥掉 `actions` / `axioms`——「写动作只走 `set_action`」是引擎形状，不是红线。
 4. **发现工具加 `space`，缺省 `published`，非法值 `-32602`。** 改画布必须写 `space: "draft"`。`query` / `run_action` / `propose_ontology` / `apply_draft` / `list_tables` 带 `space` → `-32602`。draft 的 `read_class` 才带 `sources` 与（PR 2）`replaceable`。
@@ -965,12 +1044,12 @@ if ("link" in item) {
 7. **无第四个 LLM 槽位。** Agent 在外编排 op；`draftObjects` 仍只给 `propose_ontology` 与画布 generate。
 8. **`apply_draft` 走 `requireWriteAuth`；发现工具保持放开。** 工具入参不带 `ws`。
 9. **不建 `log_draft`。** 未发布编辑以画布状态与外部对话抄本为准；发布后以 `onto_version` 为准。
-10. **并发：每空间一层 `enqueue`（失败也续链）。`base_rev` 在 `applyOp` task 开头比较，MCP 不再比、不再套队列。** 省略则后写赢。不在对象卡上做 OT。
+10. **并发：每空间一层 `enqueue`（失败也续链）。`base_rev` 在 `applyOp` task 开头比较，MCP 不再比、不再套队列。** MCP 信封必填；REST 画布不传，队列里后到的写入赢。不在对象卡上做 OT。
 11. **`DraftReject` 在 MCP 上映射 `-32000`。** 与 REST 422、与 `EngineReject` 同档。
 12. **用户可见文案走大白话。** toast「草稿有更新，已刷新」。锁定理由说「派生字段」不说「派生属性」。工具说明点明缺省已发布，不教发布。
-13. **动作写入是 `set_action` / `remove_action` 两个 op，`propose_action` 仍只给模板。** 画布不加动作编辑器，但加只读审查面（对象卡动作摘要 + 发布条点名 + toast 动作差集，§6）；机器可读由 `actionSchema` + 每步 `validateSemantics` + `validateActionShapes` 保证；**转化关系**由裁决独占，转化动作的名字与内容不独占（同名覆盖同权）。draft 的 `read_class` 返回完整动作定义，支持读回-改-写回。
+13. **动作写入是 `set_action` / `remove_action` 两个 op，人和 Agent 都用。** 定义形状以《ontos-article.md》§6 / 附录 B 为准：`pre` / `effect` / `inform`。写入请求仍是 `{ action, object, identity }`，编号在入参。表单是附录 B 的子集，保存仍是合法 `ActionDef`；`update`/`delete` 自动带 `object` + `identity: { from: identity }`，控件上不填编号；`create` / `link` 不带这句认人。演示五条超出子集则无「编辑」。**转化关系**由裁决独占。
 14. **Skill 拆成四个（`ontos-query` / `ontos-action-run` / `ontos-canvas` / `ontos-action`），`tools/list` 全量暴露不裁剪。** 分工与克制由 skill 正文承担；四个 skill 各自自包含（端点、错误码、红线），发布权永远在人。
-15. **画布加只读动作审查面，动作编辑仍不上画布。** 发布条点名动作差集（草稿 vs 已发布）；toast 对同名类的动作变化点名；放弃整份丢弃，确认句写明连坐。
+15. **对象卡能加/改/删简单动作，也能看见 Agent 写来的。** `action_changes` + `effectSummary`（含「删除」）；`formCompatible` 钉演示五条为假；表单开着时暂停冲刷、Esc 取消表单不是关卡。`set_action`、摘要、表单同一 PR 合入。
 
 ---
 
@@ -1022,13 +1101,9 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 
 代价：文件越来越长，问数的红线和改画布的红线互相干扰；模型按任务只加载一个 skill，会被另一条用法带偏（问数时惦记草稿、改画布时惦记已发布）；「列出类」要同时记住缺省已发布与必须传 draft 两套。**不采用。** 按「世界 × 读写」拆四个 skill（查数 / 执行动作 / 改画布 / 写动作定义），每个 prompt 聚焦、红线独立。执行动作独立成 skill 的理由：读写风险不对称——查数任务不该加载写闸纪律，执行任务不该被查数的完整语法带偏。
 
-### I. 动作写路径的三种产品形态（本期拍板：B）
+### I. 动作写路径（本期拍板：画布与 Agent 都能写）
 
-A. **缩回原边界**：本期不做 `set_action` / `remove_action`，动作维持种子配置 + 阶段裁决。代价：放弃「Agent 生成动作」的目标。
-B. **最低审查面**（采用）：保留动作写入；画布加只读动作区（对象卡）+ 发布条点名动作差集 + toast 点名——人发布前看得见内容，画布不加编辑器。
-C. **改产品承诺**：动作内容不由画布审查，审查面是外部对话抄本。代价：MVP「人裁决动作定义」失守，画布不再是这条路径的工作台。
-
-A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真的。
+曾列三种：A 本期不写动作；B 只让 Agent 写、画布只读；C 画布不审查。产品改为：**人和 Agent 都能写**，同一套 op。对象卡表单**先做简单动作**（Goal 1），给人看效果后再决定要不要把验收入库/调拨/登记/结束维修/带阶段的报废加进表单。表单填不全的只展示、只许删。发布条与 toast 仍点名差集。
 
 ---
 
@@ -1046,7 +1121,7 @@ A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真�
 8. **提示注入（人把不可信文本贴进外部 Agent）。** Agent 可能被唆使 `delete_object`。缓解：人闸（发布/放弃）、skill 红线、画布可见 `deleted` 与 toast。不在 Ontos 内做二次 LLM 审查（那会变成第四槽 + 内循环）。
 9. **`replace_object` 抹掉派生/动作/已挂来源类上人加的未对照字段。** 锁定规则（计数 + 有来源时才锁未对照字段）禁止这类覆盖。没挂来源的残缺生成可以整份换。
 10. **ETag/`rev` 泄露。** 只说明「这份草稿改过几次」，无个体数据。`GET /api/ontology` 本就是画布只读面。
-11. **经 MCP 写入恶意动作定义。** `set_action` 与画布编辑同一道 `requireWriteAuth` 闸；`def` 必须过 `actionSchema`（机器可读），效应/前置经 `validateSemantics` 校验（含效应 `link`、转化成对、取值来源形状三项），自由 SQL 进不来（取值全部参数化，`EXPR_LIKE` 串在 `expr.ts` 被拒）；发布仍是人闸；`run_action` 只执行已发布快照上的动作，草稿里的动作谁也执行不了。
+11. **经 MCP 写入恶意动作定义。** `set_action` 与画布编辑同一道 `requireWriteAuth` 闸；`def` 必须过 `actionSchema`（机器可读），效应/前置经 `validateSemantics` 校验（含效应 `link`、转化成对、取值来源形状三项），自由 SQL 进不来（取值全部参数化，`EXPR_LIKE` 串在 `expr.ts` 被拒）；发布仍是人闸，且对象卡效应摘要必须印出「撤走」那一行——多挂 `delete` 不是只能看见动作名。`run_action` 只执行已发布快照上的动作，草稿里的动作谁也执行不了。同一属性换取值来源或字面量，摘要看不见，见 Risks。
 
 数据边界不变化：个体不进平台；交集仍内存算；草稿仍是配置，不是业务行。
 
@@ -1054,11 +1129,12 @@ A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真�
 
 ## Open Questions
 
-下列为已拍板的后续，不挡本期 PR（动作审查面已在本期范围内，见 §6 只读动作审查面）：
+下列不挡本期（简单动作表单先做出来给人看）：
 
-- **画布动作编辑器（人能在画布上改动作定义）：** 本期不做。本期加的是**只读审查面**（对象卡动作摘要 + 发布条点名，§6）；动作的创建/修改/删除仍只走 `set_action` / `remove_action`。若以后要让画布可编辑动作，另开设计。
-- **`outlets` 写入 op：** 本期不做（§2.2 规则 6）。带 `inform` 的动作只在已声明出站的空间可写；若以后要让 Agent 声明出站，另开设计（`draftOpSchema` 再扩判别值）。
-- **`list_candidates` / `overlap` 作为只读 MCP：** 本期不做。Agent 用自然语言请人打开「疑似重复」。避免在 MCP 上触发槽位 `suggestPairs` 与全列扫描。
+- **把演示五条完整规矩加进表单：** 看过简单表单效果再定。五条是设备上的报废、验收入库、调拨、登记、结束维修（阶段前置、一年保修、新部门校验、各源还没有、跨类改维修）。未加格子之前，这五条 Agent 能写，对象卡只展示、只许删。
+- **画布上填告知（`inform`）：** 本期不做。摘要能看见「告知谁」；要写告知走 Agent。
+- **`outlets` 写入 op：** 本期不做（§2.2 规则 6）。
+- **`list_candidates` / `overlap` 作为只读 MCP：** 本期不做。Agent 用自然语言请人打开「疑似重复」。
 
 ---
 
@@ -1066,7 +1142,7 @@ A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真�
 
 - `AGENTS.md` — 语言规则；交互架构 v5；关卡（选表、确认、裁决、发布）；不是 ReAct
 - `docs/Ontology平台MVP设计文档.md` §3 模块、§6 选型（不要 tool 循环 / 不要 Mastra）、§9 写与 Agent 边界（循环分三种、入口两个）
-- `docs/ontos-article.md` — 画布 / 再生成 / Agent 词表；§3.2 人选表再生成；§5.3 三视图不返回 sources；附录 B 配置骨架（本功能不改）
+- `docs/ontos-article.md` — §6 写入（请求点名、定义里 pre/effect）；附录 B 动作键与认人；画布 / 再生成 / Agent 词表；§5.3 已发布三视图不返回 sources；本功能不改附录 B 骨架
 - `src/app/api/mcp/route.ts` — JSON-RPC 信封、现七工具、`getPublished` 绑定
 - `src/server/schema/ops.ts` — `draftOpSchema`
 - `src/server/engine/configStore.ts` — `applyOp` / `import_objects` 拒已存在名 / `dropClass` / dirty / 每步 `validateSemantics`
@@ -1087,7 +1163,7 @@ A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真�
 
 ## PR Plan
 
-四个可独立审查、可单独合入的 PR。合入顺序即依赖顺序。每一 PR 合入后 `npm test` 全绿。
+四个 PR，合入顺序即依赖顺序。每一 PR 合入后 `npm test` 全绿。PR 1、PR 2 可单独合入（PR 2 **不得**带上 `set_action`）。PR 3 把动作写入、对象卡表单和摘要绑在一起，禁止拆成「先合 op、后合对象卡」。PR 4 硬依赖 PR 3。
 
 ### PR 1 — MCP 读工作副本 + `rev`（无写、无 UI 行为变化）
 
@@ -1109,42 +1185,50 @@ A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真�
 
 ---
 
-### PR 2 — `replace_object` + `apply_draft` + `list_tables`（无画布轮询）
+### PR 2 — `replace_object` + `apply_draft` + `list_tables`（无动作 op、无画布轮询）
 
-**标题：** `feat(mcp): apply_draft 写工作副本（含 replace_object 锁定与 set_action）`
+**标题：** `feat(mcp): apply_draft 写工作副本（含 replace_object 锁定）`
 
 **影响文件：**
 
-- `src/server/schema/ops.ts` — `replace_object`（`name` + `def: draftObjectSchema`）、`set_action`（`object` + `name` + `def: actionSchema`）、`remove_action`（`object` + `name`）；`draftObjectSchema = objectTypeSchema.omit({ actions, axioms })`，`import_objects` / `replace_object` 的类体统一用它；抽出 `draftOpVariantsWithoutSaveLayout` 供 MCP
-- `src/server/engine/configStore.ts` — `applyOp(op, ws, opts?: { base_rev })`：task 开头比 `base_rev`；`replaceBlockers`（计数；未对照字段**只在有来源时**）；`replace_object` / `set_action` / `remove_action` 分支（`remove_action` 删空后清掉 `actions` 键）；`import_objects` 的对象体校验从 `objectTypeSchema.parse` 换成 `draftObjectSchema.parse`（剥掉 `actions` / `axioms`）；**唯一一层** `enqueue`（失败续链）
-- `src/server/engine/validate.ts` — 动作校验补三项：效应 `link` 指向已有转化关系且 from/to 在宿主类上；每条 `transition` 关系被至少一条动作引用；取值来源形状（§2.2 规则 3 的 ①②③）；**独立函数 `validateActionShapes`（仍在 validate.ts），只在 `applyOp` / `mutateDraft` / 发布校验的 `validateSemantics` 之后调用，`loadPublished` / `rollbackTo` 不调**
-- `src/server/engine/adjudicate.ts` — `mergeInto` 复制被吸收类 `actions` 时跳过 `pre` / 效应 `filter` 的 `$link` 引用、或效应 `link` 项指向将被移除关系的动作（N1：先阶段后合并的多跳裁决不炸）
-- `src/server/engine/views.ts` — draft `read_class` 返回完整动作定义（`{ name, def }`）并调用 `replaceBlockers` 填 `replaceable` / `replace_blockers`；draft `list_classes` 返回 `outlets`
-- `src/app/api/mcp/route.ts` — 注册 `apply_draft`、`list_tables`；`requireWriteAuth`；信封 Zod（**`base_rev` 必填**，parse op 前剥离）；`mcpDraftOpSchema`（无 `save_layout`）；`applyOp(op, ws, { base_rev })`（路由里**不**比 rev、**不**再 enqueue）；`DraftReject` → `-32000`；`apply_draft`/`list_tables` 带 `space` → `-32602`；`list_tables` 按连接 catch；`read_class` description **补上**「能不能整份替换」与「完整动作定义」；`apply_draft` 返回 `names` 对 `set_action` / `remove_action` 带 `类名.动作名`；其余 description 按 §1 表
-- `src/tests/schema.test.ts` — 十三种操作；`replace_object` 收 `def` 拒把 `object` 当类体；`set_action` 的 `def` 必须过 `actionSchema`；`import_objects` / `replace_object` 的类体带 `actions` / `axioms` 会被剥掉（不报错、不落地）
-- `src/tests/configStore.test.ts` — 未锁定可替换；**无源但有字段的残缺生成可 `replace_object`**；已发布/多源/派生/动作/空 `actions: {}` 不误锁；有来源的未对照字段锁定；**锁定六条各拒一次**；替换后 `match` 断了则回退；`set_action` 新增、同名覆盖、`remove_action` 删除、删不存在的动作拒绝、**删最后一个动作后 `actions` 键消失且 dirty 收回**；`set_action` 效应指向不存在的类、效应 `link` 不存在或非转化关系、**`remove_action` 删掉转化关系唯一引用动作**、非法取值来源（`{ from: "generated" }` 在 update、`{ from: "bogus" }`、`{ property, from: "identity" }`、create 效应里的 `{ from: "current" }`）均整步回退；**先阶段后合并（`mergeInto` 带转化动作的类）不炸（含 pre/效应 filter 的 `$link` 引用被删关系的动作形状）；历史版本含效应 link 指向已删关系的配置加载不炸（`loadPublished` 不调 `validateActionShapes`）**；**`set_action` 之后再 `replace_object` 被「含动作」锁拒**；前一次 `DraftReject` 之后 `create_object` 仍成功；并发：`applyOp` 与 `{ base_rev: 0 }` 的第二次 `DraftReject` 且不落地
-- `src/tests/m4m6.test.ts` — 工具列表为九；`inputSchema` 存在且不含 `save_layout`；已发布类 `read_class space=draft` 的 `replaceable: false`；落地 `import_objects` 后 `getDraft` 能见；撞名、锁定、无令牌、`save_layout`、`base_rev` 字符串 `"12"` → `-32602`、`base_rev` 数字冲突 → `-32000`；`list_tables` 无 `sample` 键；未知连接名槽内 `error: "没有这个连接"`；`set_action` 写入后 `read_class space=draft` 能见该动作的**完整定义**，发布前 `query` 不受影响；`apply_draft` 缺 `base_rev` → `-32602`；`names` 对 `set_action` 返回 `类名.动作名`
+- `src/server/schema/ops.ts` — `replace_object`（`name` + `def: draftObjectSchema`）；`draftObjectSchema = objectTypeSchema.omit({ actions, axioms })`，`import_objects` / `replace_object` 的类体统一用它；抽出 `draftOpVariantsWithoutSaveLayout` 供 MCP（**本 PR 不含** `set_action` / `remove_action`）
+- `src/server/engine/configStore.ts` — `applyOp(op, ws, opts?: { base_rev })`：task 开头比 `base_rev`；`replaceBlockers`（计数；未对照字段**只在有来源时**）；`replace_object` 分支；`import_objects` 的对象体校验从 `objectTypeSchema.parse` 换成 `draftObjectSchema.parse`（剥掉 `actions` / `axioms`）；**唯一一层** `enqueue`（失败续链）
+- `src/server/engine/views.ts` — draft `read_class` 调用 `replaceBlockers` 填 `replaceable` / `replace_blockers`；draft `list_classes` 返回 `outlets`（**完整动作 def 在 PR 3**）
+- `src/app/api/mcp/route.ts` — 注册 `apply_draft`、`list_tables`；`requireWriteAuth`；信封 Zod（**`base_rev` 必填**，parse op 前剥离）；`mcpDraftOpSchema`（无 `save_layout`、无动作 op）；`applyOp(op, ws, { base_rev })`（路由里**不**比 rev、**不**再 enqueue）；`DraftReject` → `-32000`；`apply_draft`/`list_tables` 带 `space` → `-32602`；`list_tables` 按连接 catch；`read_class` description **补上**「能不能整份替换」；`apply_draft` description 按 §1 表（本 PR 的 op 清单还不提设置/删除动作——那两个 op 在 PR 3 才进 schema，本 PR 的 description 也不提，避免教一个还不存在的 op）
+- `src/tests/schema.test.ts` — 十三种操作（现十二种 + `replace_object`；`update_link` / `update_property` 已在基础 schema 里）；`replace_object` 收 `def` 拒把 `object` 当类体；`import_objects` / `replace_object` 的类体带 `actions` / `axioms` 会被剥掉（不报错、不落地）
+- `src/tests/configStore.test.ts` — 未锁定可替换；**无源但有字段的残缺生成可 `replace_object`**；已发布/多源/派生/动作/空 `actions: {}` 不误锁；有来源的未对照字段锁定；**锁定六条各拒一次**；替换后 `match` 断了则回退；前一次 `DraftReject` 之后 `create_object` 仍成功；并发：`applyOp` 与 `{ base_rev: 0 }` 的第二次 `DraftReject` 且不落地
+- `src/tests/m4m6.test.ts` — 工具列表为九；`inputSchema` 存在且不含 `save_layout`，`base_rev` 必填；已发布类 `read_class space=draft` 的 `replaceable: false`；落地 `import_objects` 后 `getDraft` 能见；撞名、锁定、无令牌、`save_layout`、`base_rev` 字符串 `"12"` → `-32602`、`base_rev` 数字冲突 → `-32000`、缺 `base_rev` → `-32602`；`list_tables` 无 `sample` 键；未知连接名槽内 `error: "没有这个连接"`
 
 **依赖：** PR 1（`getRev` / `space=draft` 供 `base_rev` 与读回）。
 
-**说明：** 开着的旧画布仍要人自己点一次才会看到变化——监视器在 PR 3。可用 MCP 客户端单独验收写入。画布 UI 不出现新按钮。`POST /api/draft` 因 schema 共用而能打 `replace_object` / `set_action` / `remove_action`，无调用方也安全。`replaceable` 在本 PR 才出现，skill 流程图不要提前按 PR 1 写。
+**说明：** 开着的旧画布仍要人自己点一次才会看到变化——监视器在 PR 3。可用 MCP 客户端单独验收**对象/字段/关系**写入。画布 UI 不出现新按钮。`POST /api/draft` 因 schema 共用而能打 `replace_object`，无调用方也安全。`replaceable` 在本 PR 才出现。**禁止把本 PR 当成动作写入的可用起点**——`set_action` 尚未进 schema。
 
 ---
 
-### PR 3 — 画布监视器
+### PR 3 — 画布监视器 + 对象卡动作表单 + `set_action` / `remove_action`
 
-**标题：** `feat(canvas): 草稿有外部改动时自动刷新`
+**标题：** `feat(canvas): 草稿有外部改动时自动刷新，对象卡可增删改动作`
 
 **影响文件：**
 
-- `src/components/CanvasPage.tsx` — 2s 轮询、Visibility、`fetch cache: "no-store"` + `If-None-Match`、toast（新增与去掉拼一句；**同名类的动作名增删/同名动作内容不同 → 点名「动作有更新：类.动作」**）、对象被删则收卡、`withLocalWrite` 覆盖 `op`/generate/publish/discard/rollback/**裁决 `onDone`**，成功路径保持 busy 到 `setOnt`，**`finally` 里放下**（失败也放）、描述框无焦点时按描述重挂；**对象卡加只读「动作」区**（名字 + 描述 + `pre` + 效应摘要，数据源是 ontology JSON 的动作摘要）；**发布条点名动作差集**（对照草稿与已发布的 `actions`：「将新增/覆盖/删除的动作」）；放弃确认句写明「放弃会连 Agent 写的动作和你改的字段一起没」
-- `src/app/api/ontology/route.ts` — JSON 里每个类的 `actions` 带完整摘要（名字 + `description` + `pre` + 效应摘要），对象卡只读动作区的数据源
+- `src/server/schema/ops.ts` — 本 PR 才加 `set_action`（`object` + `name` + `def: actionSchema`）、`remove_action`（`object` + `name`）；MCP `mcpDraftOpSchema` 同步纳入；`apply_draft` 的 tools/list 说明补上设置/删除动作
+- `src/server/engine/configStore.ts` — `set_action` / `remove_action` 分支（`remove_action` 删空后清掉 `actions` 键）；`applyOp` 在 `validateSemantics` 之后调 `validateActionShapes`
+- `src/server/engine/validate.ts` — 动作校验补四处：效应 `link` 指向已有转化关系且 from/to 在宿主类上；每条 `transition` 关系被至少一条动作引用；取值来源形状；`update`/`delete` 必须有 `identity` 或 `filter`（§2.2 规则 3 的 ①②③④）；**独立函数 `validateActionShapes`，只在 `applyOp` / `mutateDraft` / 发布校验的 `validateSemantics` 之后调用，`loadPublished` / `rollbackTo` 不调**
+- `src/server/engine/adjudicate.ts` — `mergeInto` 复制被吸收类 `actions` 时跳过 `pre` / 效应 `filter` 的 `$link` 引用、或效应 `link` 项指向将被移除关系的动作（先阶段后合并的多跳裁决不炸）
+- `src/server/engine/views.ts` — draft `read_class` 返回完整动作定义（`{ name, def }`）
+- `src/app/api/ontology/route.ts` — 顶层 `action_changes: { added, overwritten, removed }`（对照已发布算；`object_types[].actions` **不改形状**）；PR 1 的 `rev` / ETag 保持
+- `src/app/api/mcp/route.ts` — `apply_draft` 接受动作两个 op；`names` 对它们返回 `类名.动作名`；description 按 §1 表补全
+- `src/components/CanvasPage.tsx` — 2s 轮询、Visibility、`fetch cache: "no-store"` + `If-None-Match`、toast（§6 判定顺序：先动作差集再默认句；人手 `set_action` 不 toast 成外部）、对象被删则收卡、`withLocalWrite` 覆盖 `op`/generate/publish/discard/rollback/**裁决 `onDone`**，成功路径保持 busy 到 `setOnt`，**`finally` 里放下**（失败也放）、描述框无焦点时按描述重挂；**对象卡「动作」区**：列表（摘要 + 新增/已修改 + 编辑/删除）+ 「新建动作」表单（§6 字段表）+ `formCompatible`；**发布条 `title` 只印 `action_changes` 实际发生的子集**；放弃与删动作都先 `window.confirm`
 - `src/components/wsClient.ts` — 仅当需要：304 友好的 GET 助手（也可把轮询 `fetch` 留在 `CanvasPage`，不强迫改 seam）
-- 可选：`src/tests/routes.test.ts` 已在 PR 1 覆盖 ETag 与 `Cache-Control`。React 轮询不强制上 vitest
+- `src/tests/schema.test.ts` — 十五种操作；`set_action` 的 `def` 必须过 `actionSchema`
+- `src/tests/configStore.test.ts` — `set_action` 新增、同名覆盖、`remove_action` 删除、删不存在的动作拒绝、**删最后一个动作后 `actions` 键消失且 dirty 收回**；效应指向不存在的类、效应 `link` 不存在或非转化关系、**`remove_action` 删掉转化关系唯一引用动作**、非法取值来源均整步回退；**先阶段后合并不炸**；历史版本含效应 link 指向已删关系的配置加载不炸；**`set_action` 之后再 `replace_object` 被「含动作」锁拒**
+- `src/tests/m4m6.test.ts` — `set_action` 写入后 `read_class space=draft` 能见该动作的**完整定义**，发布前 `query` 不受影响；`names` 返回 `类名.动作名`
+- 纯函数测试 `formCompatible`：演示 `convert` / `transfer` / `scrap` / `register` / `finish_repair` 为假（无「编辑」）；一条「把本类非派生字段写成字面量、且 `identity: { from: identity }`」的 `update` 为真；`create` 且 `expiry: now/d` 为假
+- `src/tests/routes.test.ts` — `GET /api/ontology` 含 `action_changes`；种子配置有 `convert` 时 `overwritten` 在未改动作时为空
 
-**依赖：** PR 1（`getRev` + ETag + `no-store`）。不依赖 PR 2 才能编译，但端到端「Agent 写入 → toast」需要 PR 2。
+**依赖：** PR 1（`getRev` + ETag + `no-store`）+ **PR 2（`apply_draft` 已存在，本 PR 往上加动作 op）**。审查面展示种子里已有的动作不依赖 PR 2 也能编译，但 **`set_action` 与审查面必须同一 PR 合入**——禁止先合动作 op、后合对象卡。
 
-**说明：** 无新聊天 UI。toast 用上文白话。不自动打开裁决面板。仅 `objects.length` 从 0 变为非 0 时允许现有的一次 `fitView`。
+**说明：** 无新聊天 UI。toast 用上文白话。不自动打开裁决面板。仅 `objects.length` 从 0 变为非 0 时允许现有的一次 `fitView`。本 PR 合入之前，有人会点发布的环境不得出现 `set_action`。
 
 ---
 
@@ -1157,10 +1241,10 @@ A 放弃目标，C 动产品底线；B 只加只读展示，关卡仍然是真�
 - `skills/ontos-query/SKILL.md`（新）— 现 `skills/ontos/SKILL.md` 迁入后只保留查数内容：工具表删 `propose_ontology` / `propose_action` / `run_action` **三行**（只留 `search` / `list_classes` / `read_class` / `query`）；frontmatter 删动作触发词；删「动作 JSON 语法」节与剧本二（迁入 `ontos-action-run`）；红线只留查数条（删动作前置/投影条）
 - `skills/ontos-action-run/SKILL.md`（新）— 工具表（`run_action` / `read_class` / `query`）、三步方法论（先查前置 → 执行 → 复查）、查询语法与 `ontos-query` 同文完整内嵌（不维护子集）、红线（只执行已发布动作；不碰草稿；不原样重试）
 - `skills/ontos-canvas/SKILL.md`（新）— 工具表（`space: "draft"` 必传）、四步方法论、落地分支（`def` 只来自 `propose_ontology`）、红线（不许发布/裁决/回滚；不 `query` / `run_action`；不许 `delete` 再 `import` 绕锁）
-- `skills/ontos-action/SKILL.md`（新）— 工具表（`set_action` / `remove_action`、`read_class space=draft` 完整动作定义、`list_classes` 的 `outlets`、`propose_action` 一律 `space: "draft"`）、四步方法论、**内嵌附录 B 动作定义骨架**（`pre` / `effect` 的 `update|create|delete|link` / `inform` / `generate` 列表 / 禁止 `$root` 与 `write` 名单——自包含要求：Agent 往往只加载这一个 skill；并写明「类上已有转化关系时 `propose_action` 只给转化模板，改属性动作要按骨架拼」）、红线（转化**关系**由裁决独占；`inform` 出站先查 `outlets`；同名覆盖先读回；删转化动作走替代动作再删；不许发布/裁决）
+- `skills/ontos-action/SKILL.md`（新）— 工具表（`set_action` / `remove_action`、`read_class space=draft` 完整动作定义、`list_classes` 的 `outlets`、`propose_action` 一律 `space: "draft"`）、四步方法论、**内嵌附录 B 动作定义骨架**（`pre` / `effect` 的 `update|create|delete|link` / `inform` / `generate` 列表 / 禁止 `$root` 与 `write` 名单——自包含要求：Agent 往往只加载这一个 skill；并写明「类上已有转化关系时 `propose_action` 只给转化模板，改属性动作要按骨架拼」）、红线（转化**关系**由裁决独占；`import_objects` / `replace_object` 会剥掉 `actions`，新类也要另走 `set_action`；`inform` 出站先查 `outlets`；同名覆盖先读回；删转化动作走替代动作再删；不许发布/裁决）
 - `README.md` — 接口表 MCP 行；建模流补一句「外部 Agent 经 `apply_draft` 写工作副本，画布轮询显示」；skill 列表改为四个
 - 删除 `skills/ontos/SKILL.md`（查数内容迁入 `ontos-query`），但旧路径留一份跳转说明（「已拆成四份：查数用 `ontos-query`，执行动作用 `ontos-action-run`，改画布用 `ontos-canvas`，写动作定义用 `ontos-action`」）——已指向旧路径的调用方不能空引用
 
-**依赖：** PR 2（工具已存在）+ **PR 3（硬依赖：skill 与 README 写「画布轮询 / 动作区显示新动作」之前，监视器与只读动作审查面必须已合）**。
+**依赖：** PR 2（工具已存在）+ **PR 3（硬依赖：skill 与 README 写「画布轮询 / 对象卡能加动作」之前，监视器与动作表单必须已合）**。
 
 **说明：** 只改文档。不改附录 B，不改 `ontos-article.md` 配置骨架。若文章词表要把 Agent 从「只编查询/动作」扩成「也可编草稿 op」，另开文案任务，不塞进本 PR。

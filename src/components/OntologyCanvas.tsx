@@ -45,9 +45,10 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
           {data.properties.map((p) => (
             <div key={p.name} className="node-prop">
               <code>{p.name}</code>
-              <span className="t">
+              <span className="t" style={{ maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {p.type}
                 {p.derived ? " · 派生" : ""}
+                {p.description ? ` · ${p.description}` : ""}
               </span>
             </div>
           ))}
@@ -89,15 +90,17 @@ export default function OntologyCanvas(props: CanvasProps) {
   );
 }
 
-/** 边色一处判：点中 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn 同值——SVG marker 不吃 CSS var，故常量单源）。 */
+/** 边色一处判：点中 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn 同值——SVG marker 不吃 CSS var，故常量单源）。
+ *  默认边也必须显式给 marker 颜色：color 缺省时不渲染箭头（marker 不继承边的描边色）。 */
 const EDGE_ACCENT = "#3b36b0"; // = var(--accent)
 const EDGE_WARN = "#8a5f0b"; // = var(--warn)
+const EDGE_DEFAULT = "#b1b1b7"; // = xyflow 默认边色（.react-flow__edge-path 的默认 stroke）
 function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["style"]; markerEnd: Edge["markerEnd"] } {
   const selected = l.name === selectedLink;
   const transition = l.kind === "transition";
   return {
     style: selected ? { stroke: "var(--accent)", strokeWidth: 2.5 } : transition ? { strokeDasharray: "6 4", stroke: "var(--warn)" } : undefined,
-    markerEnd: { type: MarkerType.ArrowClosed, color: selected ? EDGE_ACCENT : transition ? EDGE_WARN : undefined },
+    markerEnd: { type: MarkerType.ArrowClosed, color: selected ? EDGE_ACCENT : transition ? EDGE_WARN : EDGE_DEFAULT },
   };
 }
 

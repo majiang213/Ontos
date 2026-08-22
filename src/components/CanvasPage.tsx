@@ -7,7 +7,7 @@ import PairCard from "./PairCard";
 import Bezel from "./Bezel";
 import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";
 import QuestionsCard from "./QuestionsCard";
-import { AddProperty, ConnectForm, CreateForm, LinkForm, Section } from "./forms";
+import { ConnectForm, CreateForm, FieldForm, LinkForm, PROP_TYPES, Section } from "./forms";
 import type { PairAdvice } from "../server/engine/llmSlot";
 
 interface OntologyResp {
@@ -23,7 +23,7 @@ interface IntrospectResp {
   sources: {
     connection: string;
     error?: string;
-    tables: { name: string; columns: { name: string; type: string; pk: boolean }[]; sample?: Record<string, unknown>[] }[];
+    tables: { name: string; columns: { name: string; type: string; pk: boolean; comment?: string }[]; sample?: Record<string, unknown>[] }[];
   }[];
 }
 
@@ -53,6 +53,9 @@ export default function CanvasPage() {
   const [generating, setGenerating] = useState(false);
   const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [fieldForm, setFieldForm] = useState<{ mode: "create" } | { mode: "edit"; name: string } | null>(null); // 字段区：列表 ↔ 表单
+  const cardName = card?.kind === "object" ? card.name : null;
+  useEffect(() => setFieldForm(null), [cardName]); // 换卡收表单
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []); // 卸载清定时器
 
@@ -173,6 +176,7 @@ export default function CanvasPage() {
           type: d.type,
           derived: Boolean(d.derived),
           values: d.values,
+          description: d.description,
         })),
         sources: Object.entries(t.sources ?? {}).map(([srcName, s]: [string, any]) => ({
           key: srcName,
@@ -430,7 +434,7 @@ export default function CanvasPage() {
               <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
             </div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", margin: "2px 0 10px" }}>
-              {card.from} → {card.to}。关系得说清靠哪两个字段对上，默认用两边的识别字段。
+              {card.from} → {card.to}。关系得说清靠哪两个字段对上，默认用两边的唯一键。
             </div>
             <LinkForm
               key={`${card.from}|${card.to}`}
@@ -450,46 +454,96 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 右侧：关系详情卡（点边弹出） */}
+      {/* 右侧：关系详情卡（点边弹出）：名称/反向名/描述可改，失焦保存 */}
       {card?.kind === "linkDetail" && ont?.link_types?.[card.name] && (
         <div className="float-card float-tr" style={{ width: 320 }}>
           <Bezel pad={16}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
-              <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
-            </div>
             {(() => {
               const l = ont.link_types[card.name] as any;
               return (
-                <div style={{ fontSize: 12, lineHeight: 2.2, color: "var(--ink-2)", margin: "6px 0 10px" }}>
-                  <div>{l.from} → {l.to}{l.inverse ? `（反向名 ${l.inverse}）` : ""}</div>
-                  {l.card && <div>基数 {l.card}</div>}
-                  {l.match && <div>配对字段：{l.match.map((m: any) => `${m.from} → ${m.to}`).join("，")}</div>}
-                  {l.transition && <div>状态转化：{l.transition.property} 从「{l.transition.from}」到「{l.transition.to}」</div>}
-                  {l.description && <div style={{ color: "var(--ink-3)" }}>{l.description}</div>}
-                </div>
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
+                    <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
+                  </div>
+                  <div style={{ fontSize: 12, lineHeight: 2, color: "var(--ink-3)", margin: "2px 0 10px" }}>
+                    <div>{l.from} → {l.to}{l.card ? `，基数 ${l.card}` : ""}</div>
+                    {l.transition && <div>状态转化：{l.transition.property} 从「{l.transition.from}」到「{l.transition.to}」</div>}
+                    {l.match && <div>配对字段：{l.match.map((m: any) => `${m.from} → ${m.to}`).join("，")}</div>}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11, color: "var(--ink-3)" }}>
+                    <label>
+                      名称
+                      <input
+                        key={`name:${card.name}`} /* 换关系强制重挂，旧名不写进新关系 */
+                        className="text-in"
+                        style={{ width: "100%", fontSize: 12, padding: "6px 10px" }}
+                        defaultValue={card.name} /* 关系名是 link_types 的键，不在条目里 */
+                        onBlur={async (e) => {
+                          const v = e.target.value.trim();
+                          if (!v || v === e.target.defaultValue) return;
+                          const ok = await op({ op: "update_link", name: card.name, new_name: v });
+                          if (ok) {
+                            setCard({ kind: "linkDetail", name: v }); // 边以关系名为键：卡跟新名走
+                            showToast(`关系已改名为 ${v}（进草稿，发布后生效）`);
+                          }
+                        }}
+                      />
+                    </label>
+                    <label>
+                      反向名（可选）
+                      <input
+                        key={`inv:${card.name}`}
+                        className="text-in"
+                        style={{ width: "100%", fontSize: 12, padding: "6px 10px" }}
+                        defaultValue={l.inverse ?? ""}
+                        onBlur={async (e) => {
+                          const v = e.target.value.trim();
+                          if (v === e.target.defaultValue) return;
+                          const ok = await op({ op: "update_link", name: card.name, inverse: v });
+                          if (ok) showToast(`反向名已更新（进草稿，发布后生效）`);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      描述（可选）
+                      <textarea
+                        key={`desc:${card.name}`}
+                        className="ctl"
+                        rows={2}
+                        style={{ width: "100%" }}
+                        defaultValue={l.description ?? ""}
+                        onBlur={async (e) => {
+                          if (e.target.value === e.target.defaultValue) return;
+                          const ok = await op({ op: "update_link", name: card.name, description: e.target.value });
+                          if (ok) showToast(`描述已更新（进草稿，发布后生效）`);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <button
+                    className="chip"
+                    style={{ color: "var(--danger)", marginTop: 10 }}
+                    onClick={async () => {
+                      const ok = await op({ op: "delete_link", name: card.name });
+                      if (ok) {
+                        setCard(null);
+                        showToast(`已删除关系 ${card.name}（进草稿，发布后生效）`);
+                      }
+                    }}
+                  >
+                    删除关系
+                  </button>
+                </>
               );
             })()}
-            <button
-              className="chip"
-              style={{ color: "var(--danger)" }}
-              onClick={async () => {
-                const ok = await op({ op: "delete_link", name: card.name });
-                if (ok) {
-                  setCard(null);
-                  showToast(`已删除关系 ${card.name}（进草稿，发布后生效）`);
-                }
-              }}
-            >
-              删除关系
-            </button>
           </Bezel>
         </div>
       )}
 
       {/* 右侧：对象编辑卡 */}
       {sel && card?.kind === "object" && (
-        <div className="float-card float-tr" style={{ width: 360, maxHeight: "calc(100% - 110px)" }}>
+        <div className="float-card float-tr" style={{ width: 400, maxHeight: "calc(100% - 110px)" }}>
           <Bezel pad={16} coreStyle={{ overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
               <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
@@ -503,7 +557,7 @@ export default function CanvasPage() {
                   key={card.name} /* 切换对象时强制重挂，否则旧描述会写进新对象 */
                   className="ctl"
                   defaultValue={sel.description ?? ""}
-                  rows={2}
+                  rows={1}
                   style={{ width: "100%" }}
                   onBlur={(e) => {
                     // 跟挂载时的值比（defaultValue），不跟实时 sel 比——编辑期间的别处 refresh 不换基准
@@ -511,11 +565,14 @@ export default function CanvasPage() {
                   }}
                 />
               </Section>
-              <Section title={`识别字段（跨源认人靠它）`}>
+              <Section title="唯一键">
                 <select
                   className="ctl"
                   value={sel.identity ?? ""}
-                  onChange={(e) => void op({ op: "set_identity", object: card.name, name: e.target.value })}
+                  onChange={async (e) => {
+                    const ok = await op({ op: "set_identity", object: card.name, name: e.target.value });
+                    if (!ok) e.target.value = sel.identity ?? ""; // 被拒则回显（如选了派生字段）
+                  }}
                 >
                   <option value="">未设置</option>
                   {Object.entries(sel.properties).filter(([, d]: [string, any]) => !d.derived).map(([p]) => (
@@ -524,21 +581,54 @@ export default function CanvasPage() {
                 </select>
               </Section>
               <Section title="字段">
-                {Object.entries(sel.properties).map(([p, d]: [string, any]) => (
-                  <div key={p} style={{ fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                    <span>
-                      <code>{p}</code> <span style={{ color: "var(--ink-3)" }}>{d.type}{d.derived ? " · 派生" : ""}</span>
-                    </span>
-                    <button
-                      className="x-btn"
-                      title={sel.identity === p ? "识别字段不能直接删" : "删除字段"}
-                      onClick={() => void op({ op: "remove_property", object: card.name, name: p })}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                <AddProperty onAdd={(name, type) => op({ op: "add_property", object: card.name, name, type })} />
+                {fieldForm ? (
+                  <FieldForm
+                    initial={fieldForm.mode === "edit" ? { name: fieldForm.name, ...(sel.properties[fieldForm.name] as any) } : undefined}
+                    onSave={async (v) => {
+                      if (fieldForm.mode === "create") {
+                        return op({
+                          op: "add_property",
+                          object: card.name,
+                          name: v.name,
+                          type: v.type,
+                          description: v.description || undefined,
+                          values: v.type === "enum" && v.values.length ? v.values : undefined,
+                        });
+                      }
+                      return op({
+                        op: "update_property",
+                        object: card.name,
+                        name: fieldForm.name,
+                        new_name: v.name !== fieldForm.name ? v.name : undefined,
+                        type: v.type,
+                        description: v.description,
+                        values: v.type === "enum" ? v.values : undefined,
+                      });
+                    }}
+                    onCancel={() => setFieldForm(null)}
+                  />
+                ) : (
+                  <>
+                    {Object.entries(sel.properties).map(([p, d]: [string, any]) => (
+                      <div key={p} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <code>{p}</code> <span style={{ color: "var(--ink-3)" }}>{d.type}{d.derived ? " · 派生" : ""}</span>
+                          {d.description ? <span style={{ color: "var(--ink-3)" }}> · {d.description}</span> : null}
+                          {d.type === "enum" && d.values?.length ? <span style={{ color: "var(--ink-3)" }}> · {d.values.join("/")}</span> : null}
+                        </span>
+                        <button className="chip" style={{ fontSize: 11 }} title="编辑这个字段" onClick={() => setFieldForm({ mode: "edit", name: p })}>编辑</button>
+                        <button
+                          className="x-btn"
+                          title={sel.identity === p ? "唯一键不能直接删，先在上方换一个" : "删除字段"}
+                          onClick={() => void op({ op: "remove_property", object: card.name, name: p })}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button className="btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setFieldForm({ mode: "create" })}>加字段</button>
+                  </>
+                )}
               </Section>
               <Section title="来源">
                 {Object.keys(sel.sources ?? {}).length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>还没有来源——这个对象是手工建的，没挂任何表</div>}
@@ -606,7 +696,7 @@ export default function CanvasPage() {
                         <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
                           <span>
                             <code>{c.name}</code>
-                            <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}</span>
+                            <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}{c.comment ? ` · ${c.comment}` : ""}</span>
                           </span>
                           <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
                         </div>

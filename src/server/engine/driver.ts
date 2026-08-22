@@ -19,7 +19,7 @@ export interface Condition {
 
 export interface TableInfo {
   name: string;
-  columns: { name: string; type: string; pk: boolean }[];
+  columns: { name: string; type: string; pk: boolean; comment?: string }[];
 }
 
 export interface SourceDriver {

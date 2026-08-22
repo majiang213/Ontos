@@ -37,17 +37,19 @@ describe("configSchema", () => {
 });
 
 describe("draftOpSchema", () => {
-  it("十种操作各收一例", () => {
+  it("十二种操作各收一例", () => {
     const ops: unknown[] = [
       { op: "create_object", name: "vendor", kind: "thing" },
       { op: "delete_object", name: "vendor" },
       { op: "update_object", name: "vendor", description: "供应商" },
       { op: "add_property", object: "vendor", name: "vendor_no", type: "string" },
       { op: "remove_property", object: "vendor", name: "vendor_no" },
+      { op: "update_property", object: "vendor", name: "vendor_no", new_name: "vendor_code", type: "string", description: "供应商编号" },
       { op: "set_identity", object: "vendor", name: "vendor_no" },
       { op: "save_layout", positions: { vendor: { x: 10, y: 20 } } },
       { op: "create_link", name: "supplies", from: "vendor", to: "equipment", match: { from: "vendor_no", to: "vendor_no" } },
       { op: "delete_link", name: "supplies" },
+      { op: "update_link", name: "supplies", new_name: "supplied_by", description: "供应关系" },
       { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } } },
     ];
     for (const op of ops) expect(draftOpSchema.parse(op)).toBeTruthy();
