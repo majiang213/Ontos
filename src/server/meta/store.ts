@@ -82,100 +82,109 @@ class MysqlBackend implements MetaBackend {
 /* ---------- DDL（两个方言，同一张结构） ---------- */
 
 const SQLITE_DDL = `
-CREATE TABLE IF NOT EXISTS onto_workspace (
+CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个空间一行
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
-  seed_from TEXT,
-  layout TEXT,
+  name TEXT NOT NULL UNIQUE,                  -- 空间名（小写字母/数字/中划线/下划线）
+  seed_from TEXT,                             -- 起步来源：template=演示模板；lazy=被元数据写抢注
+  layout TEXT,                                -- 画布界面状态 JSON：对象摆位 + 线的弯折点 + 端点钉点
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS onto_version (
+CREATE TABLE IF NOT EXISTS onto_version (     -- 版本快照：发布/回滚各插一行，历史链不断
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  version INTEGER NOT NULL,
-  yaml TEXT NOT NULL,
-  origin TEXT NOT NULL DEFAULT 'publish',   -- publish | rollback
-  revert_of INTEGER,
-  note TEXT,
+  version INTEGER NOT NULL,                   -- 首版为 1；已发布版 = 该空间 MAX(version)
+  yaml TEXT NOT NULL,                         -- 本体 YAML 全量快照（不存增量 diff）
+  origin TEXT NOT NULL DEFAULT 'publish',     -- publish | rollback
+  revert_of INTEGER,                          -- 回滚自哪个版本；origin=rollback 时有值
+  note TEXT,                                  -- 发布说明
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, version)
 );
-CREATE TABLE IF NOT EXISTS conn_source (
+CREATE TABLE IF NOT EXISTS conn_source (      -- 数据源连接：本体按 name 引用
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL,
-  host TEXT, port INTEGER, db_name TEXT,
-  ro_user TEXT, ro_pass TEXT,
-  rw_user TEXT, rw_pass TEXT,
-  options TEXT,
+  name TEXT NOT NULL,                         -- 连接名
+  type TEXT NOT NULL,                         -- mysql | pg | sqlite
+  host TEXT,
+  port INTEGER,
+  db_name TEXT,
+  ro_user TEXT,                               -- 只读账号：读表结构与问数用
+  ro_pass TEXT,                               -- 密码加密存
+  rw_user TEXT,                               -- 可写账号：动作写回用，可空
+  rw_pass TEXT,                               -- 密码加密存
+  options TEXT,                               -- 方言项 JSON：ssl、超时等
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, name)
 );
-CREATE TABLE IF NOT EXISTS adj_decision (
+CREATE TABLE IF NOT EXISTS adj_decision (     -- 裁决留痕：人定的，不可重算
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  version INTEGER,
-  class_a TEXT NOT NULL, class_b TEXT NOT NULL,
-  source_a TEXT NOT NULL, source_b TEXT NOT NULL,
-  llm_advice TEXT,
-  rate REAL,
-  evidence TEXT,
-  verdict TEXT NOT NULL,
-  decided_by TEXT NOT NULL,
+  version INTEGER,                            -- 结论生效的已发布版本，发布时回填
+  class_a TEXT NOT NULL,                      -- 被裁决的两个类
+  class_b TEXT NOT NULL,
+  source_a TEXT NOT NULL,                     -- 两个类各自来自的连接
+  source_b TEXT NOT NULL,
+  llm_advice TEXT,                            -- 模型建议与依据
+  rate REAL,                                  -- 裁决时看到的交集率
+  evidence TEXT,                              -- 证据快照 JSON：归一化规则、样本量、交集数；交集可重算，快照留裁决时点
+  verdict TEXT NOT NULL,                      -- same | overlap | stage | name_similar | skip（同一 | 部分重叠 | 阶段 | 仅名称相似 | 跳过）
+  decided_by TEXT NOT NULL,                   -- 裁决人
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS adj_overlap (
+CREATE TABLE IF NOT EXISTS adj_overlap (      -- 交集计算记录：机器算的，可重算；只落计数，标识值集合不落盘
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  class_a TEXT NOT NULL, class_b TEXT NOT NULL,
-  norm_rule TEXT,
-  count_a INTEGER NOT NULL, count_b INTEGER NOT NULL, count_hit INTEGER NOT NULL,
-  rate REAL NOT NULL,
+  class_a TEXT NOT NULL,                      -- 被比对的两个类
+  class_b TEXT NOT NULL,
+  norm_rule TEXT,                             -- 归一化规则
+  count_a INTEGER NOT NULL,                   -- 两类的标识数
+  count_b INTEGER NOT NULL,
+  count_hit INTEGER NOT NULL,                 -- 交集数
+  rate REAL NOT NULL,                         -- 交集率 = |交集| / max(|A|, |B|)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS ont_question (
+CREATE TABLE IF NOT EXISTS ont_question (     -- 验收问题集
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  version INTEGER,
-  question TEXT NOT NULL,
-  expected TEXT,
-  status TEXT NOT NULL DEFAULT '未跑',
-  detail TEXT
+  version INTEGER,                            -- 最后一次跑批时的本体版本
+  question TEXT NOT NULL,                     -- 自然语言问题
+  expected TEXT,                              -- 纯数字=比对行数；字段=值=至少一行对上；留空=能查出就算过
+  status TEXT NOT NULL DEFAULT '未跑',        -- 未跑 / 通过 / 编译失败 / 执行出错 / 答案不符
+  detail TEXT                                 -- 失败原因（白话），通过时清空
 );
-CREATE TABLE IF NOT EXISTS log_query (
+CREATE TABLE IF NOT EXISTS log_query (        -- 问数留痕：存请求与成败，不存结果集
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  version INTEGER,
-  session_id TEXT,
-  model TEXT,
-  question TEXT,
-  query_json TEXT,
-  row_count INTEGER,
-  error TEXT,
-  duration_ms INTEGER,
-  ok INTEGER NOT NULL,
+  version INTEGER,                            -- 查询依据的本体版本
+  session_id TEXT,                            -- 关联的会话
+  model TEXT,                                 -- 编查询用的模型（离线回退也记）
+  question TEXT,                              -- 自然语言问题
+  query_json TEXT,                            -- 编出的结构化查询
+  row_count INTEGER,                          -- 当时返回的行数；不是结果集
+  error TEXT,                                 -- 失败原因摘要
+  duration_ms INTEGER,                        -- 耗时（毫秒）
+  ok INTEGER NOT NULL,                        -- 1 成 0 败
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS log_action (
+CREATE TABLE IF NOT EXISTS log_action (       -- 动作留痕
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  version INTEGER,
-  action TEXT NOT NULL,
-  object_type TEXT NOT NULL,
-  subject TEXT NOT NULL,
-  request_json TEXT,
-  projections TEXT,
-  error TEXT,
-  duration_ms INTEGER,
-  ok INTEGER NOT NULL,
+  version INTEGER,                            -- 动作依据的本体版本
+  action TEXT NOT NULL,                       -- 动作名
+  object_type TEXT NOT NULL,                  -- 类名
+  subject TEXT NOT NULL,                      -- 请求点名的个体识别值
+  request_json TEXT,                          -- 请求参数
+  projections TEXT,                           -- 各条写回的成败 JSON；演示期不拆子表
+  error TEXT,                                 -- 前置/公理拒绝的原因；拒绝发生在写回之前
+  duration_ms INTEGER,                        -- 耗时（毫秒）
+  ok INTEGER NOT NULL,                        -- 1 成 0 败
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS meta_seq (
+CREATE TABLE IF NOT EXISTS meta_seq (         -- 发号器：generate 的 sequence 片段按名取号
   workspace_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  value INTEGER NOT NULL,
+  name TEXT NOT NULL,                         -- 序列名（如 appt_no）；按空间分开，各自起号
+  value INTEGER NOT NULL,                     -- 当前已发到几号
   PRIMARY KEY (workspace_id, name)
 );
 `;
