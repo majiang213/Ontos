@@ -236,6 +236,15 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
         l.to = to;
         if (match) l.match = match;
       }
+      if (input.match !== undefined) {
+        // 改配对字段：与改两端同闸——转化关系没有配对、被引用的关系改了会静默变语义
+        if (l.transition) throw new DraftReject("转化关系没有配对字段可改");
+        const refs = linkRefs(d, input.name);
+        if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}，先改引用它的动作再改配对`);
+        if (!d.object_types[l.from].properties[input.match.from]) throw new DraftReject(`${l.from} 上没有属性 ${input.match.from}`);
+        if (!d.object_types[l.to].properties[input.match.to]) throw new DraftReject(`${l.to} 上没有属性 ${input.match.to}`);
+        l.match = [{ from: input.match.from, to: input.match.to }];
+      }
       if (input.description !== undefined) l.description = input.description || undefined; // 空串 = 清掉
       if (input.inverse !== undefined) {
         if (input.inverse && !/^[a-z][a-z0-9_]*$/.test(input.inverse)) throw new DraftReject("反向名必须是小写字母/数字/下划线，字母开头");
