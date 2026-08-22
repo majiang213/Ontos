@@ -23,6 +23,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
+import FloatingConnectionLine from "./FloatingConnectionLine";
 
 // CanvasObject/CanvasLink 定义在同目录 layout.ts（布局是唯一下游定义点）；这里再导出，老调用方不用改
 export type { CanvasLink, CanvasObject };
@@ -31,8 +32,9 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
   const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
   return (
     <div className={cls}>
-      {/* 上下各一对连接点：平时透明，悬停节点时浮现；从底部拖出、落到别家顶部即连线 */}
-      <Handle type="target" position={Position.Top} />
+      {/* 上下各一对连接点：平时透明，悬停节点时浮现；从底部拖出、落到别家身上即连线。
+          顶点只接不出：方向恒为拖出节点 → 落点节点，与连线预览一致 */}
+      <Handle type="target" position={Position.Top} isConnectableStart={false} />
       <Handle type="source" position={Position.Bottom} />
       <div className="node-core">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -190,6 +192,7 @@ function Flow({ objects, links, layout, selectedLink, onSelect, onSelectLink, on
       connectionMode={ConnectionMode.Loose}
       connectionRadius={150} // 半径要盖过节点半身位（节点最大 288×~220），落在节点正中也能吸附
       connectOnClick={false} // 点选连线会和节点点击（开编辑卡）打架，只保留拖拽一种手势
+      connectionLineComponent={FloatingConnectionLine} // 预览与最终边同算法：选中的落点就是新建后的落点
       deleteKeyCode={null} // 删除只走编辑卡/详情卡：键盘删节点不过草稿，状态会乱
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}

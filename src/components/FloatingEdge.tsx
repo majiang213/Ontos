@@ -10,8 +10,8 @@ interface Pt {
   y: number;
 }
 
-/** 中心连线与节点矩形边框的交点。 */
-function borderPoint(from: { x: number; y: number; w: number; h: number }, to: Pt): Pt {
+/** 中心连线与节点矩形边框的交点。连线预览（FloatingConnectionLine）共用这套算法：拖的时候什么样，松手就什么样。 */
+export function borderPoint(from: { x: number; y: number; w: number; h: number }, to: Pt): Pt {
   const cx = from.x + from.w / 2;
   const cy = from.y + from.h / 2;
   const dx = to.x - cx;
@@ -21,7 +21,7 @@ function borderPoint(from: { x: number; y: number; w: number; h: number }, to: P
   return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
-function rectOf(node: { internals: { positionAbsolute: { x: number; y: number } }; measured: { width?: number; height?: number } }) {
+export function rectOf(node: { internals: { positionAbsolute: { x: number; y: number } }; measured: { width?: number; height?: number } }) {
   return {
     x: node.internals.positionAbsolute.x,
     y: node.internals.positionAbsolute.y,
