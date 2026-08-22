@@ -151,7 +151,7 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 3. `src/server/engine/individual.ts` 配 `query.ts`：读个体（下推、对齐、派生）在 individual；问数树投影在 query。
 4. `src/server/engine/action.ts`：写的路径——前置、效应、投影、留痕；读个体走 individual，不经过 query。
 5. `src/server/engine/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。引用扫描在 `refs.ts`（纯函数），资格谓词在 `eligibility.ts`，进程级单例收口在 `runtime.ts`。
-6. `src/app/api/mcp/route.ts` 配 `skills/`（四个目录）：外部 Agent 的完整入口——工具清单、信封与错误码约定、发现→组装→执行→纠错的用法。
+6. `src/app/api/mcp/route.ts` 配 `tools.ts` 与 `skills/`（四个目录）：外部 Agent 的完整入口——route 只剩信封与调度，九个工具登记在 tools.ts 一张表（说明/inputSchema/space/令牌/handler），skill 正文是调用方法论。
 7. `src/tests/engine.test.ts`：引擎的行为约定。改引擎先跑 `npm test`，全绿再谈别的。
 
 ## 技术栈
