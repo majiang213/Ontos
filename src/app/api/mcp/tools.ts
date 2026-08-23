@@ -52,7 +52,7 @@ const applyDraftEnvelope = z.looseObject({
   base_rev: z.number().int().nonnegative(),
 });
 
-/** apply_draft 的 inputSchema：op 联合由 mcpDraftOpSchema 派生（天然没有 save_layout），再并上必填的 base_rev。 */
+/** apply_draft 的 inputSchema：op 联合由 mcpDraftOpSchema 派生（天然没有 save_*：摆位/弯折/钉点是界面状态），再并上必填的 base_rev。 */
 const applyDraftInputSchema = {
   ...(z.toJSONSchema(mcpDraftOpSchema) as Record<string, unknown>),
   properties: { base_rev: { type: "integer", minimum: 0, description: "先 list_classes space=draft 拿到的 rev" } },
@@ -193,7 +193,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "apply_draft",
     description:
-      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（set_action / remove_action）。不能发布、放弃、裁决、回滚，也不能改节点位置。不接受 space。",
+      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（set_action / remove_action）。不能发布、放弃、裁决、回滚；摆位、线的弯折和端点钉点是界面状态，也不归这里。不接受 space。",
     inputSchema: applyDraftInputSchema,
     auth: true,
     handler: async (ctx, args) => {

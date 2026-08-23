@@ -1,5 +1,5 @@
 // SQLite fixture 驱动 —— 每个连接一个内存库，用真实 SQL 执行下推与写回。
-// 两种用途：引擎 golden 测试；没有 MySQL/PG 时的离线演示。
+// 三种用途：引擎 golden 测试；test 空间的离线演示种子；用户接入的 sqlite 文件库的驱动（load.ts registerSaved 复用本类）。
 // 种子数据按演示剧本：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）。
 
 import { DatabaseSync } from "node:sqlite";
