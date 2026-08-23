@@ -196,14 +196,14 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getPublished(WS)).config.object_types.vendor).toBeDefined();
   });
 
-  it("未发布的编辑落 JSON 不落 YAML；重启后工作副本还在，版本链仍是 v1", async () => {
+  it("未发布的编辑只进工作行（canvas_json）不落 YAML；重启后工作副本还在，版本链仍是 v1", async () => {
     const s = await freshStore();
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
     const store = await meta();
-    const saved = await store.getDraftJson(WS);
+    const saved = await store.getWorkingPack(WS);
     expect(saved).toBeDefined();
     expect(JSON.stringify(saved)).toContain("vendor");
-    expect(JSON.stringify(saved).trimStart().startsWith("{")).toBe(true); // JSON，不是 YAML
+    expect((saved as { config: unknown }).config).toBeDefined(); // pack 里是 config 对象，不是 YAML 文本
     expect(await store.versionYaml(WS, 2)).toBeUndefined(); // 没点发布，没有 v2 YAML
     await restartRuntime(tmp);
     const state = await s.getDraft(WS);
@@ -234,21 +234,23 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getDraft(WS)).dirty).toBe(false);
   });
 
-  it("发布才写入 YAML 并清空工作副本 JSON；放弃也清空 JSON", async () => {
+  it("发布把工作行复制成编号行（YAML 进版本链）；放弃把工作行写回已发布内容", async () => {
     const s = await freshStore();
     const store = await meta();
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
     await s.applyOp({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
     await s.applyOp({ op: "set_identity", object: "vendor", name: "vendor_no" }, WS);
-    expect(await store.getDraftJson(WS)).toBeDefined();
+    expect(JSON.stringify(await store.getWorkingPack(WS))).toContain("vendor");
     await s.publishDraft(WS);
-    expect(await store.getDraftJson(WS)).toBeUndefined();
     expect(await store.versionYaml(WS, 2)).toMatch(/vendor:/); // 发布才有 YAML
+    // 工作行永存：发布后内容与已发布一致（可变头 = 最新内容）
+    expect(JSON.stringify(await store.getWorkingPack(WS))).toContain("vendor");
+    expect((await s.getDraft(WS)).dirty).toBe(false);
 
     await s.applyOp({ op: "create_object", name: "ghost", kind: "thing" }, WS);
-    expect(await store.getDraftJson(WS)).toBeDefined();
+    expect(JSON.stringify(await store.getWorkingPack(WS))).toContain("ghost");
     await s.discardDraft(WS);
-    expect(await store.getDraftJson(WS)).toBeUndefined();
+    expect(JSON.stringify(await store.getWorkingPack(WS))).not.toContain("ghost");
     await restartRuntime(tmp);
     expect((await s.getDraft(WS)).draft.object_types.ghost).toBeUndefined();
     expect((await s.getDraft(WS)).dirty).toBe(false);

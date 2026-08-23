@@ -3,7 +3,7 @@
 // Next dev 下各路由包各有模块实例，挂全局才共享同一份；测试 installRuntime(makeRuntime({ cwd: tmp }))
 // 整套换掉——不再 chdir，也不再逐个 reset。cwd 与 ONTOS_META_DSN 只在 makeRuntime 读一次。
 // 单进程假设写在这里：已发布快照与工作副本的热缓存挂在进程里；编辑写入
-// onto_workspace.draft_json（不是 YAML），重启从库读回。YAML 只在发布时进 onto_version。
+// onto_version 的工作行（version IS NULL 行的 canvas_json，不是 YAML），重启从库读回。YAML 只在发布时进 onto_version 的编号行。
 // 多实例部署各有缓存，不会互见。
 
 import type { MetaStore } from "./meta/store";

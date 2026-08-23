@@ -399,16 +399,27 @@ CREATE INDEX idx_action_subject ON log_action (ontology_id, object_type, subject
 **结构：共享元库 + `workspace_id`，一张注册表。** 隔离边界不再落在文件系统上，而是落在共享平台元数据库的 `workspace_id` 列上——这是接入外部 MySQL/PG 时的形态：一个实例管全部空间，跨空间统一管理成为合法需求。共享库的存在也让注册表有了宿主（文件制下「注册表没地方放」的自指问题在共享库下不成立）：
 
 ```sql
-CREATE TABLE onto_workspace (                  -- 工作空间注册表
+CREATE TABLE onto_workspace (                  -- 工作空间注册表：只登记身份
   id         BIGINT PRIMARY KEY AUTO_INCREMENT,
   name       VARCHAR(128) NOT NULL UNIQUE,     -- 空间名（小写字母/数字/中划线/下划线）
   seed_from  VARCHAR(128),                     -- 起步来源：模板名或 clone 来源空间
-  layout     JSON,                             -- 画布摆位（对象名 → {x, y}）
   created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表两用）
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  workspace_id BIGINT NOT NULL REFERENCES onto_workspace(id),
+  version     INT,                             -- 已发布编号（首版为 1）；NULL = 工作行（每空间恰一行的可变头）
+  yaml        MEDIUMTEXT NOT NULL,             -- 本体 YAML 全量快照；工作行恒空串（内容在 canvas_json）
+  canvas_json JSON,                            -- 画布包 { config, layout, edgeBends, edgePins }：编号行是发布时点快照，工作行是活体
+  origin      VARCHAR(8) NOT NULL,             -- publish（工作行带默认值，不读它）
+  note        TEXT,                            -- 发布说明
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (workspace_id, version)               -- version 可空：NULL 行不进唯一约束，「每空间恰一行工作行」靠 MetaStore 纪律
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-- **本体配置与版本链入库**：`onto_version` 增加 `workspace_id`，YAML 全量快照按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`。点某个历史版本 = 用那一版覆盖当前工作副本，不插入新行；要让问数也变成这版，再点发布。摆位挂在 `onto_workspace.layout`。
+- **本体配置、版本链与画布状态同表入库**：`onto_version` 按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`。**工作副本是版本链上 `version IS NULL` 的工作行**：编辑画布、拖摆位、弯折、钉点都写它的 `canvas_json`；发布把工作行复制成编号行；点某个历史版本 = 用那一行覆盖工作行，不插入新行；要让问数也变成这版，再点发布。画布状态不再另有家——旧的 `onto_workspace.layout` / `draft_json` 两列已废。
 - **其余 7 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）全部增加 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列；`meta_seq` 主键改 `(workspace_id, name)`。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。
 - **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 即本章 MySQL 8 方言。PG 同理（方言注记见上节）。
 - **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `test` 的 `onto_version` v1 行，此后不再被读；`default` 与新建空间一样空白起步（v1 是空本体），演示 fixture 连接也只注入 `test`——切换空间要看得出是另一套。

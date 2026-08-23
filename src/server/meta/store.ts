@@ -31,6 +31,52 @@ class SqliteBackend implements MetaBackend {
         /* 列已存在 */
       }
     }
+    this.migrateWorkingRow();
+  }
+
+  /* 一次性迁移（幂等）：旧双列（layout/draft_json）拼工作行；版本表重建出可空 version（SQLite 改不了列约束，只能建新表搬家，顺带丢 revert_of）；删老列。 */
+  private migrateWorkingRow(): void {
+    const vCols = this.db.prepare(`PRAGMA table_info(onto_version)`).all() as { name: string; notnull: number }[];
+    if (vCols.find((c) => c.name === "version")?.notnull === 1) {
+      const hasCanvas = vCols.some((c) => c.name === "canvas_json");
+      this.db.exec(`DROP TABLE IF EXISTS onto_version_new`);
+      this.db.exec(`CREATE TABLE onto_version_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_id INTEGER NOT NULL,
+        version INTEGER,
+        yaml TEXT NOT NULL DEFAULT '',
+        canvas_json TEXT,
+        origin TEXT NOT NULL DEFAULT 'publish',
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (workspace_id, version)
+      )`);
+      this.db
+        .prepare(
+          `INSERT INTO onto_version_new (workspace_id, version, yaml, ${hasCanvas ? "canvas_json," : ""} origin, note, created_at)
+           SELECT workspace_id, version, yaml, ${hasCanvas ? "canvas_json," : ""} origin, note, created_at FROM onto_version`
+        )
+        .run();
+      this.db.exec(`DROP TABLE onto_version`);
+      this.db.exec(`ALTER TABLE onto_version_new RENAME TO onto_version`);
+    }
+    const wCols = (this.db.prepare(`PRAGMA table_info(onto_workspace)`).all() as { name: string }[]).map((c) => c.name);
+    const hasDraft = wCols.includes("draft_json");
+    const hasLayout = wCols.includes("layout");
+    if (!hasDraft && !hasLayout) return;
+    const rows = this.db
+      .prepare(`SELECT id${hasDraft ? ", draft_json" : ""}${hasLayout ? ", layout" : ""} FROM onto_workspace`)
+      .all() as Record<string, unknown>[];
+    for (const row of rows) {
+      const pack = stitchWorkingPack(row.draft_json, row.layout);
+      if (pack === undefined) continue;
+      const wsid = row.id as number;
+      const existing = this.db.prepare(`SELECT id FROM onto_version WHERE workspace_id = ? AND version IS NULL`).get(wsid);
+      if (existing) continue;
+      this.db.prepare(`INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, origin) VALUES (?, NULL, '', ?, 'publish')`).run(wsid, JSON.stringify(pack));
+    }
+    if (hasLayout) this.db.exec(`ALTER TABLE onto_workspace DROP COLUMN layout`);
+    if (hasDraft) this.db.exec(`ALTER TABLE onto_workspace DROP COLUMN draft_json`);
   }
   async all(sql: string, params: unknown[] = []) {
     return this.db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
@@ -51,17 +97,46 @@ class MysqlBackend implements MetaBackend {
   private pool: mysql.Pool;
   constructor(dsn: string) {
     this.pool = mysql.createPool({ uri: dsn, connectionLimit: 4, namedPlaceholders: false });
-    this.ready = this.pool.query(MYSQL_DDL).then(async () => {
-      for (const m of MIGRATIONS) {
-        try {
-          await this.pool.query(m);
-        } catch {
-          /* 列已存在 */
+    this.ready = this.pool
+      .query(MYSQL_DDL)
+      .then(async () => {
+        for (const m of MIGRATIONS) {
+          try {
+            await this.pool.query(m);
+          } catch {
+            /* 列已存在 */
+          }
         }
-      }
-    });
+      })
+      .then(() => this.migrateWorkingRow());
   }
   private ready: Promise<void>;
+
+  /* 一次性迁移（幂等），与 SQLite 版同编排；MySQL 可以直接 MODIFY/带判断地 DROP，不用重建表。 */
+  private async migrateWorkingRow(): Promise<void> {
+    const vCols = await this.pool.query(
+      `SELECT COLUMN_NAME AS name, IS_NULLABLE AS nullable FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'onto_version'`
+    ).then(([rows]) => rows as { name: string; nullable: string }[]);
+    const versionCol = vCols.find((c) => c.name === "version");
+    if (versionCol?.nullable === "NO") await this.pool.query(`ALTER TABLE onto_version MODIFY COLUMN version INT NULL`);
+    if (vCols.some((c) => c.name === "revert_of")) await this.pool.query(`ALTER TABLE onto_version DROP COLUMN revert_of`);
+    const wCols = await this.pool.query(
+      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'onto_workspace'`
+    ).then(([rows]) => (rows as { name: string }[]).map((c) => c.name));
+    const hasDraft = wCols.includes("draft_json");
+    const hasLayout = wCols.includes("layout");
+    if (!hasDraft && !hasLayout) return;
+    const [rows] = await this.pool.query(`SELECT id${hasDraft ? ", draft_json" : ""}${hasLayout ? ", layout" : ""} FROM onto_workspace`);
+    for (const row of rows as Record<string, unknown>[]) {
+      const pack = stitchWorkingPack(row.draft_json, row.layout);
+      if (pack === undefined) continue;
+      const [existing] = await this.pool.query(`SELECT id FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [row.id]);
+      if ((existing as unknown[]).length) continue;
+      await this.pool.query(`INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, origin) VALUES (?, NULL, '', ?, 'publish')`, [row.id, JSON.stringify(pack)]);
+    }
+    if (hasLayout) await this.pool.query(`ALTER TABLE onto_workspace DROP COLUMN layout`);
+    if (hasDraft) await this.pool.query(`ALTER TABLE onto_workspace DROP COLUMN draft_json`);
+  }
   async all(sql: string, params: unknown[] = []) {
     await this.ready;
     const [rows] = await this.pool.query(sql, params);
@@ -82,21 +157,19 @@ class MysqlBackend implements MetaBackend {
 /* ---------- DDL（两个方言，同一张结构） ---------- */
 
 const SQLITE_DDL = `
-CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个空间一行
+CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个空间一行，只登记身份（画布内容全在 onto_version 的工作行）
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,                  -- 空间名（小写字母/数字/中划线/下划线）
   seed_from TEXT,                             -- 起步来源：template=演示模板；lazy=被元数据写抢注
-  layout TEXT,                                -- 画布界面状态 JSON：对象摆位 + 线的弯折点 + 端点钉点
-  draft_json TEXT,                            -- 未发布的工作副本（JSON，不是 YAML）；有改动才存，发布/放弃后清空
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS onto_version (     -- 版本快照：发布/回滚各插一行，历史链不断
+CREATE TABLE IF NOT EXISTS onto_version (     -- 版本链 + 工作行：编号行是不可变历史；version IS NULL 的是工作行（每空间恰一行的可变头）
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL,
-  version INTEGER NOT NULL,                   -- 首版为 1；已发布版 = 该空间 MAX(version)
-  yaml TEXT NOT NULL,                         -- 本体 YAML 全量快照（不存增量 diff）
-  canvas_json TEXT,                           -- 发布时的画布界面状态快照，随版本可回看
-  origin TEXT NOT NULL DEFAULT 'publish',     -- 恒 publish：回滚只覆盖工作副本、不插行；rollback 行只见于历史库
+  version INTEGER,                            -- 已发布编号（首版为 1）；NULL = 工作行
+  yaml TEXT NOT NULL DEFAULT '',              -- 本体 YAML 全量快照（不存增量 diff）；工作行恒空串（内容在 canvas_json）
+  canvas_json TEXT,                           -- 画布包 JSON：{ config, layout, edgeBends, edgePins }；老编号行可能没有
+  origin TEXT NOT NULL DEFAULT 'publish',     -- 恒 publish（工作行带默认值，不读它）；rollback 行只见于历史库
   note TEXT,                                  -- 发布说明
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, version)
@@ -198,10 +271,36 @@ const MYSQL_DDL = SQLITE_DDL.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, "BIGI
 /* 旧库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，逐条试加，报「列已存在」就跳过。 */
 const MIGRATIONS = [
   `ALTER TABLE ont_question ADD COLUMN detail TEXT`,
-  `ALTER TABLE onto_workspace ADD COLUMN draft_json TEXT`,
-  `ALTER TABLE onto_version ADD COLUMN canvas_json TEXT`,
-  `ALTER TABLE onto_version DROP COLUMN revert_of`,
+  `ALTER TABLE onto_version ADD COLUMN canvas_json TEXT`, // 预 WIP 老库补上，工作行迁移的 INSERT SELECT 要它
 ];
+
+/** 老双列拼工作行画布包（纯函数，两个方言的迁移共用）：draft_json 优先，界面状态缺键回退 layout 列。
+ *  只存过摆位（无草稿）的空间也造工作行——pack 不带 config 键，本体由 getDraft 用已发布补上（首次写入即补全）。 */
+function stitchWorkingPack(draftRaw: unknown, layoutRaw: unknown): unknown | undefined {
+  const parse = (v: unknown): unknown => {
+    if (typeof v !== "string" || !v.length) return undefined;
+    try {
+      return JSON.parse(v);
+    } catch {
+      return undefined;
+    }
+  };
+  const l = parse(layoutRaw);
+  const lo = l && typeof l === "object" ? (l as Record<string, unknown>) : {};
+  const nodes = "nodes" in lo ? lo.nodes : l; // layout 列旧格式是平铺的节点摆位（没有 nodes 键）
+  const draft = parse(draftRaw);
+  if (draft === undefined) {
+    if (nodes === undefined && lo.edges === undefined && lo.pins === undefined) return undefined; // 全空，不造
+    return { layout: nodes ?? {}, edgeBends: lo.edges ?? {}, edgePins: lo.pins ?? {} };
+  }
+  const d = draft && typeof draft === "object" ? (draft as Record<string, unknown>) : {};
+  return {
+    config: "config" in d ? d.config : draft, // 旧格式顶上就是 object_types
+    layout: d.layout ?? nodes ?? {},
+    edgeBends: d.edgeBends ?? lo.edges ?? {},
+    edgePins: d.edgePins ?? lo.pins ?? {},
+  };
+}
 
 /* ---------- 记录类型 ---------- */
 
@@ -259,13 +358,6 @@ export interface BorderPinRec {
   t: number;
 }
 
-/** 画布界面状态（onto_workspace.layout 的 JSON 形状）：对象摆位 + 线的弯折点 + 线端点钉点。 */
-export interface CanvasLayout {
-  nodes: Record<string, { x: number; y: number }>;
-  edges: Record<string, { dx: number; dy: number }>;
-  pins: Record<string, { source?: BorderPinRec; target?: BorderPinRec }>;
-}
-
 export interface ActionLogRec {
   version?: number;
   action: string;
@@ -318,7 +410,7 @@ export class MetaStore {
 
   async latestVersion(ws: string, seedYaml: string): Promise<{ version: number; yaml: string }> {
     const id = await this.wsId(ws);
-    const row = await this.backend.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? ORDER BY version DESC LIMIT 1`, [id]);
+    const row = await this.backend.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version DESC LIMIT 1`, [id]);
     if (row) return { version: row.version as number, yaml: row.yaml as string };
     await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]); // 被元数据写抢注的空间：种子补成 v1
     return { version: 1, yaml: seedYaml };
@@ -334,7 +426,7 @@ export class MetaStore {
 
   async listVersions(ws: string): Promise<{ version: number; createdAt: string; origin: string }[]> {
     const id = await this.wsId(ws);
-    const rows = await this.backend.all(`SELECT version, origin, created_at FROM onto_version WHERE workspace_id = ? ORDER BY version`, [id]);
+    const rows = await this.backend.all(`SELECT version, origin, created_at FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version`, [id]);
     return rows.map((r) => ({ version: r.version as number, origin: String(r.origin), createdAt: String(r.created_at) }));
   }
 
@@ -357,35 +449,13 @@ export class MetaStore {
     }
   }
 
-  /* 摆位 */
+  /* 工作行（onto_version 里 version IS NULL 的一行）：画布全部内容（本体 + 界面状态）的唯一落点。 */
 
-  /** 画布界面状态：nodes = 对象摆位；edges = 线的弯折（相对两端节点中心连线中点的偏移，0/0 即直线）；pins = 线端点钉点。 */
-  async getLayout(ws: string): Promise<CanvasLayout> {
+  /** 工作行的画布包（canvas_json，已 JSON.parse）；还没有工作行返回 undefined。 */
+  async getWorkingPack(ws: string): Promise<unknown | undefined> {
     const id = await this.wsId(ws);
-    const row = await this.backend.get(`SELECT layout FROM onto_workspace WHERE id = ?`, [id]);
-    if (!row?.layout) return { nodes: {}, edges: {}, pins: {} };
-    try {
-      const parsed = JSON.parse(String(row.layout));
-      // 旧格式是平铺的节点摆位（没有 nodes 键），按 nodes 读、其余置空
-      if (parsed && typeof parsed === "object" && "nodes" in parsed) return { nodes: parsed.nodes ?? {}, edges: parsed.edges ?? {}, pins: parsed.pins ?? {} };
-      return { nodes: parsed ?? {}, edges: {}, pins: {} };
-    } catch {
-      return { nodes: {}, edges: {}, pins: {} };
-    }
-  }
-
-  async setLayout(ws: string, layout: CanvasLayout): Promise<void> {
-    const id = await this.wsId(ws);
-    await this.backend.run(`UPDATE onto_workspace SET layout = ? WHERE id = ?`, [JSON.stringify(layout), id]);
-  }
-
-  /* 工作副本：未发布的画布快照 JSON（对象 + 线 + 摆位）。有改动才存；发布/放弃后清空。
-     问数不读这一列。YAML 只出现在 onto_version.yaml；画布回到某版读 onto_version.canvas_json。 */
-
-  async getDraftJson(ws: string): Promise<unknown | undefined> {
-    const id = await this.wsId(ws);
-    const row = await this.backend.get(`SELECT draft_json FROM onto_workspace WHERE id = ?`, [id]);
-    const raw = row?.draft_json;
+    const row = await this.backend.get(`SELECT canvas_json FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
+    const raw = row?.canvas_json;
     if (typeof raw !== "string" || !raw.length) return undefined;
     try {
       return JSON.parse(raw);
@@ -394,9 +464,12 @@ export class MetaStore {
     }
   }
 
-  async setDraftJson(ws: string, draft: unknown | null): Promise<void> {
+  /** upsert 工作行：version IS NULL 不进 UNIQUE 约束，「每空间恰一行」的纪律收在这一处。 */
+  async setWorkingPack(ws: string, pack: unknown): Promise<void> {
     const id = await this.wsId(ws);
-    await this.backend.run(`UPDATE onto_workspace SET draft_json = ? WHERE id = ?`, [draft == null ? null : JSON.stringify(draft), id]);
+    const existing = await this.backend.get(`SELECT id FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
+    if (existing) await this.backend.run(`UPDATE onto_version SET canvas_json = ? WHERE id = ?`, [JSON.stringify(pack), existing.id]);
+    else await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, origin) VALUES (?, NULL, '', ?, 'publish')`, [id, JSON.stringify(pack)]);
   }
 
   /* 连接 */

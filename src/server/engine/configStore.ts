@@ -1,13 +1,13 @@
-// 配置存储 —— M4 雏形。工作副本（草稿）与已发布版本的唯一出入口。
-// 画布读写副本；引擎只读已发布。两件分开的事：
-//   编辑画布 → 把画布快照 JSON（对象+线+摆位）写入 onto_workspace.draft_json。不生成 YAML。
-//   发布     → YAML 进 onto_version.yaml（问数用）；同一行 canvas_json 存当时画布。然后清空 draft_json。
-//   回到某版 → 用该行 canvas_json 覆盖当前工作副本（没有则解析 yaml）。不插入新版本。
-// 摆位另存 onto_workspace.layout。内存 Store 是热缓存。
+// 配置存储 —— 工作副本（草稿）与已发布版本的唯一出入口。
+// 存储模型（onto_version 一表两用）：version IS NULL 的工作行 = 可变头，画布全部内容（本体 + 界面状态）只活在它的 canvas_json；
+// 编号行 = 不可变历史（yaml 给问数；canvas_json 给「回到某版」还原画布）。
+//   编辑画布/拖摆位 → 写工作行。发布 → 工作行复制成编号行。回滚/放弃 → 编号行覆盖工作行。
+// 内存 Store 是热缓存。
 
 import { dump, load } from "js-yaml";
+import { z } from "zod";
 import { configSchema, type OntologyConfig, type ObjectType } from "../schema/config";
-import { draftObjectSchema, type DraftOpInput as DraftOp } from "../schema/ops";
+import { borderPinSchema, draftObjectSchema, type DraftOpInput as DraftOp } from "../schema/ops";
 import { metaStore, type BorderPinRec } from "../meta/store";
 import { linkRefs, referencesOf } from "./refs";
 import { runtime } from "../runtime";
@@ -74,39 +74,69 @@ function canvasSnapshot(state: DraftState): { config: OntologyConfig; layout: Dr
   return { config: state.draft, layout: state.layout, edgeBends: state.edgeBends ?? {}, edgePins: state.edgePins ?? {} };
 }
 
-/** 新格式 { config, layout, … }；旧 draft_json 顶上就是 object_types。 */
-function unpackCanvas(raw: unknown): { config: unknown; layout?: DraftState["layout"]; edgeBends?: DraftState["edgeBends"]; edgePins?: DraftState["edgePins"] } {
-  if (raw && typeof raw === "object" && "config" in raw) {
-    const o = raw as { config: unknown; layout?: DraftState["layout"]; edgeBends?: DraftState["edgeBends"]; edgePins?: DraftState["edgePins"] };
-    return { config: o.config, layout: o.layout, edgeBends: o.edgeBends, edgePins: o.edgePins };
+/* 画布包界面状态三键的浅校验（读回侧）：坏键当没有（按键降级），不拖死整包。config 键由调用方过 configSchema，坏了硬炸。 */
+const packLayoutSchema = z.record(z.string(), z.object({ x: z.number(), y: z.number() }));
+const packBendsSchema = z.record(z.string(), z.object({ dx: z.number(), dy: z.number() }));
+const packPinsSchema = z.record(z.string(), z.looseObject({ source: borderPinSchema.optional().catch(undefined), target: borderPinSchema.optional().catch(undefined) })); // 单端坏钉点降级为没有，不拖垮整条记录
+
+function validKey<S extends z.ZodType>(schema: S, v: unknown): z.infer<S> | undefined {
+  const r = schema.safeParse(v);
+  return r.success ? r.data : undefined;
+}
+
+/** 解画布包：全形 { config, layout, edgeBends, edgePins }；config 可缺（迁移留下的摆位-only 行，本体由调用方用已发布补）；
+ *  旧格式顶上就是 object_types（按只有 config 处理）。 */
+function unpackCanvas(raw: unknown): { config?: unknown; layout?: DraftState["layout"]; edgeBends?: DraftState["edgeBends"]; edgePins?: DraftState["edgePins"] } {
+  if (raw && typeof raw === "object" && ("config" in raw || "layout" in raw || "edgeBends" in raw || "edgePins" in raw)) {
+    const o = raw as Record<string, unknown>;
+    return {
+      config: o.config,
+      layout: validKey(packLayoutSchema, o.layout),
+      edgeBends: validKey(packBendsSchema, o.edgeBends),
+      edgePins: validKey(packPinsSchema, o.edgePins),
+    };
   }
   return { config: raw };
+}
+
+/** 把包里的界面状态三键穿进 DraftState：缺键（或读回校验没过的）用 fallback——水合传已发布快照的，回滚传当前状态（保留现状）。 */
+function applyPack(
+  state: DraftState,
+  pack: { layout?: DraftState["layout"]; edgeBends?: DraftState["edgeBends"]; edgePins?: DraftState["edgePins"] },
+  fallback: Pick<DraftState, "layout" | "edgeBends" | "edgePins">
+): void {
+  state.layout = pack.layout ?? fallback.layout;
+  state.edgeBends = pack.edgeBends ?? fallback.edgeBends;
+  state.edgePins = pack.edgePins ?? fallback.edgePins;
 }
 
 export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
   const store = storeOf(ws);
   if (!store.draft) {
     const { config, version } = await getPublished(ws);
-    const { nodes, edges, pins } = await metaStore().getLayout(ws);
-    const saved = await metaStore().getDraftJson(ws);
+    const saved = await metaStore().getWorkingPack(ws);
+    // 界面状态的后备：最近已发布版的画布包（老行可能只有 yaml，那就空着，画布走 dagre）
+    const pubPack = unpackCanvas((await metaStore().versionCanvas(ws, version)) ?? {});
+    const fallback = { layout: pubPack.layout ?? {}, edgeBends: pubPack.edgeBends ?? {}, edgePins: pubPack.edgePins ?? {} };
     if (saved !== undefined) {
       const pack = unpackCanvas(saved);
       let draft: OntologyConfig;
-      try {
-        draft = configSchema.parse(pack.config);
-      } catch (e) {
-        throw new DraftReject(`工作副本读不回来：${e instanceof Error ? e.message : String(e)}`);
+      if (pack.config === undefined) {
+        draft = structuredClone(config); // 迁移留下的摆位-only 工作行：本体用已发布，首次写入即补全 pack
+      } else {
+        try {
+          draft = configSchema.parse(pack.config);
+        } catch (e) {
+          throw new DraftReject(`工作副本读不回来：${e instanceof Error ? e.message : String(e)}`);
+        }
       }
-      store.draft = {
-        draft: structuredClone(draft),
-        baseVersion: version,
-        dirty: !sameConfig(draft, config),
-        layout: pack.layout ?? nodes,
-        edgeBends: pack.edgeBends ?? edges,
-        edgePins: pack.edgePins ?? pins,
-      };
+      store.draft = { draft: structuredClone(draft), baseVersion: version, dirty: !sameConfig(draft, config), layout: {}, edgeBends: {}, edgePins: {} };
+      applyPack(store.draft, pack, fallback);
     } else {
-      store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: nodes, edgeBends: edges, edgePins: pins };
+      // 还没有工作行：从已发布造一行落库——此后这空间恒有可变头
+      store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: {}, edgeBends: {}, edgePins: {} };
+      applyPack(store.draft, {}, fallback);
+      await persistWorkingCopy(ws, store.draft);
     }
   }
   store.draft.edgeBends ??= {}; // 热更新前建的内存态没有这字段
@@ -114,9 +144,10 @@ export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
   return store.draft;
 }
 
-/** 有改动就把画布快照（对象+线+摆位）落 JSON；改回去或发布/放弃则清空。不 dump YAML。 */
+/** 工作行落库：画布全部内容（本体 + 界面状态）的唯一落点（onto_version 里 version IS NULL 的行）。
+ *  dirty 与否都写——界面状态也以这为家。save_* 路径也走这里：界面状态不算本体改动（不碰 dirty、不过校验、不加 rev）。 */
 async function persistWorkingCopy(ws: string, state: DraftState): Promise<void> {
-  await metaStore().setDraftJson(ws, state.dirty ? canvasSnapshot(state) : null);
+  await metaStore().setWorkingPack(ws, canvasSnapshot(state));
 }
 
 /* ---------- 写路径的收尾原语（applyOp / mutateDraft / publish / rollback 共用） ---------- */
@@ -126,19 +157,11 @@ function bumpRev(ws: string): void {
   storeOf(ws).rev += 1;
 }
 
-/** 界面状态（摆位/弯折/钉点）入库：不算本体改动——不碰 dirty、不过校验、不加 rev；未发布时随工作副本落一份，回到某版才画得出。 */
-async function saveCanvasState(ws: string, state: DraftState): Promise<void> {
-  await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends, pins: state.edgePins });
-  if (state.dirty) await persistWorkingCopy(ws, state);
-}
-
-/** 校验过了再清界面状态死键：对象没了清摆位、关系没了清弯折和钉点（校验失败回退时不调，不丢）。 */
-async function gcCanvasState(ws: string, state: DraftState): Promise<void> {
-  let changed = false;
-  for (const name of Object.keys(state.layout)) if (!state.draft.object_types[name]) { delete state.layout[name]; changed = true; }
-  for (const name of Object.keys(state.edgeBends)) if (!state.draft.link_types[name]) { delete state.edgeBends[name]; changed = true; }
-  for (const name of Object.keys(state.edgePins)) if (!state.draft.link_types[name]) { delete state.edgePins[name]; changed = true; }
-  if (changed) await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends, pins: state.edgePins });
+/** 校验过了再清界面状态死键：对象没了清摆位、关系没了清弯折和钉点（校验失败回退时不调，不丢）。只改内存态，落库由收尾统一做。 */
+function gcCanvasState(state: DraftState): void {
+  for (const name of Object.keys(state.layout)) if (!state.draft.object_types[name]) delete state.layout[name];
+  for (const name of Object.keys(state.edgeBends)) if (!state.draft.link_types[name]) delete state.edgeBends[name];
+  for (const name of Object.keys(state.edgePins)) if (!state.draft.link_types[name]) delete state.edgePins[name];
 }
 
 /** 每步改完立即校验（结构 + 语义 + 动作形状四查），不合法整体回退——坏草稿不能攒到发布一刻才炸。
@@ -154,10 +177,10 @@ function validateDraftOrThrow(state: DraftState, backup: OntologyConfig): void {
   }
 }
 
-/** 草稿写路径的统一收尾：rev → 清界面状态死键 → 按结构重算 dirty（改出去又改回来要能收回来）→ 工作副本落库。 */
+/** 草稿写路径的统一收尾：rev → 清界面状态死键 → 按结构重算 dirty（改出去又改回来要能收回来）→ 落工作行。 */
 async function commitDraft(ws: string, state: DraftState): Promise<void> {
   bumpRev(ws);
-  await gcCanvasState(ws, state);
+  gcCanvasState(state);
   state.dirty = !sameConfig(state.draft, (await getPublished(ws)).config);
   await persistWorkingCopy(ws, state);
 }
@@ -260,13 +283,13 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
     }
     case "save_layout": {
       state.layout = { ...state.layout, ...input.positions };
-      await saveCanvasState(ws, state);
+      await persistWorkingCopy(ws, state); // 摆位落工作行（界面状态，不算本体改动）
       return state;
     }
     case "save_edge_bend": {
       if (!state.draft.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
       if (input.bend) state.edgeBends[input.name] = input.bend; else delete state.edgeBends[input.name]; // null = 拉直
-      await saveCanvasState(ws, state);
+      await persistWorkingCopy(ws, state);
       return state;
     }
     case "save_edge_pin": {
@@ -274,7 +297,7 @@ export async function applyOp(input: DraftOp, ws: string = DEFAULT_WS, opts?: { 
       const cur = { ...state.edgePins[input.name] };
       if (input.pin) cur[input.end] = input.pin; else delete cur[input.end]; // null = 回到浮动附着
       if (cur.source || cur.target) state.edgePins[input.name] = cur; else delete state.edgePins[input.name];
-      await saveCanvasState(ws, state);
+      await persistWorkingCopy(ws, state);
       return state;
     }
     case "create_link": {
@@ -455,8 +478,11 @@ export async function publishDraft(ws: string = DEFAULT_WS): Promise<{ version: 
 
 export async function discardDraft(ws: string = DEFAULT_WS): Promise<void> {
   return enqueue(ws, async () => {
-  await metaStore().setDraftJson(ws, null); // 先清落库的工作副本，再丢内存——放弃必须重启后也干净
-  storeOf(ws).draft = undefined; // 回到已发布快照；摆位在库里，不随草稿丢
+  const state = await getDraft(ws);
+  const published = await getPublished(ws);
+  state.draft = structuredClone(published.config); // 内容回到已发布；摆位/弯折/钉点保留（界面状态不随草稿丢）
+  state.dirty = false;
+  await persistWorkingCopy(ws, state); // 工作行写成已发布内容——放弃必须重启后也干净
   bumpRev(ws); // 放弃也是内容变化：监视器要靠它刷回已发布
   try {
     await metaStore().abandonPendingDecisions(ws); // 草稿里裁过又没发布的留痕标记「已放弃」，不挂到无关的下一次发布上
@@ -478,7 +504,7 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
   const yaml = await metaStore().versionYaml(ws, version);
   if (yaml === undefined) throw new DraftReject(`版本不存在：v${version}`);
   const snap = await metaStore().versionCanvas(ws, version);
-  const pack = snap !== undefined ? unpackCanvas(snap) : { config: undefined, layout: undefined, edgeBends: undefined, edgePins: undefined };
+  const pack = snap !== undefined ? unpackCanvas(snap) : { config: undefined }; // 老行没有 canvas_json：config 从 yaml 解
   let config: OntologyConfig;
   try {
     config = configSchema.parse(pack.config ?? load(yaml));
@@ -488,10 +514,8 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
   }
   const state = await getDraft(ws);
   state.draft = structuredClone(config);
-  if (pack.layout) state.layout = pack.layout;
-  if (pack.edgeBends) state.edgeBends = pack.edgeBends;
-  if (pack.edgePins) state.edgePins = pack.edgePins;
-  await metaStore().setLayout(ws, { nodes: state.layout, edges: state.edgeBends, pins: state.edgePins });
+  // 界面状态缺键（老行/读回校验没过的键）保留现状
+  applyPack(state, pack, { layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins });
   await commitDraft(ws, state);
   return { version };
   });

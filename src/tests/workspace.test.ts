@@ -53,7 +53,7 @@ describe("空间隔离", () => {
     expect(await meta.nextSeq("lab", "eq")).toBe(1);
   });
 
-  it("摆位按空间分开存（onto_workspace.layout）", async () => {
+  it("摆位按空间分开存（onto_version 的工作行）", async () => {
     const s = await import("../server/engine/configStore");
     await s.applyOp({ op: "save_layout", positions: { equipment: { x: 1, y: 2 } } }, "default");
     expect((await s.getDraft("default")).layout.equipment).toEqual({ x: 1, y: 2 });
