@@ -1,5 +1,5 @@
 // 工作副本编辑操作的请求形状 —— /api/draft（REST 画布）与 MCP apply_draft 共用同一组判别联合。
-// MCP 侧抽掉 save_layout（摆位是界面状态，Agent 不写）。
+// MCP 侧抽掉 save_layout / save_edge_bend / save_edge_pin（摆位/弯折/钉点是界面状态，Agent 不写）。
 
 import { z } from "zod";
 import { actionSchema, objectTypeSchema } from "./config";
@@ -85,7 +85,7 @@ export const draftOpSchema = z.discriminatedUnion("op", [
 ]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
 
-/** MCP apply_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_layout（Agent 不写摆位）。 */
+/** MCP apply_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_* 三个界面状态 op（Agent 不写摆位/弯折/钉点）。 */
 export const mcpDraftOpSchema = z.discriminatedUnion("op", [
   createObjectOp,
   deleteObjectOp,

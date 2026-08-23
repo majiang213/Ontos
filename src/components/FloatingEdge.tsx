@@ -5,7 +5,7 @@
 
 import { useRef, useState } from "react";
 import { BaseEdge, EdgeLabelRenderer, useInternalNode, useReactFlow, type EdgeProps } from "@xyflow/react";
-import { NODE_W } from "./layout";
+import { NODE_H, NODE_W } from "./layout";
 
 interface Pt {
   x: number;
@@ -27,8 +27,8 @@ export function rectOf(node: { internals: { positionAbsolute: { x: number; y: nu
   return {
     x: node.internals.positionAbsolute.x,
     y: node.internals.positionAbsolute.y,
-    w: node.measured.width ?? NODE_W, // 宽度与布局计算同一常量（layout.ts）
-    h: node.measured.height ?? 160,
+    w: node.measured.width ?? NODE_W, // 未测量回退与布局计算同一常量（layout.ts）
+    h: node.measured.height ?? NODE_H,
   };
 }
 

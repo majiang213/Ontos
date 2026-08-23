@@ -22,8 +22,9 @@ export interface CanvasLink {
   kind: "match" | "transition";
 }
 
-/** 节点在布局计算里的宽度（唯一出处）：dagre 分层与 FloatingEdge 的未测量回退共用。 */
+/** 节点尺寸的未测量回退（唯一出处）：dagre 分层、FloatingEdge.rectOf、OntologyCanvas 的 obstacles 构造共用。 */
 export const NODE_W = 300;
+export const NODE_H = 160;
 
 /** 节点高度按内容估算：题头 + 属性行 + 标签行。 */
 function estimateHeight(o: CanvasObject): number {

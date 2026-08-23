@@ -2,7 +2,8 @@
 // 画布内容 = 工作副本（已发布 + 未发布改动）；发布走「发布 vN+1 / 放弃」；表结构收进底部抽屉。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import OntologyCanvas, { type CanvasLink, type CanvasObject } from "./OntologyCanvas";
+import OntologyCanvas from "./OntologyCanvas";
+import type { CanvasLink, CanvasObject } from "./layout";
 import PairCard from "./PairCard";
 import Bezel from "./Bezel";
 import { ApiError, apiGet, apiPost, apiDel, getWs } from "./wsClient";

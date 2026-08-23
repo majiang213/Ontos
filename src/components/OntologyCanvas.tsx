@@ -26,9 +26,6 @@ import { layoutObjects, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge, { type Bend } from "./FloatingEdge";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 
-// CanvasObject/CanvasLink 定义在同目录 layout.ts（布局是唯一下游定义点）；这里再导出，老调用方不用改
-export type { CanvasLink, CanvasObject };
-
 function ObjectNode({ data }: { data: ObjNodeData }) {
   const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
   return (
