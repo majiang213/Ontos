@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OntologyCanvas from "./OntologyCanvas";
 import type { CanvasLink, CanvasObject } from "./layout";
+import type { BorderPin } from "./FloatingEdge";
 import PairCard from "./PairCard";
 import Bezel from "./Bezel";
 import { ApiError, apiGet, apiPost, apiDel, getWs } from "./wsClient";
@@ -18,6 +19,7 @@ interface OntologyResp {
   dirty: boolean;
   layout: Record<string, { x: number; y: number }>;
   edgeBends: Record<string, { dx: number; dy: number }>; // 线的弯折点（界面状态，随摆位存）
+  edgePins: Record<string, { source?: { side: "top" | "bottom" | "left" | "right"; t: number }; target?: { side: "top" | "bottom" | "left" | "right"; t: number } }>; // 端点钉点
   states: Record<string, "new" | "modified" | "same">;
   deleted: string[];
   action_changes: { added: string[]; overwritten: string[]; removed: string[] }; // 类名.动作名
@@ -40,7 +42,7 @@ type Card =
   | { kind: "create" }
   | { kind: "connect" }
   | { kind: "questions" }
-  | { kind: "link"; from: string; to: string } // 拖线落地后等待取名的半成品
+  | { kind: "link"; from: string; to: string; pins?: { source?: BorderPin; target?: BorderPin } } // 拖线落地后等待取名的半成品（pins = 两端钉点）
   | { kind: "linkDetail"; name: string } // 点中的边
   | { kind: "object"; name: string } // 对象编辑卡
   | null;
@@ -294,6 +296,9 @@ export default function CanvasPage() {
         from: l.from,
         to: l.to,
         inverse: l.inverse,
+        description: l.description,
+        fromLabel: ont?.object_types?.[l.from]?.description ?? l.from,
+        toLabel: ont?.object_types?.[l.to]?.description ?? l.to,
         kind: l.transition ? "transition" : "match",
       })),
     [ont]
@@ -323,6 +328,7 @@ export default function CanvasPage() {
         links={links}
         layout={ont?.layout}
         edgeBends={ont?.edgeBends}
+        edgePins={ont?.edgePins}
         selectedLink={card?.kind === "linkDetail" ? card.name : null}
         onSelect={(name) => {
           // 动作表单有未保存改动时，切去别的对象先问一句（切换会收掉表单）
@@ -332,10 +338,13 @@ export default function CanvasPage() {
           setCard({ kind: "object", name });
         }}
         onSelectLink={(name) => setCard({ kind: "linkDetail", name })}
-        onConnectRequest={(from, to) => setCard({ kind: "link", from, to })}
-        onReconnectLink={async (name, from, to) => {
+        onConnectRequest={(from, to, pins) => setCard({ kind: "link", from, to, pins })}
+        onReconnectLink={async (name, from, to, moved) => {
           const ok = await op({ op: "update_link", name, from, to });
-          if (ok) showToast(`关系已改接为 ${from} → ${to}（发布后生效）`);
+          if (ok) {
+            if (moved?.pin) void op({ op: "save_edge_pin", name, end: moved.end, pin: moved.pin }); // 拖的那头钉新位置（静默）
+            showToast(`关系已改接为 ${from} → ${to}（发布后生效）`);
+          }
         }}
         onBendChange={(name, bend) => void op({ op: "save_edge_bend", name, bend })} // 拉弯/拉直：静默存，与摆位同理
         onLayoutChange={saveLayout}
@@ -422,7 +431,7 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 版本历史卡（点版本号展开；回滚 = 旧内容作为新版本发布） */}
+      {/* 版本历史卡：点某版把内容覆盖到当前画布（未发布） */}
       {card?.kind === "versions" && (
         <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
           <Bezel>
@@ -439,28 +448,26 @@ export default function CanvasPage() {
                   <span>
                     <strong>v{v.version}</strong>　<span style={{ color: "var(--ink-3)" }}>{v.createdAt.slice(0, 16).replace("T", " ")}</span>
                   </span>
-                  {v.version !== ont?.version && (
-                    <button
-                      className="chip"
-                      disabled={rollbacking}
-                      onClick={async () => {
-                        if (rollbacking) return; // 防连点：连发会产生两个新版本
-                        setRollbacking(true);
-                        try {
-                          await withLocalWrite(async () => {
-                            const data = await apiPost<{ version: number }>("/api/versions", { version: v.version });
-                            showToast(`已回滚到 v${v.version} 的内容（发布为 v${data.version}）`);
-                            setCard(null);
-                            await refresh();
-                          });
-                        } finally {
-                          setRollbacking(false);
-                        }
-                      }}
-                    >
-                      回滚到这版
-                    </button>
-                  )}
+                  <button
+                    className="chip"
+                    disabled={rollbacking}
+                    onClick={async () => {
+                      if (rollbacking) return;
+                      setRollbacking(true);
+                      try {
+                        await withLocalWrite(async () => {
+                          await apiPost("/api/versions", { version: v.version });
+                          showToast(`已用 v${v.version} 覆盖当前画布（还没发布）`);
+                          setCard(null);
+                          await refresh();
+                        });
+                      } finally {
+                        setRollbacking(false);
+                      }
+                    }}
+                  >
+                    回到这版
+                  </button>
                 </div>
               ))}
           </Bezel>
@@ -571,6 +578,9 @@ export default function CanvasPage() {
               onSubmit={async (body) => {
                 const ok = await op(body);
                 if (ok) {
+                  // 钉点随建线落存（静默）：端点就是连的时候手选的位置
+                  if (card.pins?.source) void op({ op: "save_edge_pin", name: body.name, end: "source", pin: card.pins.source });
+                  if (card.pins?.target) void op({ op: "save_edge_pin", name: body.name, end: "target", pin: card.pins.target });
                   setCard(null);
                   showToast("关系已进草稿（发布后生效）");
                 }

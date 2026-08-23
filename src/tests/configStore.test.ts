@@ -196,6 +196,64 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getPublished(WS)).config.object_types.vendor).toBeDefined();
   });
 
+  it("未发布的编辑落 JSON 不落 YAML；重启后工作副本还在，版本链仍是 v1", async () => {
+    const s = await freshStore();
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    const store = await meta();
+    const saved = await store.getDraftJson(WS);
+    expect(saved).toBeDefined();
+    expect(JSON.stringify(saved)).toContain("vendor");
+    expect(JSON.stringify(saved).trimStart().startsWith("{")).toBe(true); // JSON，不是 YAML
+    expect(await store.versionYaml(WS, 2)).toBeUndefined(); // 没点发布，没有 v2 YAML
+    await restartRuntime(tmp);
+    const state = await s.getDraft(WS);
+    expect(state.dirty).toBe(true);
+    expect(state.draft.object_types.vendor).toBeDefined();
+    expect((await s.getPublished(WS)).version).toBe(1);
+    expect((await s.getPublished(WS)).config.object_types.vendor).toBeUndefined();
+  });
+
+  it("发布把画布 JSON 存进该版；回到这版连摆位一起覆盖", async () => {
+    const s = await freshStore();
+    const store = await meta();
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.applyOp({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    await s.applyOp({ op: "set_identity", object: "vendor", name: "vendor_no" }, WS);
+    await s.applyOp({ op: "save_layout", positions: { vendor: { x: 11, y: 22 } } }, WS);
+    await s.publishDraft(WS);
+    const snap = await store.versionCanvas(WS, 2);
+    expect(JSON.stringify(snap)).toContain("vendor");
+    expect((snap as { layout: { vendor: { x: number; y: number } } }).layout.vendor).toEqual({ x: 11, y: 22 });
+
+    await s.applyOp({ op: "create_object", name: "ghost", kind: "thing" }, WS);
+    await s.applyOp({ op: "save_layout", positions: { vendor: { x: 99, y: 99 } } }, WS);
+    await s.rollbackTo(2, WS);
+    expect((await s.getPublished(WS)).version).toBe(2);
+    expect((await s.getDraft(WS)).draft.object_types.ghost).toBeUndefined();
+    expect((await s.getDraft(WS)).layout.vendor).toEqual({ x: 11, y: 22 });
+    expect((await s.getDraft(WS)).dirty).toBe(false);
+  });
+
+  it("发布才写入 YAML 并清空工作副本 JSON；放弃也清空 JSON", async () => {
+    const s = await freshStore();
+    const store = await meta();
+    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.applyOp({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    await s.applyOp({ op: "set_identity", object: "vendor", name: "vendor_no" }, WS);
+    expect(await store.getDraftJson(WS)).toBeDefined();
+    await s.publishDraft(WS);
+    expect(await store.getDraftJson(WS)).toBeUndefined();
+    expect(await store.versionYaml(WS, 2)).toMatch(/vendor:/); // 发布才有 YAML
+
+    await s.applyOp({ op: "create_object", name: "ghost", kind: "thing" }, WS);
+    expect(await store.getDraftJson(WS)).toBeDefined();
+    await s.discardDraft(WS);
+    expect(await store.getDraftJson(WS)).toBeUndefined();
+    await restartRuntime(tmp);
+    expect((await s.getDraft(WS)).draft.object_types.ghost).toBeUndefined();
+    expect((await s.getDraft(WS)).dirty).toBe(false);
+  });
+
   it("未知操作被拒，不置 dirty", async () => {
     const s = await freshStore();
     await expect(s.applyOp({ op: "fly_to_moon" } as never, WS)).rejects.toThrow("未知操作");
@@ -243,11 +301,12 @@ describe("配置存储（工作副本与发布）", () => {
     expect(await (await meta()).versionYaml(WS, 2)).toBeUndefined(); // 没有 v2
   });
 
-  it("回滚守卫：草稿脏时拒绝；版本不存在拒绝", async () => {
+  it("回到某版：未发布改动直接覆盖；版本不存在拒绝", async () => {
     const s = await freshStore();
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, WS); // 弄脏草稿
-    await expect(s.rollbackTo(1, WS)).rejects.toThrow("先发布或放弃");
-    await s.discardDraft(WS); // 干净了再验版本守卫
+    await s.rollbackTo(1, WS); // 用 v1 覆盖，vendor 没了
+    expect((await s.getDraft(WS)).draft.object_types.vendor).toBeUndefined();
+    expect((await s.getDraft(WS)).dirty).toBe(false);
     await expect(s.rollbackTo(99, WS)).rejects.toThrow("版本不存在");
   });
 

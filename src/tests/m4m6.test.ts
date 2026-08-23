@@ -12,17 +12,19 @@ describe("版本历史与回滚", () => {
     await cleanupRuntime(tmp);
   });
 
-  it("回滚是 revert 语义：v1 内容发成 v3，历史链不断", async () => {
+  it("回到某版：覆盖当前工作副本，不插入新版本；问数仍读已发布", async () => {
     const s = await import("../server/engine/configStore");
     await restartRuntime(tmp); // 从干净内存态开始
     await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
     await s.publishDraft(); // v2 含 vendor
     expect((await s.getPublished()).version).toBe(2);
-    const { version } = await s.rollbackTo(1); // 回到 v1 内容
-    expect(version).toBe(3); // 不是回到 v1，是新发一版
-    expect((await s.getPublished()).config.object_types.vendor).toBeUndefined();
-    expect((await s.listVersions()).map((v) => v.version)).toEqual([1, 2, 3]);
-    expect((await s.getDraft()).dirty).toBe(false); // 回滚后草稿与已发布一致
+    const { version } = await s.rollbackTo(1); // 用 v1 覆盖草稿
+    expect(version).toBe(1);
+    expect((await s.getPublished()).version).toBe(2); // 已发布不动
+    expect((await s.getPublished()).config.object_types.vendor).toBeDefined();
+    expect((await s.listVersions()).map((v) => v.version)).toEqual([1, 2]); // 没有 v3
+    expect((await s.getDraft()).dirty).toBe(true);
+    expect((await s.getDraft()).draft.object_types.vendor).toBeUndefined();
   });
 });
 

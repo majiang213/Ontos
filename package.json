@@ -15,6 +15,7 @@
     "@phosphor-icons/react": "^2.1.10",
     "@types/js-yaml": "^4.0.9",
     "@xyflow/react": "^12.11.2",
+    "@xyflow/system": "0.0.80",
     "ai": "^7.0.66",
     "js-yaml": "^5.2.3",
     "mysql2": "^3.23.3",

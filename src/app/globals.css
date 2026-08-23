@@ -236,6 +236,7 @@ input { font-family: inherit; outline: none; }
 
 /* ---------- 画布节点 ---------- */
 .node-shell {
+  position: relative; /* 四边连接条的定位锚 */
   background: var(--bg-deep);
   border-radius: var(--r-shell);
   padding: 5px;
@@ -245,18 +246,20 @@ input { font-family: inherit; outline: none; }
   transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
 }
 
-/* 连线锚点：平时隐形，悬停节点时浮现；底点拖出 = 我连着落点，顶点拖出 = 落点连着我 */
+/* 连接把手：永不显示（起线已由四边连接条承担），但组件必须在——连接机器与边定位都读它 */
 .node-shell .react-flow__handle {
   width: 12px;
   height: 12px;
-  background: var(--accent);
-  border: 2px solid var(--panel);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
-.node-shell:hover .react-flow__handle {
-  opacity: 1;
-}
+/* 四边连接条：跨在节点边框上的隐形抓手（内外各 6px），从任意边的任意点拖出即连线 */
+.connect-strip { position: absolute; z-index: 12; cursor: crosshair; }
+.connect-strip.top { top: -6px; left: 10px; right: 10px; height: 12px; }
+.connect-strip.bottom { bottom: -6px; left: 10px; right: 10px; height: 12px; }
+.connect-strip.left { left: -6px; top: 10px; bottom: 10px; width: 12px; }
+.connect-strip.right { right: -6px; top: 10px; bottom: 10px; width: 12px; }
+/* 抓手悬停时节点边框给反馈（:has 选中悬停条所在节点） */
+.node-shell:has(.connect-strip:hover) { border-color: var(--accent); }
 /* 改接锚点：悬停或选中一条边时在其两端（节点的上/下中点）露出，抓住拖到别的对象即改接 */
 .react-flow__edge:hover .react-flow__edgeupdater,
 .react-flow__edge.selected .react-flow__edgeupdater {
@@ -318,6 +321,15 @@ input { font-family: inherit; outline: none; }
   padding: 1px 8px;
   border: 1px solid var(--line);
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.5;
+}
+/* 线上副标注：源 → 目（小一号、弱色） */
+.edge-label-sub {
+  font-size: 10px;
+  color: var(--ink-3);
 }
 .react-flow__edge-text { font-size: 11px; fill: var(--ink-2); }
 .react-flow__edge-textbg { fill: var(--bg); }

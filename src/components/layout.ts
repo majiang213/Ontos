@@ -19,6 +19,9 @@ export interface CanvasLink {
   from: string;
   to: string;
   inverse?: string;
+  description?: string; // 线身主标注：关系的白话描述（没有才退英文名）
+  fromLabel?: string; // 线身副标注：源对象的中文名（没有退对象名）
+  toLabel?: string; // 线身副标注：目标对象的中文名
   kind: "match" | "transition";
 }
 

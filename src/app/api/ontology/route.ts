@@ -44,6 +44,7 @@ export async function GET(req: Request) {
         dirty: state.dirty,
         layout: state.layout,
         edgeBends: state.edgeBends,
+        edgePins: state.edgePins,
         states,
         deleted,
         action_changes,

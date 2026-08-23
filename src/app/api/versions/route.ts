@@ -1,5 +1,5 @@
-// 版本历史与回滚：GET /api/versions 列表；POST /api/versions { version } 回滚到该版。
-// 回滚是 Git revert 语义：旧内容作为新版本发布，历史链不断。
+// 版本历史：GET /api/versions 列表；POST /api/versions { version } 把该版覆盖到当前工作副本。
+// 不插入新版本；问数仍读已发布。要让问数也变成这版，人再点发布。
 
 import { z } from "zod";
 import { listVersions, rollbackTo } from "@/server/engine/configStore";

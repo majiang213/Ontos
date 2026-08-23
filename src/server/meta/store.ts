@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个�
   name TEXT NOT NULL UNIQUE,                  -- 空间名（小写字母/数字/中划线/下划线）
   seed_from TEXT,                             -- 起步来源：template=演示模板；lazy=被元数据写抢注
   layout TEXT,                                -- 画布界面状态 JSON：对象摆位 + 线的弯折点 + 端点钉点
+  draft_json TEXT,                            -- 未发布的工作副本（JSON，不是 YAML）；有改动才存，发布/放弃后清空
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS onto_version (     -- 版本快照：发布/回滚各插一行，历史链不断
@@ -94,8 +95,8 @@ CREATE TABLE IF NOT EXISTS onto_version (     -- 版本快照：发布/回滚各
   workspace_id INTEGER NOT NULL,
   version INTEGER NOT NULL,                   -- 首版为 1；已发布版 = 该空间 MAX(version)
   yaml TEXT NOT NULL,                         -- 本体 YAML 全量快照（不存增量 diff）
+  canvas_json TEXT,                           -- 发布时的画布界面状态快照，随版本可回看
   origin TEXT NOT NULL DEFAULT 'publish',     -- 恒 publish：回滚只覆盖工作副本、不插行；rollback 行只见于历史库
-  revert_of INTEGER,                          -- 历史列：早期 revert 语义记的回滚来源，现行语义不写
   note TEXT,                                  -- 发布说明
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, version)
@@ -195,7 +196,12 @@ const MYSQL_DDL = SQLITE_DDL.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, "BIGI
   .replace(/REAL/g, "DOUBLE") + ";";
 
 /* 旧库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，逐条试加，报「列已存在」就跳过。 */
-const MIGRATIONS = [`ALTER TABLE ont_question ADD COLUMN detail TEXT`];
+const MIGRATIONS = [
+  `ALTER TABLE ont_question ADD COLUMN detail TEXT`,
+  `ALTER TABLE onto_workspace ADD COLUMN draft_json TEXT`,
+  `ALTER TABLE onto_version ADD COLUMN canvas_json TEXT`,
+  `ALTER TABLE onto_version DROP COLUMN revert_of`,
+];
 
 /* ---------- 记录类型 ---------- */
 
@@ -247,10 +253,17 @@ export interface QueryLogRec {
   ok: boolean;
 }
 
-/** 画布界面状态（onto_workspace.layout 的 JSON 形状）：对象摆位 + 线的弯折点。 */
+/** 线端点的钉点：钉在某条边的 t 比例处（0..1）。 */
+export interface BorderPinRec {
+  side: "top" | "bottom" | "left" | "right";
+  t: number;
+}
+
+/** 画布界面状态（onto_workspace.layout 的 JSON 形状）：对象摆位 + 线的弯折点 + 线端点钉点。 */
 export interface CanvasLayout {
   nodes: Record<string, { x: number; y: number }>;
   edges: Record<string, { dx: number; dy: number }>;
+  pins: Record<string, { source?: BorderPinRec; target?: BorderPinRec }>;
 }
 
 export interface ActionLogRec {
@@ -311,9 +324,12 @@ export class MetaStore {
     return { version: 1, yaml: seedYaml };
   }
 
-  async insertVersion(ws: string, version: number, yaml: string, origin: "publish" | "rollback", revertOf?: number): Promise<void> {
+  async insertVersion(ws: string, version: number, yaml: string, origin: "publish", canvas?: unknown): Promise<void> {
     const id = await this.wsId(ws);
-    await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, origin, revert_of) VALUES (?, ?, ?, ?, ?)`, [id, version, yaml, origin, revertOf ?? null]);
+    await this.backend.run(
+      `INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, origin) VALUES (?, ?, ?, ?, ?)`,
+      [id, version, yaml, canvas == null ? null : JSON.stringify(canvas), origin]
+    );
   }
 
   async listVersions(ws: string): Promise<{ version: number; createdAt: string; origin: string }[]> {
@@ -328,26 +344,59 @@ export class MetaStore {
     return row?.yaml as string | undefined;
   }
 
+  /** 该版发布时的画布快照（对象 + 线 + 摆位）。旧行可能没有。 */
+  async versionCanvas(ws: string, version: number): Promise<unknown | undefined> {
+    const id = await this.wsId(ws);
+    const row = await this.backend.get(`SELECT canvas_json FROM onto_version WHERE workspace_id = ? AND version = ?`, [id, version]);
+    const raw = row?.canvas_json;
+    if (typeof raw !== "string" || !raw.length) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  }
+
   /* 摆位 */
 
-  /** 画布界面状态：nodes = 对象摆位；edges = 线的弯折（相对两端节点中心连线中点的偏移，0/0 即直线）。 */
+  /** 画布界面状态：nodes = 对象摆位；edges = 线的弯折（相对两端节点中心连线中点的偏移，0/0 即直线）；pins = 线端点钉点。 */
   async getLayout(ws: string): Promise<CanvasLayout> {
     const id = await this.wsId(ws);
     const row = await this.backend.get(`SELECT layout FROM onto_workspace WHERE id = ?`, [id]);
-    if (!row?.layout) return { nodes: {}, edges: {} };
+    if (!row?.layout) return { nodes: {}, edges: {}, pins: {} };
     try {
       const parsed = JSON.parse(String(row.layout));
-      // 旧格式是平铺的节点摆位（没有 nodes 键），按 nodes 读、edges 置空
-      if (parsed && typeof parsed === "object" && "nodes" in parsed) return { nodes: parsed.nodes ?? {}, edges: parsed.edges ?? {} };
-      return { nodes: parsed ?? {}, edges: {} };
+      // 旧格式是平铺的节点摆位（没有 nodes 键），按 nodes 读、其余置空
+      if (parsed && typeof parsed === "object" && "nodes" in parsed) return { nodes: parsed.nodes ?? {}, edges: parsed.edges ?? {}, pins: parsed.pins ?? {} };
+      return { nodes: parsed ?? {}, edges: {}, pins: {} };
     } catch {
-      return { nodes: {}, edges: {} };
+      return { nodes: {}, edges: {}, pins: {} };
     }
   }
 
   async setLayout(ws: string, layout: CanvasLayout): Promise<void> {
     const id = await this.wsId(ws);
     await this.backend.run(`UPDATE onto_workspace SET layout = ? WHERE id = ?`, [JSON.stringify(layout), id]);
+  }
+
+  /* 工作副本：未发布的画布快照 JSON（对象 + 线 + 摆位）。有改动才存；发布/放弃后清空。
+     问数不读这一列。YAML 只出现在 onto_version.yaml；画布回到某版读 onto_version.canvas_json。 */
+
+  async getDraftJson(ws: string): Promise<unknown | undefined> {
+    const id = await this.wsId(ws);
+    const row = await this.backend.get(`SELECT draft_json FROM onto_workspace WHERE id = ?`, [id]);
+    const raw = row?.draft_json;
+    if (typeof raw !== "string" || !raw.length) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error("工作副本读不回来：不是合法 JSON");
+    }
+  }
+
+  async setDraftJson(ws: string, draft: unknown | null): Promise<void> {
+    const id = await this.wsId(ws);
+    await this.backend.run(`UPDATE onto_workspace SET draft_json = ? WHERE id = ?`, [draft == null ? null : JSON.stringify(draft), id]);
   }
 
   /* 连接 */

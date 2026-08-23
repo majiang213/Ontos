@@ -34,6 +34,13 @@ const setIdentityOp = z.object({ op: z.literal("set_identity"), object: z.string
 const saveLayoutOp = z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) });
 // 线的弯折点：相对两端节点中心连线中点的偏移；bend=null 拉直。与摆位一样是界面状态
 const saveEdgeBendOp = z.object({ op: z.literal("save_edge_bend"), name: z.string(), bend: z.object({ dx: z.number(), dy: z.number() }).nullable() });
+// 端点钉点：钉在某条边的 t 比例处（0..1）；pin=null 回到浮动附着。界面状态
+const saveEdgePinOp = z.object({
+  op: z.literal("save_edge_pin"),
+  name: z.string(),
+  end: z.enum(["source", "target"]),
+  pin: z.object({ side: z.enum(["top", "bottom", "left", "right"]), t: z.number() }).nullable(),
+});
 // 手动连线：from 类 → to 类，必须给配对字段（match）——关系总得说清靠哪两个字段对上
 const createLinkOp = z.object({
   op: z.literal("create_link"),
@@ -75,6 +82,7 @@ export const draftOpSchema = z.discriminatedUnion("op", [
   setIdentityOp,
   saveLayoutOp,
   saveEdgeBendOp,
+  saveEdgePinOp,
   createLinkOp,
   deleteLinkOp,
   updateLinkOp,
@@ -128,6 +136,7 @@ export function affectedNames(op: DraftOpInput): string[] {
       return Object.keys(op.objects);
     case "save_layout":
     case "save_edge_bend":
+    case "save_edge_pin":
       return [];
   }
 }
