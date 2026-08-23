@@ -31,9 +31,6 @@ export interface Env {
 /** 引擎拒绝：请求或配置里的名字对不上已发布配置。路由按 422 处理；其它异常是引擎故障，按 500。 */
 export class EngineReject extends Error {}
 
-/** 关系解析已收进 schema 层（filterWalk.resolveLink）；本 re-export 只为了不动的调用点。 */
-export { resolveLink as findLink } from "../schema/filterWalk";
-
 /** 关系名对不上配置即拒绝（问数展开、个体组装、Env.linkHolds 共用）。 */
 export function mustLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } {
   const found = resolveLink(config, clsName, name);
