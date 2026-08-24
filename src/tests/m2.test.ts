@@ -66,6 +66,12 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_MODEL;
   });
+
+  it("罐头问数只对上了类的剧本编得动：空配置下不编幽灵查询，明说该配模型 Key", async () => {
+    const { CannedSlot } = await import("../server/engine/llmSlot");
+    const slot = new CannedSlot();
+    await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never)).rejects.toThrow(/离线回退只覆盖演示剧本/);
+  });
 });
 
 describe("LLM 槽位离线回退", () => {

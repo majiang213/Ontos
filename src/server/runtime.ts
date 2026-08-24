@@ -9,6 +9,7 @@
 import type { MetaStore } from "./meta/store";
 import type { DriverRegistry } from "./engine/infra/registry";
 import type { Store as ConfigStore } from "./engine/config/configStore";
+import type { LlmSlot } from "./engine/llmSlot";
 
 export interface OntosRuntime {
   cwd: string;
@@ -16,6 +17,7 @@ export interface OntosRuntime {
   meta?: MetaStore;
   registries?: Map<string, DriverRegistry>;
   stores?: Map<string, ConfigStore>;
+  llmSlot?: LlmSlot;
 }
 
 /** 缺省取进程cwd与 ONTOS_META_DSN；测试传 { cwd: 临时目录 }。 */

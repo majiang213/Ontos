@@ -1,5 +1,6 @@
 // LLM 槽位 —— 模型只在这几个槽位里出现（《ontos-article.md》§4、§5.3）。
 // 接口 + 离线确定性回退：没有模型 key 时由罐头实现产出；key 就位后换 AiSdkSlot。
+// 罐头只服务 test 演示空间，剧本是 fixture 的演示数据（demoQueries），本文件不出现领域词。
 // 模型当顾问不当计算器：产出一律过 Zod 校验，不合法即拒绝。
 
 import type { QueryRequest } from "../schema/request";
@@ -7,6 +8,9 @@ import { queryRequestSchema } from "../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../schema/config";
 import type { TableInfo } from "./infra/driver";
 import { TENDENCIES, VERDICT_LABELS, Verdict, type Tendency } from "./adjudication/verdict";
+import { demoQueries } from "./infra/fixture";
+import { runtime } from "../runtime";
+import { EngineReject } from "../errors";
 import { z } from "zod";
 import { generateText, Output, type LanguageModel } from "ai";
 import { createXai } from "@ai-sdk/xai";
@@ -33,33 +37,15 @@ export interface PairAdvice {
 
 export class CannedSlot implements LlmSlot {
   readonly name = "canned-离线回退";
-  async nlToQuery(question: string, _config: OntologyConfig): Promise<QueryRequest> {
-    // 演示剧本四问 + 默认。形状与 generateText + Output.object 产物一致，过同一道 Zod
-    if (/每个部门|各部门|多少台|多少设备/.test(question)) {
-      return queryRequestSchema.parse({
-        object: "equipment",
-        filter: { status: "in_service" },
-        aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] },
-      });
+  async nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest> {
+    // 剧本在 fixture.demoQueries（test 空间的演示数据）：正则顺序即优先级，末条兜底。
+    // 形状与 generateText + Output.object 产物一致，过同一道 Zod。
+    // 无模型时问数没有通用编译法，剧本只对上了类才编；对不上说明不是演示问题，得配模型 Key
+    const hit = demoQueries.find((q) => q.pattern.test(question))!;
+    if (!config.object_types[hit.query.object]) {
+      throw new EngineReject("离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问");
     }
-    if (/过保/.test(question)) {
-      return queryRequestSchema.parse({ object: "equipment", properties: ["name", "serial_no"], filter: { in_warranty: false } });
-    }
-    if (/在途/.test(question)) {
-      return queryRequestSchema.parse({ object: "equipment", properties: ["name", "serial_no"], filter: { status: "in_transit" } });
-    }
-    if (/报废/.test(question)) {
-      return queryRequestSchema.parse({ object: "equipment", properties: ["name", "serial_no"], filter: { status: "scrapped" } });
-    }
-    if (/在役|部门/.test(question)) {
-      return queryRequestSchema.parse({
-        object: "equipment",
-        properties: ["name"],
-        filter: { status: "in_service" },
-        expand: [{ relation: "belongs_to", properties: ["name"] }],
-      });
-    }
-    return queryRequestSchema.parse({ object: "equipment", properties: ["name", "status"] });
+    return queryRequestSchema.parse(hit.query);
   }
 
   async proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
@@ -200,13 +186,18 @@ properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 
   }
 }
 
-/** 槽位选择：有 OPENAI_API_KEY 走真模型（OpenAI 兼容协议，通用键同 Claude Code / Codex），否则离线回退。
+/** 槽位选择：有 OPENAI_API_KEY 走真模型（OpenAI 兼容协议，通用键同 Claude Code / Codex），实例缓存在 runtime 上；
+ *  否则离线回退（CannedSlot：问数只覆盖演示剧本，逆向建模与候选对建议是通用启发式，各空间都能用）。
  *  模型必须显式指定 OPENAI_MODEL，不设默认；接入点用 OPENAI_BASE_URL，不设走 SDK 默认端点。 */
 export function getSlot(): LlmSlot {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return new CannedSlot();
-  const model = process.env.OPENAI_MODEL;
-  if (!model) throw new Error("OPENAI_MODEL 未设置：接真模型必须显式指定模型名");
-  const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
-  return new AiSdkSlot(xai.responses(model));
+  const rt = runtime();
+  if (!rt.llmSlot) {
+    const model = process.env.OPENAI_MODEL;
+    if (!model) throw new Error("OPENAI_MODEL 未设置：接真模型必须显式指定模型名");
+    const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
+    rt.llmSlot = new AiSdkSlot(xai.responses(model));
+  }
+  return rt.llmSlot;
 }
