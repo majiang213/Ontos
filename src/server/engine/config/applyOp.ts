@@ -1,5 +1,5 @@
 // op 解释器 —— 草稿 18 个编辑 op 的逐一解释（唯一解释点：REST 画布与 MCP apply_draft 同走这里）。
-// 纯变更：内容 op 只改内存态（校验与收尾在 configStore 的 applyDraft）；界面状态 op（save_*）直落工作行，标 "ui" 返回。
+// 只做内存修改：18 种 op 全归这里（含 save_* 的摆位/弯折/钉点）；落库与收尾方式由 applyDraft 按 ops.ts 的 UI_STATE_OPS 分流。
 // 认人/引用/锁定三类共享原语（mustType / dropClass / replaceBlockers）住本文件，views 与裁决从这里取。
 
 import type { ObjectType, OntologyConfig } from "../../schema/config";
@@ -7,7 +7,7 @@ import { draftObjectSchema, type DraftOpInput as DraftOp } from "../../schema/op
 import { DraftReject } from "../../errors";
 import { linkRefs, referencesOf } from "./refs";
 import { FIELDS_UPDATE_ACTION, fieldsUpdateAction, removeFieldsUpdateKeys, renameFieldsUpdateKey } from "./skeletons";
-import { persistWorkingCopy, type DraftState } from "./pack";
+import type { DraftState } from "./pack";
 
 function mustType(d: OntologyConfig, name: string) {
   const t = d.object_types[name];
@@ -41,8 +41,8 @@ export function replaceBlockers(existing: ObjectType, publishedHasClass: boolean
   return reasons;
 }
 
-/** 解释一个 op：内容 op 改 state.draft 返回 "mutated"；界面状态 op 直落工作行返回 "ui"（不算本体改动，不校验不加 rev）。 */
-export async function applyOp(state: DraftState, input: DraftOp, published: OntologyConfig, ws: string): Promise<"ui" | "mutated"> {
+/** 解释一个 op：只改内存（state.draft 与界面状态三键）。落库、校验、rev、dirty 全由 applyDraft 决定。 */
+export function applyOp(state: DraftState, input: DraftOp, published: OntologyConfig): void {
   const d = state.draft;
   switch (input.op) {
     case "create_object": {
@@ -112,23 +112,20 @@ export async function applyOp(state: DraftState, input: DraftOp, published: Onto
       break;
     }
     case "save_layout": {
-      state.layout = { ...state.layout, ...input.positions };
-      await persistWorkingCopy(ws, state); // 摆位落工作行（界面状态，不算本体改动）
-      return "ui";
+      state.layout = { ...state.layout, ...input.positions }; // 摆位只进内存；落库在 applyDraft 的界面状态分流
+      break;
     }
     case "save_edge_bend": {
       if (!state.draft.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
       if (input.bend) state.edgeBends[input.name] = input.bend; else delete state.edgeBends[input.name]; // null = 拉直
-      await persistWorkingCopy(ws, state);
-      return "ui";
+      break;
     }
     case "save_edge_pin": {
       if (!state.draft.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
       const cur = { ...state.edgePins[input.name] };
       if (input.pin) cur[input.end] = input.pin; else delete cur[input.end]; // null = 回到浮动附着
       if (cur.source || cur.target) state.edgePins[input.name] = cur; else delete state.edgePins[input.name];
-      await persistWorkingCopy(ws, state);
-      return "ui";
+      break;
     }
     case "create_link": {
       if (!/^[a-z][a-z0-9_]*$/.test(input.name)) throw new DraftReject("关系名必须是小写字母/数字/下划线，字母开头");
@@ -249,5 +246,4 @@ export async function applyOp(state: DraftState, input: DraftOp, published: Onto
     default:
       throw new DraftReject(`未知操作：${JSON.stringify(input)}`);
   }
-  return "mutated";
 }

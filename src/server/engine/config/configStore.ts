@@ -6,7 +6,7 @@
 
 import { dump, load } from "js-yaml";
 import { configSchema, type OntologyConfig } from "../../schema/config";
-import type { DraftOpInput as DraftOp } from "../../schema/ops";
+import { isUiStateOp, type DraftOpInput as DraftOp } from "../../schema/ops";
 import { metaStore } from "../../meta/store";
 import { DraftReject } from "../../errors";
 import { runtime } from "../../runtime";
@@ -132,7 +132,7 @@ async function commitDraft(ws: string, state: DraftState): Promise<void> {
 }
 
 /* ---------- 编辑操作（作用于工作副本） ----------
-   op 解释器在 ./applyOp（REST 画布与 MCP 同走一处）；这里只留队列、备份、校验、收尾。 */
+   op 解释器在 ./applyOp（REST 画布与 MCP 同走一处，只做内存修改）；这里留队列、按 UI_STATE_OPS 分流、备份、校验、收尾。 */
 
 export async function applyDraft(input: DraftOp, ws: string = DEFAULT_WS, opts?: { base_rev?: number }): Promise<DraftState> {
   return enqueue(ws, async () => {
@@ -141,10 +141,15 @@ export async function applyDraft(input: DraftOp, ws: string = DEFAULT_WS, opts?:
       throw new DraftReject(`草稿已变（rev=${getRev(ws)}），请重新读取再改`);
     }
     const state = await getDraft(ws);
-    const backup = structuredClone(state.draft);
     const published = (await getPublished(ws)).config;
-    const kind = await applyOp(state, input, published, ws);
-    if (kind === "ui") return state; // 界面状态 op：不算本体改动，不校验不加 rev
+    // 界面状态 op（名单在 ops.ts 的 UI_STATE_OPS）：改内存 + 落工作行就完事——不校验、不加 rev、不算本体改动
+    if (isUiStateOp(input.op)) {
+      applyOp(state, input, published);
+      await persistWorkingCopy(ws, state);
+      return state;
+    }
+    const backup = structuredClone(state.draft);
+    applyOp(state, input, published);
     // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在属性的坏草稿不能攒到发布一刻才炸）
     validateDraftOrThrow(state, backup);
     await commitDraft(ws, state);

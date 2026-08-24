@@ -74,7 +74,12 @@ const replaceObjectOp = z.object({ op: z.literal("replace_object"), name: z.stri
 const setActionOp = z.object({ op: z.literal("set_action"), object: z.string(), name: z.string(), def: actionSchema });
 const removeActionOp = z.object({ op: z.literal("remove_action"), object: z.string(), name: z.string() });
 
-export const draftOpSchema = z.discriminatedUnion("op", [
+/** 界面状态 op（摆位/弯折/钉点）：唯一名单。不写本体——mcpDraftOpSchema 不含（Agent 不写界面状态）、
+ *  affectedNames 返回空、applyDraft 只落库不校验不加 rev。 */
+export const UI_STATE_OPS = ["save_layout", "save_edge_bend", "save_edge_pin"] as const;
+export const isUiStateOp = (op: string): op is (typeof UI_STATE_OPS)[number] => (UI_STATE_OPS as readonly string[]).includes(op);
+
+const CONTENT_OP_SCHEMAS = [
   createObjectOp,
   deleteObjectOp,
   updateObjectOp,
@@ -82,9 +87,6 @@ export const draftOpSchema = z.discriminatedUnion("op", [
   removePropertyOp,
   updatePropertyOp,
   setIdentityOp,
-  saveLayoutOp,
-  saveEdgeBendOp,
-  saveEdgePinOp,
   createLinkOp,
   deleteLinkOp,
   updateLinkOp,
@@ -92,29 +94,18 @@ export const draftOpSchema = z.discriminatedUnion("op", [
   replaceObjectOp,
   setActionOp,
   removeActionOp,
-]);
+] as const;
+const UI_STATE_OP_SCHEMAS = [saveLayoutOp, saveEdgeBendOp, saveEdgePinOp] as const;
+
+export const draftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS, ...UI_STATE_OP_SCHEMAS]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
 
-/** MCP apply_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_* 三个界面状态 op（Agent 不写摆位/弯折/钉点）。 */
-export const mcpDraftOpSchema = z.discriminatedUnion("op", [
-  createObjectOp,
-  deleteObjectOp,
-  updateObjectOp,
-  addPropertyOp,
-  removePropertyOp,
-  updatePropertyOp,
-  setIdentityOp,
-  createLinkOp,
-  deleteLinkOp,
-  updateLinkOp,
-  importObjectsOp,
-  replaceObjectOp,
-  setActionOp,
-  removeActionOp,
-]);
+/** MCP apply_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_* 三个界面状态 op（名单见 UI_STATE_OPS，Agent 不写摆位/弯折/钉点）。 */
+export const mcpDraftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS]);
 
 /** apply_draft 返回的 names：类名、关系名或「类名.动作名」（不收字段名）。画布 toast/发布条不读它，读 GET 的 action_changes。 */
 export function affectedNames(op: DraftOpInput): string[] {
+  if (isUiStateOp(op.op)) return []; // 界面状态 op 不算内容改动（名单见 UI_STATE_OPS）
   switch (op.op) {
     case "create_object":
     case "delete_object":
@@ -136,9 +127,5 @@ export function affectedNames(op: DraftOpInput): string[] {
       return [op.name];
     case "import_objects":
       return Object.keys(op.objects);
-    case "save_layout":
-    case "save_edge_bend":
-    case "save_edge_pin":
-      return [];
   }
 }
