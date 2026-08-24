@@ -133,7 +133,7 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
       {
         op: "import_objects",
         objects: {
-          main2: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", fields: { sn: "sn" } } } },
+          main2: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, note: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", fields: { sn: "sn" } } } },
           aux: {
             kind: "thing",
             identity: "serial_no",
@@ -144,18 +144,25 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
       },
       WS
     );
-    // aux 再带一条自定义动作：效应 object: aux（指向 dying 类），pre 过滤 serial_no（remapId 键）
+    // aux 再带两条自定义动作：recolor 效应 object: aux（指向 dying 类）且 pre 过滤 serial_no（remapId 键）；
+    // notify_x 的 inform 对象是 aux（告知对象指向 dying 类）
     await s.applyDraft(
       { op: "set_action", object: "aux", name: "recolor", def: { pre: { serial_no: "SN-1" }, effect: [{ update: { object: "aux", identity: { from: "identity" }, properties: { color: { from: "request" } } } }] } },
+      WS
+    );
+    await s.applyDraft(
+      { op: "set_action", object: "aux", name: "notify_x", def: { effect: [{ update: { object: "main2", identity: { from: "identity" }, properties: { note: { from: "request" } } } }], inform: [{ object: "aux", to: ["payroll"], properties: { c: { from: "request" } } }] } },
       WS
     );
     await adjudicate({ class_a: "main2", class_b: "aux" }, Verdict.Same, undefined, WS);
     const d = (await s.getDraft(WS)).draft;
     expect(d.object_types.aux).toBeUndefined();
     expect(d.object_types.main2.properties.color).toBeDefined(); // 属性正常并入
-    // 旧守护只防垂死关系：set_fields（object: aux）与 recolor 都会搬进 main2 → 校验炸、裁决整步回退
-    expect(d.object_types.main2.actions?.set_fields).toBeUndefined();
+    // main2 自己的 set_fields 留着（效应 object: main2）；aux 的 set_fields（object: aux）撞名跳过+随类消亡，没盖掉它
+    expect(d.object_types.main2.actions?.set_fields?.effect).toEqual([{ update: { object: "main2", identity: { from: "identity" }, properties: { note: { from: "request" } } } }]);
+    // 旧守护只防垂死关系：recolor（效应 object: aux、pre 读写 remapId）会搬进 main2 → 校验炸、裁决整步回退
     expect(d.object_types.main2.actions?.recolor).toBeUndefined();
+    expect(d.object_types.main2.actions?.notify_x).toBeUndefined(); // inform 对象是 dying 类：同样随类消亡
     await expect(s.publish(WS)).resolves.toBeDefined(); // 关键断言：落地，不弹回
   });
 

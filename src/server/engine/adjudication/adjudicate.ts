@@ -95,7 +95,8 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
 /** 动作是否随 dying 类消亡（合并时不搬进留下类——跟过去必炸 validateSemantics/validateActionShapes，整步回退）：
  *  ① 引用将消亡的关系（pre / 效应 filter 的 $link、效应 link 项：dropClass 撤掉 from/to 含 dying 的全部关系）；
  *  ② 引用 dying 类本身：效应（update/delete/create）或 inform 的对象是 dying；$request 的认人对象是 dying；
- *  ③ pre / 效应 filter 读写 remapId（B 的识别属性不并过来，留下类上没有这个键）。 */
+ *  ③ 读写 remapId（B 的识别属性不并过来，留下类上没有这个键）：pre / 效应 filter 的键侧与 {property} 值侧。
+ *     （inform 值侧不用查：位置规则禁 from: current，{property} 只能读请求袋，引用 dying 类的形状写不出来。） */
 function actionDiesWith(d: OntologyConfig, owner: string, act: ActionDef, dying: string, remapId?: string): boolean {
   let hit = false;
   const collect = (clsName: string, f: Record<string, unknown> | undefined) => {
@@ -138,6 +139,8 @@ function actionDiesWith(d: OntologyConfig, owner: string, act: ActionDef, dying:
   if (!hit) {
     for (const inf of act.inform ?? []) {
       if (inf.object === dying) { hit = true; break; } // 告知对象是 dying 类
+      // inform 值侧不查：inform.properties 位置规则禁 from: current（validateActionShapes ③），
+      // {property} 只能 from: request（读请求袋，不读类）——值侧引用 dying 类的形状根本写不出来
     }
   }
   return hit;
