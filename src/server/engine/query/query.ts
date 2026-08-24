@@ -1,15 +1,15 @@
 // M7 查询求值 —— 对应《ontos-article.md》§5.4 与图 7。
 // 个体由 individual 组装；本文件只投影结果树（展开、聚合、排序）。全程只读。
 
-import type { OntologyConfig } from "../schema/config";
-import type { ExpandNode, QueryRequest } from "../schema/request";
-import type { SourceDriver } from "./driver";
+import type { OntologyConfig } from "../../schema/config";
+import type { ExpandNode, QueryRequest } from "../../schema/request";
+import type { SourceDriver } from "../infra/driver";
 import type { EvalContext } from "./expr";
+import { EngineReject } from "../../errors";
 import {
   assertFilterShapes,
   createEnv,
   currentOf,
-  EngineReject,
   evalDerived,
   matchConds,
   mustCls,
@@ -31,7 +31,7 @@ export interface QueryResult {
   path: string[];
 }
 
-export async function runQuery(config: OntologyConfig, driver: SourceDriver, req: QueryRequest): Promise<QueryResult> {
+export async function query(config: OntologyConfig, driver: SourceDriver, req: QueryRequest): Promise<QueryResult> {
   const env = createEnv(config, driver);
   const path: string[] = [];
   const cls = mustCls(config, req.object);

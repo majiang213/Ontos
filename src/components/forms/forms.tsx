@@ -3,8 +3,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { isFromOnly } from "../server/schema/valueShape";
-import { apiPost } from "./wsClient";
+import { apiPost } from "../wsClient";
+import { buildActionDef, prefillEff, prefillPre, type EffRow, type PreRow, type PropVal } from "./actionView";
 
 export const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
 
@@ -240,66 +240,8 @@ export function FieldForm({
    前置：本类非派生字段 等于/不等于 字面量；或 从本类出发的关系 必须已经发生/必须还没发生。
    效应四种：把字段写成某值（update 宿主类）/ 转化（link 本类转化关系）/ 新生一个对象（create）/ 撤走这个对象（delete 宿主类）。
    update/delete 保存时自动写 object + identity: { from: identity }（附录 B：请求点名的那个体必须这样认人），控件上不出现编号。
-   表单认不出的动作不进这里（formCompatible 白名单把门），所以回读预填只处理这套形状。 */
-
-type PreRow =
-  | { kind: "prop"; prop: string; op: "eq" | "ne"; value: string }
-  | { kind: "link"; link: string; happened: boolean };
-
-type PropVal = { prop: string; source: "request" | "identity" | "literal"; value: string };
-
-type EffRow =
-  | { kind: "update"; rows: PropVal[] } // 把字段写成某值（作用在请求点名的那个体上）
-  | { kind: "link"; link: string } // 转化
-  | { kind: "create"; object: string; rows: PropVal[] } // 新生一个对象
-  | { kind: "delete" }; // 撤走这个对象
-
-/** 值输入框里的文本 → 字面量：true/false/null/数字各归各位，其余当字符串。 */
-function parseLiteral(s: string): unknown {
-  const t = s.trim();
-  if (t === "true") return true;
-  if (t === "false") return false;
-  if (t === "null") return null;
-  if (t !== "" && !Number.isNaN(Number(t))) return Number(t);
-  return t;
-}
-
-function prefillPre(def: any): PreRow[] {
-  const rows: PreRow[] = [];
-  for (const [k, v] of Object.entries(def?.pre ?? {})) {
-    if (k === "$link") {
-      for (const [ln, b] of Object.entries(v as Record<string, unknown>)) rows.push({ kind: "link", link: ln, happened: b === true });
-    } else if (v !== null && typeof v === "object" && "ne" in (v as Record<string, unknown>)) {
-      rows.push({ kind: "prop", prop: k, op: "ne", value: String((v as Record<string, unknown>).ne) });
-    } else {
-      rows.push({ kind: "prop", prop: k, op: "eq", value: String(v) });
-    }
-  }
-  return rows;
-}
-
-function prefillVal(v: unknown): Pick<PropVal, "source" | "value"> {
-  if (isFromOnly(v, "request")) return { source: "request", value: "" };
-  if (isFromOnly(v, "identity")) return { source: "identity", value: "" };
-  return { source: "literal", value: String(v) };
-}
-
-function prefillEff(def: any): EffRow[] | undefined {
-  if (!def) return undefined;
-  const rows: EffRow[] = [];
-  for (const item of def.effect ?? []) {
-    if ("update" in item) {
-      rows.push({ kind: "update", rows: Object.entries(item.update.properties).map(([p, v]) => ({ prop: p, ...prefillVal(v) })) });
-    } else if ("link" in item) {
-      rows.push({ kind: "link", link: item.link });
-    } else if ("create" in item) {
-      rows.push({ kind: "create", object: item.create.object, rows: Object.entries(item.create.properties).map(([p, v]) => ({ prop: p, ...prefillVal(v) })) });
-    } else if ("delete" in item) {
-      rows.push({ kind: "delete" });
-    }
-  }
-  return rows;
-}
+   表单认不出的动作不进这里（formCompatible 白名单把门），所以回读预填只处理这套形状。
+   行类型与 prefill/buildActionDef 往返函数收在 ./actionView（纯函数，单测覆盖往返恒等）。 */
 
 const selStyle: React.CSSProperties = { fontSize: 12, padding: "4px 6px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", maxWidth: 150 };
 const valInputStyle: React.CSSProperties = { fontSize: 12, padding: "4px 8px", flex: 1, minWidth: 60 };
@@ -350,55 +292,7 @@ export function ActionForm({
     setEffRows((rows) => rows.map((x, j) => (j === i ? r : x)));
   };
 
-  /** 拼 def（附录 B 形状）；缺必填项返回 null 并在卡内给出原因。 */
-  const buildDef = (): Record<string, unknown> | null => {
-    if (!/^[a-z][a-z0-9_]*$/.test(name.trim())) {
-      setError("名字必须是小写字母/数字/下划线，字母开头");
-      return null;
-    }
-    const pre: Record<string, unknown> = {};
-    for (const r of preRows) {
-      if (r.kind === "prop") {
-        if (!r.prop) return setError("前置里有一行没选字段"), null;
-        pre[r.prop] = r.op === "eq" ? parseLiteral(r.value) : { ne: parseLiteral(r.value) };
-      } else {
-        if (!r.link) return setError("前置里有一行没选关系"), null;
-        pre.$link = { ...((pre.$link as Record<string, unknown>) ?? {}), [r.link]: r.happened };
-      }
-    }
-    const effect: Record<string, unknown>[] = [];
-    for (const r of effRows) {
-      if (r.kind === "update") {
-        const properties: Record<string, unknown> = {};
-        for (const p of r.rows) {
-          if (!p.prop) return setError("「把字段写成某值」里有一行没选字段"), null;
-          properties[p.prop] = p.source === "request" ? { from: "request" } : parseLiteral(p.value);
-        }
-        if (Object.keys(properties).length === 0) return setError("「把字段写成某值」至少选一行字段"), null;
-        effect.push({ update: { object: clsName, identity: { from: "identity" }, properties } });
-      } else if (r.kind === "link") {
-        if (!r.link) return setError("「转化」没选关系"), null;
-        effect.push({ link: r.link });
-      } else if (r.kind === "create") {
-        if (!r.object) return setError("「新生一个对象」没选对象"), null;
-        const properties: Record<string, unknown> = {};
-        for (const p of r.rows) {
-          if (!p.prop) return setError("「新生一个对象」里有一行没选字段"), null;
-          properties[p.prop] = p.source === "request" ? { from: "request" } : p.source === "identity" ? { from: "identity" } : parseLiteral(p.value);
-        }
-        if (Object.keys(properties).length === 0) return setError("「新生一个对象」至少填一行字段"), null;
-        effect.push({ create: { object: r.object, properties } });
-      } else {
-        effect.push({ delete: { object: clsName, identity: { from: "identity" } } });
-      }
-    }
-    if (effect.length === 0) return setError("「做完会」至少要有一条"), null;
-    return {
-      ...(description.trim() ? { description: description.trim() } : {}),
-      ...(Object.keys(pre).length ? { pre } : {}),
-      effect,
-    };
-  };
+  /** 拼 def 走 actionView.buildActionDef（白名单子集的往返恒等有单测守着）。 */
 
   const propValRow = (p: PropVal, i: number, effIdx: number, allowIdentity: boolean, propChoices: string[]) => (
     <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
@@ -473,11 +367,14 @@ export function ActionForm({
         e.preventDefault();
         if (busy) return;
         setError(null);
-        const def = buildDef();
-        if (!def) return;
+        const built = buildActionDef({ clsName, name, description, preRows, effRows });
+        if (!built.ok) {
+          setError(built.error);
+          return;
+        }
         setBusy(true);
         try {
-          if (await onSave(name.trim(), def)) onCancel();
+          if (await onSave(name.trim(), built.def)) onCancel();
         } finally {
           setBusy(false);
         }

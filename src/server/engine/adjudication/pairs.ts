@@ -1,16 +1,17 @@
 // 裁决流水线 —— 疑似重复的三步（建议 → 交集率 → 定案）唯一入口。
 // 资格谓词在 eligibility.ts；本模块编排定案集合、闸、槽位、留痕。路由只做解析与 JSON。
 
-import type { ObjectType } from "../schema/config";
-import { metaStore } from "../meta/store";
-import { getDraft } from "./configStore";
+import type { ObjectType } from "../../schema/config";
+import { metaStore } from "../../meta/store";
+import { getDraft } from "../config/configStore";
 import { adjudicate, type Verdict } from "./adjudicate";
 import { connectionsOf, hasSources, isCrossSource, pairEligible, pairKey, SAME_SOURCE_OK_VERDICTS } from "./eligibility";
-import { EngineReject, mustCls } from "./individual";
-import { getDriverRegistry } from "./load";
-import { getSlot, type PairAdvice } from "./llmSlot";
-import { computeOverlap, type OverlapResult } from "./overlap";
-import { DEFAULT_WS } from "./workspace";
+import { EngineReject } from "../../errors";
+import { mustCls } from "../query/individual";
+import { getDriverRegistry } from "../infra/load";
+import { getSlot, type PairAdvice } from "../llmSlot";
+import { overlapRate, type OverlapResult } from "./overlap";
+import { DEFAULT_WS } from "../infra/workspace";
 
 export type { PairAdvice, OverlapResult };
 
@@ -33,7 +34,7 @@ export async function listCandidates(ws: string = DEFAULT_WS): Promise<PairAdvic
       fields: Object.keys(t.properties),
     }));
   const byName = new Map(Object.entries(d.object_types));
-  const advices = await getSlot().suggestPairs(classes);
+  const advices = await getSlot().proposePairs(classes);
   return advices.filter((p) => {
     const a = byName.get(p.class_a);
     const b = byName.get(p.class_b);
@@ -42,7 +43,7 @@ export async function listCandidates(ws: string = DEFAULT_WS): Promise<PairAdvic
 }
 
 /** 两端识别字段归一化后的集合重合度。无源 / 同源 / 缺识别字段拒绝。不收已定案闸——证据允许重算。 */
-export async function overlapOf(ws: string, class_a: string, class_b: string): Promise<OverlapResult> {
+export async function computeOverlap(ws: string, class_a: string, class_b: string): Promise<OverlapResult> {
   const d = (await getDraft(ws)).draft;
   const a = mustCls(d, class_a);
   const b = mustCls(d, class_b);
@@ -53,9 +54,9 @@ export async function overlapOf(ws: string, class_a: string, class_b: string): P
     throw new EngineReject(sharedSourcesMsg(a.def, b.def));
   }
   if (!a.def.identity || !b.def.identity) {
-    throw new EngineReject("两边对不上号：有类没设识别字段");
+    throw new EngineReject("两边对不上号：有类没设唯一键");
   }
-  return computeOverlap(await getDriverRegistry(ws), a, b, metaStore(), ws);
+  return overlapRate(await getDriverRegistry(ws), a, b, metaStore(), ws);
 }
 
 export interface DecideInput {

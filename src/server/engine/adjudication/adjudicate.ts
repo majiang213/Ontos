@@ -2,9 +2,11 @@
 // 同一：合并为一个对象、挂多源。阶段：收成一类 + 派生阶段 + 转化关系 + 转化动作。
 // 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
 
-import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../schema/config";
-import { resolveLink, walkFilter } from "../schema/filterWalk";
-import { dropClass, mutateDraft } from "./configStore";
+import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../../schema/config";
+import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
+import { dropClass } from "../config/applyOp";
+import { mutateDraft } from "../config/configStore";
+import { removeFieldsUpdateKeys } from "../config/skeletons";
 import { Verdict } from "./verdict";
 
 export type { Verdict } from "./verdict";
@@ -176,6 +178,8 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
         for (const entry of Object.values(A.sources ?? {})) delete entry.fields[p];
         for (const entry of Object.values(B.sources ?? {})) delete entry.fields[p];
       }
+      removeFieldsUpdateKeys(a, A, common); // 公共属性挪到上位对象，set_fields 摘键（摘空整条撤掉）
+      removeFieldsUpdateKeys(b, B, common);
       // 识别属性复制给上位对象（不移动）
       for (const p of idProps) {
         const def = A.properties[p] ?? B.properties[p];

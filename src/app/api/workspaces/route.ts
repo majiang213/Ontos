@@ -2,7 +2,7 @@
 // 台账 = 共享元库的 onto_workspace 注册表；各空间的版本链与元数据按 workspace_id 隔离。
 
 import { z } from "zod";
-import { createWorkspace, listWorkspaces } from "@/server/engine/workspace";
+import { createWorkspace, listWorkspaces } from "@/server/engine/infra/workspace";
 import { bodyJson, requireWriteAuth, respond } from "@/app/api/_shared";
 
 export async function GET() {

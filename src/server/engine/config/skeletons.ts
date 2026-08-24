@@ -2,7 +2,7 @@
 // 转化骨架（conversionAction）在 adjudicate.ts；这里管导入时每个新类自动补的「更新字段」。
 // 生成要模型、执行不要——这条动作连模型也不用：形状固定，代码构造，过 set_action 同一份校验。
 
-import type { ActionDef, ObjectType } from "../schema/config";
+import type { ActionDef, ObjectType } from "../../schema/config";
 
 /** 固定动作名：调用方（run_action）、文档、测试都引它，不让模型起名。 */
 export const FIELDS_UPDATE_ACTION = "set_fields";

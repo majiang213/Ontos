@@ -2,9 +2,10 @@
 // 列出类 / 读取一个类 / 检索。description 供阅读；填进 JSON 的是 name。
 // 已发布视图不返回 sources/pk（问数 Agent 不绑表）；草稿视图（space=draft）带状态与来源对照，供改画布。
 
-import type { ActionDef, OntologyConfig } from "../schema/config";
-import { replaceBlockers, sameConfig } from "./configStore";
-import { EngineReject } from "./individual";
+import type { ActionDef, OntologyConfig } from "../../schema/config";
+import { replaceBlockers } from "./applyOp";
+import { sameConfig } from "./configStore";
+import { EngineReject } from "../../errors";
 
 /** 类相对已发布快照的状态（与 GET /api/ontology 的 states 同一算法）。 */
 export type ClassState = "new" | "modified" | "same";
@@ -15,6 +16,31 @@ export function classState(draft: OntologyConfig, published: OntologyConfig, nam
   const t = draft.object_types[name];
   if (!t) throw new EngineReject(`配置中没有类：${name}`);
   return !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
+}
+
+/** 草稿 vs 已发布的结构 diff：states（逐类）、deleted（待删除名单）、action_changes（类名.动作名 三向差集）。
+ *  GET /api/ontology 与画布监视器共用这一份，不再在路由里内联。 */
+export interface DraftDiff {
+  states: Record<string, ClassState>;
+  deleted: string[];
+  action_changes: { added: string[]; overwritten: string[]; removed: string[] };
+}
+
+export function draftDiff(draft: OntologyConfig, published: OntologyConfig): DraftDiff {
+  const states: Record<string, ClassState> = {};
+  for (const name of Object.keys(draft.object_types)) states[name] = classState(draft, published, name);
+  const deleted = Object.keys(published.object_types).filter((name) => !(name in draft.object_types));
+  const action_changes: DraftDiff["action_changes"] = { added: [], overwritten: [], removed: [] };
+  for (const cls of new Set([...Object.keys(draft.object_types), ...Object.keys(published.object_types)])) {
+    const da = draft.object_types[cls]?.actions ?? {};
+    const pa = published.object_types[cls]?.actions ?? {};
+    for (const n of Object.keys(da)) {
+      if (!(n in pa)) action_changes.added.push(`${cls}.${n}`);
+      else if (!sameConfig(da[n], pa[n])) action_changes.overwritten.push(`${cls}.${n}`);
+    }
+    for (const n of Object.keys(pa)) if (!(n in da)) action_changes.removed.push(`${cls}.${n}`);
+  }
+  return { states, deleted, action_changes };
 }
 
 export interface ClassListItem {
@@ -100,7 +126,7 @@ export interface DraftClassView extends Omit<ClassView, "actions"> {
   state: ClassState;
   /** 来源对照（连接名/表名/主键/字段映射）：逐步改画布必须看见；不含连接密码。 */
   sources: { name: string; connection: string; table: string; pk?: string; fields: Record<string, string> }[];
-  /** 能不能整份替换（replace_object）；replace_blockers 为空数组 = 可替换。与 applyOp 共用 replaceBlockers。 */
+  /** 能不能整份替换（replace_object）；replace_blockers 为空数组 = 可替换。与 applyDraft 共用 replaceBlockers。 */
   replaceable: boolean;
   replace_blockers: string[];
   /** 草稿视图给完整动作定义（effect/inform 原样，不压扁）——动作的读回-改-写回闭环靠它。 */

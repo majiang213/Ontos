@@ -6,10 +6,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupRuntime, setupRuntime } from "./helpers";
-import { buildInsert, buildSelect, buildStatement, maskValue } from "../server/engine/driver";
-import "../server/engine/sqlDriver"; // 副作用导入：注册 PG 日期列的 type parser（1082/1114/1184）
-import { DriverRegistry } from "../server/engine/registry";
-import { SqliteFixtureDriver } from "../server/engine/fixture";
+import { buildInsert, buildSelect, buildStatement, maskValue } from "../server/engine/infra/driver";
+import "../server/engine/infra/sqlDriver"; // 副作用导入：注册 PG 日期列的 type parser（1082/1114/1184）
+import { DriverRegistry } from "../server/engine/infra/registry";
+import { SqliteFixtureDriver } from "../server/engine/infra/fixture";
 
 describe("方言 SQL 生成", () => {
   it("pg：占位符渲染成 $1..$n，标识符双引号", () => {
@@ -126,7 +126,7 @@ describe("连接生命周期", () => {
   });
 
   it("相对路径 sqlite 按运行态 cwd 解析并落库", async () => {
-    const { saveConnection, getDriverRegistry } = await import("../server/engine/load");
+    const { saveConnection, getDriverRegistry } = await import("../server/engine/infra/load");
     writeFileSync(join(tmp, "rel_demo.db"), "");
     const r = await saveConnection("default", { name: "rel_db", type: "sqlite", db_name: "rel_demo.db" }, false);
     expect(r.saved).toBe(true);
@@ -135,7 +135,7 @@ describe("连接生命周期", () => {
   });
 
   it("内置演示源不许覆盖；不在元库的删不了；已发布引用不能删", async () => {
-    const { saveConnection, dropConnection } = await import("../server/engine/load");
+    const { saveConnection, dropConnection } = await import("../server/engine/infra/load");
     // 内置演示 fixture 只属于 test 空间
     await expect(saveConnection("test", { name: "device_sys", type: "mysql", host: "127.0.0.1", db_name: "x" })).rejects.toThrow(/内置演示源/);
     await expect(dropConnection("test", "device_sys")).rejects.toThrow(/内置演示源不能删/);
@@ -143,8 +143,8 @@ describe("连接生命周期", () => {
 
     writeFileSync(join(tmp, "used.db"), "");
     await saveConnection("test", { name: "used_db", type: "sqlite", db_name: "used.db" }, false);
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({
       op: "import_objects",
       objects: {
         gadget: {
@@ -155,7 +155,7 @@ describe("连接生命周期", () => {
         },
       },
     }, "test");
-    await s.publishDraft("test");
+    await s.publish("test");
     await expect(dropConnection("test", "used_db")).rejects.toThrow(/仍被已发布本体引用/);
   });
 });

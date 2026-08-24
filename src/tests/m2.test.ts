@@ -5,8 +5,8 @@ import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
-import { listClasses, readClass, search } from "../server/engine/views";
-import { Verdict } from "../server/engine/verdict";
+import { listClasses, readClass, search } from "../server/engine/config/views";
+import { Verdict } from "../server/engine/adjudication/verdict";
 import { CannedSlot } from "../server/engine/llmSlot";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -96,7 +96,7 @@ describe("LLM 槽位离线回退", () => {
   });
 
   it("逆向建模：表结构产草稿，识别字段猜编号列，主键不进属性", async () => {
-    const draft = await slot.draftObjects([
+    const draft = await slot.proposeObjects([
       {
         connection: "mes_sys",
         table: {
@@ -116,7 +116,7 @@ describe("LLM 槽位离线回退", () => {
   });
 
   it("逆向建模：列注释存成字段说明，没注释的字段说明为空", async () => {
-    const draft = await slot.draftObjects([
+    const draft = await slot.proposeObjects([
       {
         connection: "mes_sys",
         table: {
@@ -135,7 +135,7 @@ describe("LLM 槽位离线回退", () => {
   });
 
   it("候选对建议：跨源且字段重合才成对，同源不成对", async () => {
-    const pairs = await slot.suggestPairs([
+    const pairs = await slot.proposePairs([
       { name: "a", sources: ["s1"], fields: ["sn", "name"] },
       { name: "b", sources: ["s2"], fields: ["sn", "name", "status"] },
       { name: "c", sources: ["s1"], fields: ["sn", "name"] }, // 与 a 同源

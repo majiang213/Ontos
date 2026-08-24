@@ -4,26 +4,16 @@
 
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ConnectionRec } from "../meta/store";
-import { metaStore } from "../meta/store";
-import { runtime } from "../runtime";
-import { getPublished } from "./configStore";
+import type { ConnectionRec } from "../../meta/types";
+import { metaStore } from "../../meta/store";
+import { runtime } from "../../runtime";
+import { getPublished } from "../config/configStore";
 import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
+import { ConnectionReject } from "../../errors";
 import { DEFAULT_WS, TEST_WS } from "./workspace";
-
-/** 连接生命周期拒绝：bad_request 对形状/路径，rejected 对资格（演示源、连不上、占用）。 */
-export class ConnectionReject extends Error {
-  constructor(
-    message: string,
-    readonly kind: "bad_request" | "rejected" = "rejected"
-  ) {
-    super(message);
-    this.name = "ConnectionReject";
-  }
-}
 
 // 注册表按工作空间键控，挂运行态（runtime.ts）：Next dev 多模块实例共享，测试换运行态即隔离
 function registries(): Map<string, DriverRegistry> {

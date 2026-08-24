@@ -2,7 +2,7 @@
 // 薄适配：形状校验 + 写闸 → load.saveConnection / dropConnection。
 
 import { z } from "zod";
-import { dropConnection, saveConnection } from "@/server/engine/load";
+import { dropConnection, saveConnection } from "@/server/engine/infra/load";
 import { metaStore } from "@/server/meta/store";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 

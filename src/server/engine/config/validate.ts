@@ -1,9 +1,9 @@
 // 配置的语义校验 —— 附录 B 里 zod 管不着的约束，发布与加载时各跑一遍。
 // 违反即抛错：identity 缺映射、派生属性进 fields、关系端点不存在、inform 指向未声明的出站等。
 
-import { FILTER_OPS, type OntologyConfig } from "../schema/config";
-import { walkFilter } from "../schema/filterWalk";
-import { FROM_KEY_SET } from "../schema/valueShape";
+import { type OntologyConfig } from "../../schema/config";
+import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
+import { checkActionValue } from "../../schema/spec/actionSpec";
 
 export function validateSemantics(config: OntologyConfig): void {
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
@@ -149,9 +149,9 @@ export function validateSemantics(config: OntologyConfig): void {
    validateSemantics 管指称（类/属性/关系存在），这里管附录 B 的形状——今天只有运行期才拦的四条：
    ① 效应 link 必须指向已存在的转化关系，且 from/to 都在宿主类上（与 action.ts 运行期同口径）；
    ② 每条 transition 关系必须被至少一条动作的效应 link 引用（孤儿转化关系发布不出去）；
-   ③ 取值来源形状（from 词表原语在 schema/valueShape，与 expr.ts / individual.ts 共用）；
+   ③ 取值来源形状（规约在 schema/spec/actionSpec；过滤操作数在 schema/spec/filterSpec；词表原语在 schema/spec/valueSpec）；
    ④ update / delete 必须带 identity 或 filter（认人必须写明）。
-   只在草稿写入/发布路径调（applyOp / mutateDraft / publishDraft 的 validateSemantics 之后）；
+   只在草稿写入/发布路径调（applyDraft / mutateDraft / publish 的 validateSemantics 之后）；
    loadPublished / rollbackTo 不调——历史已发布的坏配置加载放行，运行期由 action.ts 兜底。 */
 export function validateActionShapes(config: OntologyConfig): void {
   for (const [clsName, cls] of Object.entries(config.object_types)) {
@@ -169,7 +169,7 @@ export function validateActionShapes(config: OntologyConfig): void {
           // create 投影没有 current 上下文；from: generated 只许落在带 generate 列表的属性上
           const target = config.object_types[item.create.object];
           for (const [p, v] of Object.entries(item.create.properties)) {
-            checkValueSource(v, `${where} 的效应（create ${item.create.object}.${p}）`, { allowCurrent: false, allowGenerated: Boolean(target?.properties[p]?.generate) });
+            checkActionValue("effect.create.properties", v, `${where} 的效应（create ${item.create.object}.${p}）`, { hasGenerate: Boolean(target?.properties[p]?.generate) });
           }
           continue;
         }
@@ -179,19 +179,19 @@ export function validateActionShapes(config: OntologyConfig): void {
           throw new Error(`配置不合法：${where} 的效应认人必须写明：${op.object} 缺 identity 或 filter`);
         }
         // ③ 认人键：current 不可用（认人发生在逐个体求值之前）
-        if (op.identity !== undefined) checkValueSource(op.identity, `${where} 的效应认人`, { allowCurrent: false, allowGenerated: false });
+        if (op.identity !== undefined) checkActionValue("effect.identity", op.identity, `${where} 的效应认人`);
         // ③ 效应过滤的取值：update/delete 逐个体求值，有 current 上下文
         if (op.filter) checkFilterOperands(op.filter, `${where} 的效应过滤`);
         if ("update" in item) {
           for (const [p, v] of Object.entries(item.update.properties)) {
-            checkValueSource(v, `${where} 的效应（update ${item.update.object}.${p}）`, { allowCurrent: true, allowGenerated: false });
+            checkActionValue("effect.update.properties", v, `${where} 的效应（update ${item.update.object}.${p}）`);
           }
         }
       }
       // ③ inform 的取值：没有 current 上下文，也没有 generated
       for (const inf of act.inform ?? []) {
         for (const [p, v] of Object.entries(inf.properties)) {
-          checkValueSource(v, `${where} 的 inform（${p}）`, { allowCurrent: false, allowGenerated: false });
+          checkActionValue("inform.properties", v, `${where} 的 inform（${p}）`);
         }
       }
     }
@@ -208,51 +208,5 @@ export function validateActionShapes(config: OntologyConfig): void {
   }
 }
 
-/** 取值来源形状（效应/inform 的 properties 与认人键；from 词表与 expr.ts resolveValue 共用 schema/valueShape）。 */
-function checkValueSource(v: unknown, where: string, opts: { allowCurrent: boolean; allowGenerated: boolean }): void {
-  if (v === null || typeof v !== "object") return; // 字面量与 now 系表达式串：运行期 resolveLiteral 管，这里不管
-  if (Array.isArray(v)) throw new Error(`配置不合法：${where} 的取值不接受数组`);
-  const rec = v as Record<string, unknown>;
-  if (typeof rec.property === "string") {
-    const from = rec.from === undefined ? "current" : rec.from; // { property } 缺省 from = current
-    if (from !== "current" && from !== "request") throw new Error(`配置不合法：${where} 的取值 { property } 组合的 from 只许 current/request：${JSON.stringify(v)}`);
-    if (from === "current" && !opts.allowCurrent) throw new Error(`配置不合法：${where} 没有当前个体，取值不能来自 current：${JSON.stringify(v)}`);
-    return;
-  }
-  if (typeof rec.from === "string" && FROM_KEY_SET.has(rec.from)) {
-    if (rec.from === "current" && !opts.allowCurrent) throw new Error(`配置不合法：${where} 没有当前个体，取值不能来自 current：${JSON.stringify(v)}`);
-    if (rec.from === "generated" && !opts.allowGenerated) throw new Error(`配置不合法：${where} 的 from: generated 只许用在 create 效应且目标属性带 generate 列表：${JSON.stringify(v)}`);
-    return;
-  }
-  throw new Error(`配置不合法：${where} 的取值来源不认识：${JSON.stringify(v)}`);
-}
-
-/** 效应过滤的取值：逐键检查操作数（与 individual.ts resolveOperand 同口径：{ property, from?: current|request } 或 { from: identity }）。 */
-function checkFilterOperands(filter: Record<string, unknown>, where: string): void {
-  walkFilter(null, "", filter, {
-    prop: (_cls, key, v) => checkOperand(v, `${where} 的 ${key}`),
-  });
-}
-
-function checkOperand(v: unknown, where: string): void {
-  if (Array.isArray(v)) {
-    for (const x of v) {
-      if (x !== null && typeof x === "object") throw new Error(`配置不合法：${where} 的数组元素只许是字面量`);
-    }
-    return;
-  }
-  if (v === null || typeof v !== "object") return; // 字面量
-  const rec = v as Record<string, unknown>;
-  const keys = Object.keys(rec);
-  if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
-    for (const k of keys) checkOperand(rec[k], where); // 运算符块：每个运算符的值还是操作数
-    return;
-  }
-  if (typeof rec.property === "string") {
-    const from = rec.from === undefined ? "current" : rec.from;
-    if (from !== "current" && from !== "request") throw new Error(`配置不合法：${where} 的取值 { property } 组合的 from 只许 current/request：${JSON.stringify(v)}`);
-    return; // 效应过滤逐个体求值，current 合法
-  }
-  if (rec.from === "identity") return;
-  throw new Error(`配置不合法：${where} 的取值来源不认识：${JSON.stringify(v)}`);
-}
+/* 取值形状与过滤操作数的核对已收进规约层：schema/spec/actionSpec（checkActionValue，按位置放闸）与
+   schema/spec/filterSpec（checkOperand/checkFilterOperands）。本文件只留指称校验与形状四查的编排。 */

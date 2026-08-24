@@ -5,16 +5,16 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupRuntime, setupRuntime } from "./helpers";
-import { pickRule, normalizeWith, RULES } from "../server/engine/normalize";
-import { computeOverlap } from "../server/engine/overlap";
-import { applyVerdict } from "../server/engine/adjudicate";
-import { Verdict } from "../server/engine/verdict";
-import { decide, listCandidates, overlapOf } from "../server/engine/pairs";
-import { EngineReject } from "../server/engine/individual";
-import { freshDriver } from "../server/engine/load";
+import { pickRule, normalizeWith, RULES } from "../server/engine/adjudication/normalize";
+import { overlapRate } from "../server/engine/adjudication/overlap";
+import { applyVerdict } from "../server/engine/adjudication/adjudicate";
+import { Verdict } from "../server/engine/adjudication/verdict";
+import { decide, listCandidates, computeOverlap } from "../server/engine/adjudication/pairs";
+import { EngineReject } from "../server/errors";
+import { freshDriver } from "../server/engine/infra/load";
 import { freshMetaStore } from "../server/meta/store";
 import { configSchema, type OntologyConfig } from "../server/schema/config";
-import { validateSemantics } from "../server/engine/validate";
+import { validateSemantics } from "../server/engine/config/validate";
 import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 
@@ -85,7 +85,7 @@ describe("交集率", () => {
       properties: { serial_no: { type: "string" as const } },
       sources: { device: { connection: "device_sys", table: "device", pk: "dev_id", fields: { serial_no: "serial_no" } } },
     } };
-    const result = await computeOverlap(freshDriver(), a, b, meta);
+    const result = await overlapRate(freshDriver(), a, b, meta);
     expect(result.count_a).toBe(121);
     expect(result.count_b).toBe(100);
     expect(result.count_hit).toBe(40);
@@ -213,8 +213,8 @@ describe("裁决流水线", () => {
   });
 
   it("decide「同一」：合并两个跨源类，留痕带证据", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({
       op: "import_objects",
       objects: {
         po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
@@ -236,13 +236,13 @@ describe("裁决流水线", () => {
     expect(dec.verdict).toBe(Verdict.Same);
     expect(dec.evidence?.count_hit).toBe(40);
     expect(dec.version).toBeNull();
-    await s.publishDraft();
+    await s.publish();
     expect((await meta.listDecisions("default"))[0].version).toBe(2);
   });
 
   it("decide：校验闸回退时不留幻影记录", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({
       op: "import_objects",
       objects: {
         po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, status: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", status: "sn" } } } },
@@ -256,8 +256,8 @@ describe("裁决流水线", () => {
   });
 
   it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({
       op: "import_objects",
       objects: {
         po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
@@ -274,10 +274,10 @@ describe("裁决流水线", () => {
     expect((await listCandidates()).some(isPair)).toBe(false);
   });
 
-  it("overlapOf：无源类、同源对拒绝", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
-    await expect(overlapOf("default", "equipment", "vendor")).rejects.toThrow(EngineReject);
-    await expect(overlapOf("default", "repair", "assignment")).rejects.toThrow(EngineReject);
+  it("computeOverlap：无源类、同源对拒绝", async () => {
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" });
+    await expect(computeOverlap("default", "equipment", "vendor")).rejects.toThrow(EngineReject);
+    await expect(computeOverlap("default", "repair", "assignment")).rejects.toThrow(EngineReject);
   });
 });

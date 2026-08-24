@@ -1,9 +1,9 @@
 // 留痕编排 —— 问数与动作的留痕形状（字段、duration、版本号）唯一出处。路由与 MCP 共用。
 // 版本号在成功/失败一刻取一次；留痕尽力而为，不挡响应（safeLog）。
 
-import type { ActionRequest } from "../schema/request";
-import { getPublished } from "./configStore";
-import { metaStore } from "../meta/store";
+import type { ActionRequest } from "../../schema/request";
+import { getPublished } from "../config/configStore";
+import { metaStore } from "../../meta/store";
 
 /** 留痕尽力而为（可同步可异步）：响应失败的根因若正是元库故障，catch 里再抛就成非 JSON 响应。 */
 export function safeLog(fn: () => void | Promise<void>): void {

@@ -4,7 +4,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
-import { EngineReject } from "./individual";
+import { EngineReject } from "../../errors";
 
 // node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
 // node:sqlite 不认 boolean，绑定前归一成 1/0。

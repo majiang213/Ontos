@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
-import { effectSummary, externalToast, formCompatible } from "../components/actionView";
+import { effectSummary, externalToast, formCompatible, buildActionDef, prefillEff, prefillPre } from "../components/forms/actionView";
 import { configSchema, type ActionDef } from "../server/schema/config";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -57,6 +57,39 @@ describe("formCompatible（动作表单白名单）", () => {
       inform: [{ object: "change", to: ["payroll"], properties: { action: { from: "action" } } }],
     } as ActionDef;
     expect(formCompatible(withInform, "equipment", config)).toBe(false);
+  });
+});
+
+describe("动作表单往返恒等（白名单放行 ⇒ prefill → buildActionDef 逐键恒等）", () => {
+  const roundtrip = (def: ActionDef, clsName = "equipment") => {
+    expect(formCompatible(def, clsName, config)).toBe(true); // 守卫：只测白名单放行的
+    const built = buildActionDef({
+      clsName,
+      name: "t_action",
+      description: (def as { description?: string }).description ?? "",
+      preRows: prefillPre(def),
+      effRows: prefillEff(def) ?? [],
+    });
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(built.def).toEqual(def);
+  };
+
+  it("演示配置里凡白名单放行的动作都逐键往返（当前五条都不放行，此循环是未来的哨兵）", () => {
+    for (const [clsName, cls] of Object.entries(config.object_types)) {
+      for (const def of Object.values(cls.actions ?? {})) {
+        if (formCompatible(def, clsName, config)) roundtrip(def, clsName);
+      }
+    }
+  });
+
+  it("构造的兼容动作：update 带前置、create 用 identity、delete、link 转化", () => {
+    roundtrip({
+      pre: { dept: "D01", mark: { ne: "scrapped" }, $link: { belongs_to: true } },
+      effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "request" }, mark: "scrapped", name: "x" } } }],
+    } as ActionDef);
+    roundtrip({ effect: [{ create: { object: "warranty_card", properties: { serial_no: { from: "identity" } } } }] } as ActionDef);
+    roundtrip({ effect: [{ delete: { object: "equipment", identity: { from: "identity" } } }] } as ActionDef);
+    roundtrip({ effect: [{ link: "converted" }] } as ActionDef);
   });
 });
 

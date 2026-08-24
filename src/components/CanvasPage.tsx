@@ -2,15 +2,17 @@
 // 画布内容 = 工作副本（已发布 + 未发布改动）；发布走「发布 vN+1 / 放弃」；表结构收进底部抽屉。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import OntologyCanvas from "./OntologyCanvas";
-import type { CanvasLink, CanvasObject } from "./layout";
-import type { BorderPin } from "./FloatingEdge";
-import PairCard from "./PairCard";
-import Bezel from "./Bezel";
-import { ApiError, apiGet, apiPost, apiDel, getWs } from "./wsClient";
-import QuestionsCard from "./QuestionsCard";
-import { ActionForm, ConnectForm, CreateForm, FieldForm, LinkForm, PROP_TYPES, Section } from "./forms";
-import { effectSummary, externalToast, formCompatible } from "./actionView";
+import OntologyCanvas from "./canvas/OntologyCanvas";
+import type { CanvasLink, CanvasObject } from "./canvas/layout";
+import type { BorderPin } from "./canvas/FloatingEdge";
+import PairCard from "./cards/PairCard";
+import Bezel from "./cards/Bezel";
+import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";
+import QuestionsCard from "./cards/QuestionsCard";
+import { ActionForm, ConnectForm, CreateForm, FieldForm, LinkForm, PROP_TYPES, Section } from "./forms/forms";
+import { effectSummary, externalToast, formCompatible } from "./forms/actionView";
+import { useRevWatcher } from "./revWatcher";
+import { columnTarget as columnTargetOf } from "../server/engine/config/lineage";
 import type { PairAdvice } from "../server/engine/llmSlot";
 
 interface OntologyResp {
@@ -69,10 +71,7 @@ export default function CanvasPage() {
   const ontRef = useRef<OntologyResp | null>(null);
   const cardRef = useRef<Card>(null);
   const actionFormRef = useRef<typeof actionForm>(null);
-  const lastRev = useRef<number | null>(null);
-  const etagRef = useRef<string | null>(null);
   const localBusy = useRef(false);
-  const pollFailed = useRef(false);
   const formBusy = useRef(false);
   const actionFormDirty = useRef(false);
   const actionFormRev = useRef<number | null>(null); // 打开动作表单那一刻的 rev：保存时不一样要先问
@@ -80,7 +79,7 @@ export default function CanvasPage() {
   useEffect(() => { actionFormRef.current = actionForm; }, [actionForm]);
   useEffect(() => { formBusy.current = Boolean(fieldForm || actionForm); }, [fieldForm, actionForm]);
   useEffect(() => {
-    if (actionForm) actionFormRev.current = lastRev.current;
+    if (actionForm) actionFormRev.current = watcher.currentRev();
     else { actionFormRev.current = null; actionFormDirty.current = false; }
   }, [actionForm]);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -96,22 +95,46 @@ export default function CanvasPage() {
   /** 失败的统一分流：服务端拒绝直接显示上游文案，网络层失败加前缀。 */
   const failToast = useCallback((e: unknown) => (e instanceof ApiError ? showToast(e.message) : netErr(e)), [showToast, netErr]);
 
+  // 画布当监视器：每 2 秒轮询工作副本（隐页暂停）——轮询纪律收在 revWatcher module，
+  // 这里只留「变化来了干什么」：本页写豁免在 busy()，表单开着走 onFormBlocked，失败一次走 onFailOnce。
+  const watcher = useRevWatcher({
+    busy: () => localBusy.current,
+    formBusy: () => formBusy.current,
+    onFrame: (data) => {
+      const frame = data as unknown as OntologyResp;
+      const prev = ontRef.current;
+      applyOnt(frame);
+      // 开着的对象卡对应类已不在草稿里：收卡
+      const open = cardRef.current;
+      if (open?.kind === "object" && !(open.name in frame.object_types)) {
+        setCard(null);
+        showToast("这个对象已从草稿里去掉");
+        return;
+      }
+      if (prev) showToast(externalToast(prev, frame)); // 首轮由 refresh 负责，不弹
+    },
+    onFormBlocked: () => showToast("草稿有更新，保存会盖掉外面刚写的"),
+    onFailOnce: () => showToast("没法自动刷新画布，请重新打开本页"),
+  });
+
   /** 每次拿到本体 JSON 都过这里：state、rev、ETag 一起记——本页写入的 refresh 与轮询共用这一句。 */
-  const applyOnt = useCallback((data: OntologyResp) => {
-    ontRef.current = data;
-    lastRev.current = data.rev;
-    etagRef.current = `"${getWs()}-${data.rev}"`; // 与 GET /api/ontology 的 ETag 同格式
-    setOnt(data);
-  }, []);
+  const applyOnt = useCallback(
+    (data: OntologyResp) => {
+      ontRef.current = data;
+      watcher.noteApplied(data.rev); // rev/ETag 与轮询监视器同步（同一份 etagOf）
+      setOnt(data);
+    },
+    [watcher]
+  );
   const refresh = useCallback(() => apiGet<OntologyResp>("/api/ontology").then(applyOnt), [applyOnt]);
   // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
   const loadPairs = useCallback(async () => {
-    const data = await apiGet<{ candidates?: PairAdvice[] }>("/api/candidates");
+    const data = await apiGet<{ candidates?: PairAdvice[] }>("/api/list_candidates");
     setPairs(data.candidates ?? []);
   }, []);
   useEffect(() => {
     refresh().catch(netErr); // 首轮加载失败也要说
-    apiGet<IntrospectResp>("/api/introspect").then(setSchema).catch(netErr);
+    apiGet<IntrospectResp>("/api/list_tables").then(setSchema).catch(netErr);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载时跑一次
   }, [refresh, netErr]);
 
@@ -133,58 +156,11 @@ export default function CanvasPage() {
     [failToast]
   );
 
-  // 画布当监视器：每 2 秒轮询工作副本（隐页暂停），外部写入后约 2 秒内刷新并 toast。
-  // 自有 fetch（cache: no-store + If-None-Match）：apiGet 对非 2xx 抛错且拿不到 304，不能复用。
-  useEffect(() => {
-    const tick = async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        const r = await fetch(`/api/ontology?ws=${encodeURIComponent(getWs())}`, {
-          cache: "no-store",
-          headers: etagRef.current ? { "If-None-Match": etagRef.current } : {},
-        });
-        if (r.status === 304) {
-          pollFailed.current = false;
-          return; // 无变化
-        }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = (await r.json()) as OntologyResp;
-        pollFailed.current = false;
-        if (localBusy.current) return; // 本页正在写：它自己会 refresh，不当外部改动
-        if (lastRev.current !== null && data.rev === lastRev.current) return; // rev 没变（兜底；正常走 304）
-        if (formBusy.current) {
-          // 表单开着：不冲掉未保存的内容、不偷偷重挂；记下新 rev，保存或取消后再拉一次
-          lastRev.current = data.rev;
-          etagRef.current = r.headers.get("etag") ?? etagRef.current;
-          showToast("草稿有更新，保存会盖掉外面刚写的");
-          return;
-        }
-        const prev = ontRef.current;
-        applyOnt(data);
-        // 开着的对象卡对应类已不在草稿里：收卡
-        const open = cardRef.current;
-        if (open?.kind === "object" && !(open.name in data.object_types)) {
-          setCard(null);
-          showToast("这个对象已从草稿里去掉");
-          return;
-        }
-        if (prev) showToast(externalToast(prev, data)); // 首轮由 refresh 负责，不弹
-      } catch {
-        if (!pollFailed.current) {
-          pollFailed.current = true; // 失败一次就提醒，但不每 2 秒弹
-          showToast("没法自动刷新画布，请重新打开本页");
-        }
-      }
-    };
-    const timer = setInterval(tick, 2000);
-    return () => clearInterval(timer);
-  }, [applyOnt, showToast]);
-
   /** 编辑操作统一入口：发给草稿，刷新视图，错误进 toast。网络层失败也要说。 */
   const op = useCallback(
     async (body: Record<string, unknown>) =>
       withLocalWrite(async () => {
-        await apiPost("/api/draft", body);
+        await apiPost("/api/apply_draft", body);
         await refresh();
       }),
     [withLocalWrite, refresh]
@@ -256,7 +232,7 @@ export default function CanvasPage() {
           const dot = key.indexOf("."); // 只切第一个点：连接名/表名里再有点不炸
           return { connection: key.slice(0, dot), table: key.slice(dot + 1) };
         });
-        const data = await apiPost<{ created: string[] }>("/api/generate", { tables });
+        const data = await apiPost<{ created: string[] }>("/api/generate_objects", { tables });
         showToast(`已生成对象：${data.created.join("、")}（草稿，发布后生效）`);
         setSelectedTables(new Set());
         setDrawerOpen(false);
@@ -304,20 +280,9 @@ export default function CanvasPage() {
     [ont]
   );
 
-  const columnTarget = (connection: string, table: string, column: string): string => {
-    for (const [clsName, t] of Object.entries(ont?.object_types ?? {})) {
-      for (const [srcName, s] of Object.entries((t as any).sources ?? {})) {
-        const src = s as any;
-        if (src.connection === connection && src.table === table) {
-          for (const [prop, col] of Object.entries(src.fields)) {
-            if (col === column) return `${clsName}.${prop}（${srcName}）`;
-          }
-          if (src.pk === column) return `${clsName} 的主键（${srcName}）`;
-        }
-      }
-    }
-    return "未映射";
-  };
+  // 列 → 本体属性 的反查：规则收在引擎的 lineage（纯函数单源），这里只喂当前草稿
+  const columnTarget = (connection: string, table: string, column: string): string =>
+    ont ? columnTargetOf(ont, connection, table, column) : "未映射";
 
   const sel = card?.kind === "object" ? (ont?.object_types?.[card.name] as any) : null;
 
@@ -528,7 +493,7 @@ export default function CanvasPage() {
                 setCard(null);
                 showToast(msg);
                 try {
-                  setSchema(await apiGet<IntrospectResp>("/api/introspect"));
+                  setSchema(await apiGet<IntrospectResp>("/api/list_tables"));
                   setDrawerOpen(true); // 保存后自动打开表结构抽屉
                 } catch (e) {
                   netErr(e); // 连上了但刷表结构失败：连接已存，刷新失败要告诉人
@@ -775,7 +740,7 @@ export default function CanvasPage() {
                     onDirtyChange={(d) => { actionFormDirty.current = d; }}
                     onSave={async (name, def) => {
                       // 保存仍不带 base_rev；表单开着期间外面改过了，先问一句再盖
-                      if (actionFormRev.current !== null && lastRev.current !== null && lastRev.current !== actionFormRev.current) {
+                      if (actionFormRev.current !== null && watcher.currentRev() !== null && watcher.currentRev() !== actionFormRev.current) {
                         if (!window.confirm("外面已经改过这份草稿，还要按表单覆盖吗？")) return false;
                       }
                       const ok = await op({ op: "set_action", object: card.name, name, def });

@@ -5,7 +5,9 @@
 // 缺了它浏览器可能把 200 缓存起来，轮询就看不见外部（MCP）写入。
 
 import { NextResponse } from "next/server";
-import { getDraft, getPublished, getRev, sameConfig } from "@/server/engine/configStore";
+import { getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
+import { draftDiff } from "@/server/engine/config/views";
+import { etagOf } from "@/server/etag";
 import { respond, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {
@@ -13,30 +15,13 @@ export async function GET(req: Request) {
     const ws = wsOf(req);
     const state = await getDraft(ws);
     const rev = getRev(ws);
-    const etag = `"${ws}-${rev}"`;
+    const etag = etagOf(ws, rev);
     const headers = { ETag: etag, "Cache-Control": "no-store" };
     if (req.headers.get("if-none-match") === etag) {
       return new NextResponse(null, { status: 304, headers });
     }
     const published = (await getPublished(ws)).config;
-    const states: Record<string, "new" | "modified" | "same"> = {};
-    for (const [name, t] of Object.entries(state.draft.object_types)) {
-      const pub = published.object_types[name];
-      states[name] = !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
-    }
-    // 已发布但草稿里删掉的对象：给画布一个「待删除」名单
-    const deleted = Object.keys(published.object_types).filter((name) => !(name in state.draft.object_types));
-    // 动作差集（类名.动作名）：只在草稿=新增；两边都有但结构不同=已修改；只在已发布=去掉。发布条与 toast 只读这个
-    const action_changes = { added: [] as string[], overwritten: [] as string[], removed: [] as string[] };
-    for (const cls of new Set([...Object.keys(state.draft.object_types), ...Object.keys(published.object_types)])) {
-      const da = state.draft.object_types[cls]?.actions ?? {};
-      const pa = published.object_types[cls]?.actions ?? {};
-      for (const n of Object.keys(da)) {
-        if (!(n in pa)) action_changes.added.push(`${cls}.${n}`);
-        else if (!sameConfig(da[n], pa[n])) action_changes.overwritten.push(`${cls}.${n}`);
-      }
-      for (const n of Object.keys(pa)) if (!(n in da)) action_changes.removed.push(`${cls}.${n}`);
-    }
+    const { states, deleted, action_changes } = draftDiff(state.draft, published);
     return NextResponse.json(
       {
         rev,

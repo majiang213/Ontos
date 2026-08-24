@@ -3,12 +3,8 @@
 
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { DraftReject } from "@/server/engine/configStore";
-import { EngineReject } from "@/server/engine/individual";
-import { ConnectionReject } from "@/server/engine/load";
-import { DEFAULT_WS, isWsName, WsReject } from "@/server/engine/workspace";
-
-export { safeLog } from "@/server/engine/logging";
+import { DraftReject, EngineReject, ConnectionReject, WsReject } from "@/server/errors";
+import { DEFAULT_WS, isWsName } from "@/server/engine/infra/workspace";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
 export class BadRequest extends Error {}

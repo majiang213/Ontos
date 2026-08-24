@@ -1,9 +1,9 @@
-// 裁决：POST /api/decisions
+// 裁决：POST /api/decide
 // 定案只能是人。薄适配：形状校验 + 写闸 → 裁决流水线 decide。GET 列出留痕。
 
 import { z } from "zod";
-import { decide } from "@/server/engine/pairs";
-import { Verdict } from "@/server/engine/verdict";
+import { decide } from "@/server/engine/adjudication/pairs";
+import { Verdict } from "@/server/engine/adjudication/verdict";
 import { metaStore } from "@/server/meta/store";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 

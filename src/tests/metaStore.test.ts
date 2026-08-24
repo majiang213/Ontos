@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { freshMetaStore, type MetaStore } from "../server/meta/store";
-import { Verdict } from "../server/engine/verdict";
+import { Verdict } from "../server/engine/adjudication/verdict";
 
 let tmp: string;
 let store: MetaStore;

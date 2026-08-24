@@ -5,8 +5,8 @@
 import type { QueryRequest } from "../schema/request";
 import { queryRequestSchema } from "../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../schema/config";
-import type { TableInfo } from "./driver";
-import { TENDENCIES, VERDICT_LABELS, Verdict, type Tendency } from "./verdict";
+import type { TableInfo } from "./infra/driver";
+import { TENDENCIES, VERDICT_LABELS, Verdict, type Tendency } from "./adjudication/verdict";
 import { z } from "zod";
 import { generateText, Output, type LanguageModel } from "ai";
 import { createXai } from "@ai-sdk/xai";
@@ -17,9 +17,9 @@ export interface LlmSlot {
   /** NL → 查询 JSON（问数槽位） */
   nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest>;
   /** 表结构 → 本体草稿（逆向建模槽位） */
-  draftObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>>;
+  proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>>;
   /** 跨源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合（跨源判定在实现里做）。 */
-  suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
+  proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
 }
 
 export interface PairAdvice {
@@ -62,7 +62,7 @@ export class CannedSlot implements LlmSlot {
     return queryRequestSchema.parse({ object: "equipment", properties: ["name", "status"] });
   }
 
-  async draftObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
+  async proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
     const out: Record<string, ObjectType> = {};
     for (const { connection, table } of tables) {
       const properties: Record<string, ObjectType["properties"][string]> = {};
@@ -99,7 +99,7 @@ export class CannedSlot implements LlmSlot {
     return out;
   }
 
-  async suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
+  async proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
     const pairs: PairAdvice[] = [];
     for (let i = 0; i < classes.length; i++) {
       for (let j = i + 1; j < classes.length; j++) {
@@ -175,7 +175,7 @@ export class AiSdkSlot implements LlmSlot {
     return queryRequestSchema.parse(output); // 出槽再验一次
   }
 
-  async draftObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
+  async proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
     const { output } = await this.gen({
       model: this.model,
       output: Output.object({ schema: draftSchema }),
@@ -188,7 +188,7 @@ properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 
     return draftSchema.parse(output).object_types;
   }
 
-  async suggestPairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
+  async proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
     const { output } = await this.gen({
       model: this.model,
       output: Output.object({ schema: pairsSchema }),

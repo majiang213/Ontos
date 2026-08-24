@@ -3,7 +3,7 @@
 // 条件里的 column 已经是源列名（经 sources.fields 翻好），驱动不认属性名。
 // 「空=至今」作用在哪些运算符上见 filterOp.treatsNullAsUntilNow。
 
-import { treatsNullAsUntilNow } from "./filterOp";
+import { treatsNullAsUntilNow } from "../query/filterOp";
 
 export type CondOp =
   | "eq" | "ne" | "lt" | "lte" | "gt" | "gte"

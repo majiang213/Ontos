@@ -3,16 +3,15 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { metaStore } from "../meta/store";
-import { runtime } from "../runtime";
+import { metaStore } from "../../meta/store";
+import { runtime } from "../../runtime";
+import { WsReject } from "../../errors";
 
 export const DEFAULT_WS = "default";
+
 /** 测试工作空间：演示模板与四个 fixture 连接只属于它。填充按空间名判断，与是否配置 LLM Key 无关。 */
 export const TEST_WS = "test";
 const NAME_RE = /^[a-z][a-z0-9_-]*$/;
-
-/** 工作空间域拒绝（名字不合法、已存在）：路由按 422 处理，与其它域的 Reject 同层。 */
-export class WsReject extends Error {}
 
 export function isWsName(name: string): boolean {
   return NAME_RE.test(name);

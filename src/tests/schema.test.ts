@@ -7,9 +7,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { draftOpSchema, mcpDraftOpSchema } from "../server/schema/ops";
-import { EXPR_LIKE, FROM_KEY_SET, isFromOnly, isPlainLiteral, propertyRef } from "../server/schema/valueShape";
+import { EXPR_LIKE, FROM_KEY_SET, isFromOnly, isPlainLiteral, propertyRef } from "../server/schema/spec/valueSpec";
 import { actionRequestSchema, queryRequestSchema } from "../server/schema/request";
-import { walkFilter } from "../server/schema/filterWalk";
+import { walkFilter } from "../server/schema/spec/filterSpec";
 
 describe("configSchema", () => {
   it("种子配置全收（正例骨架）", () => {
@@ -164,7 +164,7 @@ describe("walkFilter（过滤树走查器）", () => {  const config = configSch
   });
 });
 
-describe("valueShape（取值来源词表的唯一事实源）", () => {
+describe("valueSpec（取值来源词表的唯一事实源）", () => {
   it("EXPR_LIKE：now 系与 current./request. 前缀算表达式，普通文本不算", () => {
     for (const s of ["now", "now/d", "now+1y", "now-1d/d", "current.dept", "request.title"]) expect(EXPR_LIKE.test(s)).toBe(true);
     for (const s of ["nowadays", "normal", "D01", "2026-01-01"]) expect(EXPR_LIKE.test(s)).toBe(false);

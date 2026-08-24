@@ -2,9 +2,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { PairAdvice } from "../server/engine/llmSlot";
-import { VERDICTS, VERDICT_LABELS, Verdict } from "../server/engine/verdict";
-import { apiPost } from "./wsClient";
+import type { PairAdvice } from "../../server/engine/llmSlot";
+import { VERDICTS, VERDICT_LABELS, Verdict } from "../../server/engine/adjudication/verdict";
+import { apiPost } from "../wsClient";
 
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
   const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
@@ -18,7 +18,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
     setBusy(true);
     setError(null);
     try {
-      const data = await apiPost<{ recorded?: boolean }>("/api/decisions", {
+      const data = await apiPost<{ recorded?: boolean }>("/api/decide", {
         class_a: pair.class_a,
         class_b: pair.class_b,
         verdict,
@@ -76,7 +76,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               setRateBusy(true);
               setError(null);
               try {
-                setRate(await apiPost<typeof rate>("/api/overlap", { class_a: pair.class_a, class_b: pair.class_b }));
+                setRate(await apiPost<typeof rate>("/api/compute_overlap", { class_a: pair.class_a, class_b: pair.class_b }));
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {

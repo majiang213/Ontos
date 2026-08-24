@@ -2,10 +2,10 @@
 // 组装（下推、按识别字段对齐）、属性取值、派生求值、过滤核对都在这里。
 // 问数只投影结果树；动作经本模块读个体。
 
-import type { Filter, LinkType, ObjectType, OntologyConfig, WhenRule } from "../schema/config";
-import { resolveLink, walkFilter } from "../schema/filterWalk";
-import type { ExpandNode } from "../schema/request";
-import { dialectFor, toColumnValue, type Condition, type SourceDriver } from "./driver";
+import type { Filter, LinkType, ObjectType, OntologyConfig, WhenRule } from "../../schema/config";
+import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
+import type { ExpandNode } from "../../schema/request";
+import { dialectFor, toColumnValue, type Condition, type SourceDriver } from "../infra/driver";
 import { resolveLiteral, type EvalContext } from "./expr";
 import { compare, isOpObject, pushCondition } from "./filterOp";
 
@@ -28,8 +28,7 @@ export interface Env {
   existsIndividual(clsName: string, identityValue: unknown): Promise<boolean>;
 }
 
-/** 引擎拒绝：请求或配置里的名字对不上已发布配置。路由按 422 处理；其它异常是引擎故障，按 500。 */
-export class EngineReject extends Error {}
+import { EngineReject } from "../../errors";
 
 /** 关系名对不上配置即拒绝（问数展开、个体组装、Env.linkHolds 共用）。 */
 export function mustLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } {

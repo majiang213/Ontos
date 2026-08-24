@@ -5,9 +5,10 @@
 
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
-import { EngineReject } from "@/server/engine/individual";
-import { DraftReject, getDraft, getPublished } from "@/server/engine/configStore";
-import { getDriverRegistry } from "@/server/engine/load";
+import { EngineReject } from "@/server/errors";
+import { DraftReject } from "@/server/errors";
+import { getDraft, getPublished } from "@/server/engine/config/configStore";
+import { getDriverRegistry } from "@/server/engine/infra/load";
 import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
 import { TOOLS, type ToolContext } from "./tools";
 

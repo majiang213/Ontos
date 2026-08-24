@@ -1,8 +1,8 @@
 // 过滤运算符表：内存比较与下推编成 Condition 走同一张表。
 
 import { describe, expect, it } from "vitest";
-import { compare, isOpObject, pushCondition, treatsNullAsUntilNow } from "../server/engine/filterOp";
-import { buildSelect } from "../server/engine/driver";
+import { compare, isOpObject, pushCondition, treatsNullAsUntilNow } from "../server/engine/query/filterOp";
+import { buildSelect } from "../server/engine/infra/driver";
 
 describe("compare：空=至今", () => {
   it("date 实际为空：gt/gte 成立，lt 不成立", () => {

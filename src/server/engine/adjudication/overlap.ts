@@ -1,11 +1,12 @@
 // 交集率 —— 候选对两端识别字段（归一化后）的集合重合度 = |∩| / max(|A|, |B|)。
 // 只读采样，内存里算，集合算完即弃；落库的只有计数与比率（adj_overlap）。
 
-import type { SourceDriver } from "./driver";
-import { EngineReject, keyColumn, sourcesOf, type Cls } from "./individual";
+import type { SourceDriver } from "../infra/driver";
+import { EngineReject } from "../../errors";
+import { keyColumn, sourcesOf, type Cls } from "../query/individual";
 import { pickRule, normalizeWith } from "./normalize";
-import { DEFAULT_WS } from "./workspace";
-import type { MetaStore } from "../meta/store";
+import { DEFAULT_WS } from "../infra/workspace";
+import type { MetaStore } from "../../meta/store";
 
 /** 识别列全量扫的行数上限：交集是内存集合运算，超大表先收窄再算。 */
 const MAX_SCAN = 50_000;
@@ -21,7 +22,7 @@ export interface OverlapResult {
 }
 
 /** 同一规则归一化后算交集。每源只读一次：前 20 条挑规则，全量进集合；值集合算完即弃。 */
-export async function computeOverlap(driver: SourceDriver, clsA: Cls, clsB: Cls, meta?: MetaStore, ws = DEFAULT_WS): Promise<OverlapResult> {
+export async function overlapRate(driver: SourceDriver, clsA: Cls, clsB: Cls, meta?: MetaStore, ws = DEFAULT_WS): Promise<OverlapResult> {
   const readRaw = async (cls: Cls): Promise<string[][]> => {
     const out: string[][] = [];
     for (const [, entry] of sourcesOf(cls)) {

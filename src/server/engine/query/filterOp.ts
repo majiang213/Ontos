@@ -1,8 +1,8 @@
 // 过滤运算符表 —— 内存比较与下推编成 Condition 的唯一出处。
 // SQL 文本仍由 driver 按 Condition 渲染（方言接缝）；「空=至今」作用在哪些运算符上只在这里定。
 
-import { FILTER_OPS } from "../schema/config";
-import type { Condition, CondOp } from "./driver";
+import { FILTER_OPS } from "../../schema/config";
+import type { Condition, CondOp } from "../infra/driver";
 
 /** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。 */
 export function isOpObject(v: unknown): v is Record<string, unknown> {

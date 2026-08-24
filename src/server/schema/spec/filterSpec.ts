@@ -1,8 +1,9 @@
-// 过滤树走查器 —— 配置语法里 $link 过滤树的唯一遍历入口（附录 B 的核心形状）。
+// 过滤树走查器 + 操作数形状规则 —— 附录 B「过滤」一节的单一事实源。
 // 校验（validate）、值形状核对（individual）、引用扫描（configStore）、下推（query）都消费它。
 // 新增保留字只改这里；关系解析也随之收在本文件（schema 层，引擎各文件不再各自心算）。
 
-import type { Filter, LinkType, OntologyConfig } from "./config";
+import type { Filter, LinkType, OntologyConfig } from "../config";
+import { FILTER_OPS } from "../config";
 
 /** 关系解析（唯一出处）：正向名在 from 侧（目标 to），反向名（inverse）在 to 侧（目标 from）。找不到返回 undefined。 */
 export function resolveLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } | undefined {
@@ -51,4 +52,39 @@ export function walkFilter(config: OntologyConfig | null, clsName: string, filte
     }
     visit.prop?.(clsName, k, v, depth);
   }
+}
+
+/* ---------- 操作数形状规则（过滤的取值位） ----------
+   字面量（含日期表达式串）与「字面量数组」放过；运算符块逐运算符递归；
+   { property } 组合的 from 只许 current/request；裸 { from } 只许 identity。
+   validate 的静态核对用这里；individual.resolveOperand 是同一套形状的运行期求值。 */
+
+export function checkOperand(v: unknown, where: string): void {
+  if (Array.isArray(v)) {
+    for (const x of v) {
+      if (x !== null && typeof x === "object") throw new Error(`配置不合法：${where} 的数组元素只许是字面量`);
+    }
+    return;
+  }
+  if (v === null || typeof v !== "object") return; // 字面量
+  const rec = v as Record<string, unknown>;
+  const keys = Object.keys(rec);
+  if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
+    for (const k of keys) checkOperand(rec[k], where); // 运算符块：每个运算符的值还是操作数
+    return;
+  }
+  if (typeof rec.property === "string") {
+    const from = rec.from === undefined ? "current" : rec.from;
+    if (from !== "current" && from !== "request") throw new Error(`配置不合法：${where} 的取值 { property } 组合的 from 只许 current/request：${JSON.stringify(v)}`);
+    return; // 效应过滤逐个体求值，current 合法
+  }
+  if (rec.from === "identity") return;
+  throw new Error(`配置不合法：${where} 的取值来源不认识：${JSON.stringify(v)}`);
+}
+
+/** 过滤树里每个属性条件的操作数逐个核对。 */
+export function checkFilterOperands(filter: Record<string, unknown>, where: string): void {
+  walkFilter(null, "", filter, {
+    prop: (_cls, key, v) => checkOperand(v, `${where} 的 ${key}`),
+  });
 }

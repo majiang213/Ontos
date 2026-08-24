@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { configSchema, type OntologyConfig } from "../server/schema/config";
-import { linkRefs, referencesOf } from "../server/engine/refs";
+import { linkRefs, referencesOf } from "../server/engine/config/refs";
 
 /** 两个类 + 正反两个关系 + 各类动作/派生，覆盖全部引用出处。 */
 function fixture(): OntologyConfig {

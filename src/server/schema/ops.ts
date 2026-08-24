@@ -66,7 +66,7 @@ const updateLinkOp = z.object({
   to: z.string().optional(),
   match: z.object({ from: z.string(), to: z.string() }).optional(), // 单对配对，与 create_link 同形
 });
-// 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象；MCP 侧是 propose_ontology 的落地点）
+// 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象；MCP 侧是 propose_objects 的落地点）
 const importObjectsOp = z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) });
 // 整份替换一个未锁定的类（def 是单个类体，不是整张 map）：锁定规则见 configStore.replaceBlockers
 const replaceObjectOp = z.object({ op: z.literal("replace_object"), name: z.string(), def: draftObjectSchema });

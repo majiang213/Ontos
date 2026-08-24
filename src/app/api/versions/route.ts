@@ -2,7 +2,7 @@
 // 不插入新版本；问数仍读已发布。要让问数也变成这版，人再点发布。
 
 import { z } from "zod";
-import { listVersions, rollbackTo } from "@/server/engine/configStore";
+import { listVersions, rollbackTo } from "@/server/engine/config/configStore";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {

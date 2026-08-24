@@ -1,7 +1,7 @@
 // 验收问题集引擎层测试：期望写法解析/比对（纯函数）+ 失败分阶段（假槽位注入，真跑 runQuestions）。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../server/engine/questions";
+import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../server/engine/query/questions";
 import type { LlmSlot } from "../server/engine/llmSlot";
 import { cleanupRuntime, setupRuntime } from "./helpers";
 
@@ -41,8 +41,8 @@ describe("跑批失败分阶段（假槽位）", () => {
   const fakeSlot = (nlToQuery: LlmSlot["nlToQuery"]): LlmSlot => ({
     name: "fake-测试",
     nlToQuery,
-    draftObjects: async () => ({}),
-    suggestPairs: async () => [],
+    proposeObjects: async () => ({}),
+    proposePairs: async () => [],
   });
 
   it("模型没产出记编译失败；查询过不了引擎记执行出错；原因都落库", async () => {

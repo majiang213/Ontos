@@ -6,17 +6,18 @@ import { z } from "zod";
 import { actionRequestSchema, queryRequestSchema } from "@/server/schema/request";
 import { affectedNames, mcpDraftOpSchema } from "@/server/schema/ops";
 import type { OntologyConfig } from "@/server/schema/config";
-import { runQuery } from "@/server/engine/query";
-import { runAction } from "@/server/engine/action";
-import { EngineReject } from "@/server/engine/individual";
-import { conversionAction } from "@/server/engine/adjudicate";
+import { query } from "@/server/engine/query/query";
+import { runAction } from "@/server/engine/action/action";
+import { EngineReject } from "@/server/errors";
+import { conversionAction } from "@/server/engine/adjudication/adjudicate";
+import { FIELDS_UPDATE_ACTION, fieldsUpdateAction } from "@/server/engine/config/skeletons";
 import { getSlot } from "@/server/engine/llmSlot";
-import { listClasses, listClassesDraft, readClass, readClassDraft, search } from "@/server/engine/views";
-import { resolveTableInfos } from "@/server/engine/load";
-import type { DriverRegistry } from "@/server/engine/registry";
-import { applyOp, getDraft, getPublished, getRev } from "@/server/engine/configStore";
+import { listClasses, listClassesDraft, readClass, readClassDraft, search } from "@/server/engine/config/views";
+import { resolveTableInfos } from "@/server/engine/infra/load";
+import type { DriverRegistry } from "@/server/engine/infra/registry";
+import { applyDraft, getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
 import { metaStore } from "@/server/meta/store";
-import { withActionLog, withQueryLog } from "@/server/engine/logging";
+import { withActionLog, withQueryLog } from "@/server/engine/infra/logging";
 
 /** 处理器上下文：空间、驱动、space 选择与取配置的两个入口。 */
 export interface ToolContext {
@@ -69,8 +70,8 @@ export const TOOLS: ToolDef[] = [
     inputSchema: json(z.object({ query: queryRequestSchema })),
     handler: async (ctx, args) => {
       const config = await ctx.published(); // 问数永远读已发布，不可改成草稿
-      const query = queryRequestSchema.parse(args.query);
-      const out = await withQueryLog(ctx.ws, { query_json: JSON.stringify(query) }, () => runQuery(config, ctx.driver, query));
+      const parsed = queryRequestSchema.parse(args.query);
+      const out = await withQueryLog(ctx.ws, { query_json: JSON.stringify(parsed) }, () => query(config, ctx.driver, parsed));
       return { payload: { rows: out.rows, path: out.path } };
     },
   },
@@ -88,20 +89,20 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "propose_ontology",
+    name: "propose_objects",
     description: "对选中的表产对象建议（不落到画布）。入参：{ tables: [{ connection, table }] }。不接受 space。",
     inputSchema: json(z.object({ tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty() })),
     handler: async (ctx, args) => {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
       // 按连接分组内省 + 逐表定位：引擎共享实现（generate 同款）
       const infos = await resolveTableInfos(ctx.driver, tables, (m) => new EngineReject(m));
-      const draft = await getSlot().draftObjects(infos);
+      const draft = await getSlot().proposeObjects(infos);
       return { payload: { object_types: draft } };
     },
   },
   {
     name: "propose_action",
-    description: "对某个类产一条动作建议（不发布、不落到画布）。入参：{ object, space? }。space 缺省 published（已发布）；草稿里尚未发布的类请传 draft。",
+    description: "对某个类产一条动作建议（不发布、不落到画布）。返回 { name, action }：name 是建议动作名，action 可直接作 set_action.def。入参：{ object, space? }。space 缺省 published（已发布）；草稿里尚未发布的类请传 draft。",
     inputSchema: json(z.object({ object: z.string(), space: spaceField })),
     space: true,
     handler: async (ctx, args) => {
@@ -109,16 +110,11 @@ export const TOOLS: ToolDef[] = [
       const clsName = String(args.object ?? "");
       const cls = config.object_types[clsName];
       if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
-      // 有转化关系就给转化模板，否则给改属性模板；都是草稿，不发布
+      // 有转化关系就给转化模板，否则给 set_fields 骨架（与导入自动生成的同形同名）；都是草稿，不发布
       const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
-      const draftAction = transition
-        ? conversionAction(transition[0], transition[1]) // 转化骨架唯一构造点（adjudicate.ts）
-        : {
-            description: "更新属性（模板，请改属性名与前置）",
-            pre: {},
-            effect: [{ update: { object: clsName, identity: { from: "identity" }, properties: { 属性名: { from: "request" } } } }],
-          };
-      return { payload: { action: draftAction } };
+      if (transition) return { payload: { name: `convert_to_${transition[1].transition!.to}`, action: conversionAction(transition[0], transition[1]) } }; // 转化骨架唯一构造点（adjudicate.ts）
+      const skel = fieldsUpdateAction(clsName, cls); // set_fields 骨架唯一构造点（skeletons.ts）
+      return { payload: skel ? { name: FIELDS_UPDATE_ACTION, action: skel } : { name: FIELDS_UPDATE_ACTION, action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" } };
     },
   },
   {
@@ -184,7 +180,7 @@ export const TOOLS: ToolDef[] = [
             tables: tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type, pk: c.pk })) })),
           });
         } catch {
-          sources.push({ connection, tables: [], error: "连接失败或读取表结构失败" }); // 与 GET /api/introspect 同口径：驱动内部主机/路径不出网
+          sources.push({ connection, tables: [], error: "连接失败或读取表结构失败" }); // 与 GET /api/list_tables 同口径：驱动内部主机/路径不出网
         }
       }
       return { payload: { sources } };
@@ -199,8 +195,8 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, args) => {
       const { base_rev, ...rest } = applyDraftEnvelope.parse(args); // 先剥信封再 parse op（判别联合不收信封字段）
       const op = mcpDraftOpSchema.parse(rest); // 无 save_layout；Zod 失败 -32602
-      // 不在路由里比 getRev、不再套一层队列：base_rev 的比较在 applyOp 的 enqueue task 开头
-      const next = await applyOp(op, ctx.ws, { base_rev });
+      // 不在路由里比 getRev、不再套一层队列：base_rev 的比较在 applyDraft 的 enqueue task 开头
+      const next = await applyDraft(op, ctx.ws, { base_rev });
       return { payload: { ok: true, dirty: next.dirty, rev: getRev(ctx.ws), base_version: next.baseVersion, op: op.op, names: affectedNames(op) } };
     },
   },

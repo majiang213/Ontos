@@ -7,8 +7,8 @@
 // 多实例部署各有缓存，不会互见。
 
 import type { MetaStore } from "./meta/store";
-import type { DriverRegistry } from "./engine/registry";
-import type { Store as ConfigStore } from "./engine/configStore";
+import type { DriverRegistry } from "./engine/infra/registry";
+import type { Store as ConfigStore } from "./engine/config/configStore";
 
 export interface OntosRuntime {
   cwd: string;

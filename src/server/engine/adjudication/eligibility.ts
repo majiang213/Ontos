@@ -2,7 +2,7 @@
 // 只给 pairs.ts 流水线用：列表 / 交集率 / 定案共用同一套谓词，路由不再各自写闸。
 // 资格 = 两边有源 ∧ 无共同连接 ∧ 未定案；定案侧对同源对放行两个不动配置的结论（各自独立语义）。
 
-import type { ObjectType } from "../schema/config";
+import type { ObjectType } from "../../schema/config";
 import { Verdict } from "./verdict";
 
 /** 类的连接集合（无源 = 空集）。 */

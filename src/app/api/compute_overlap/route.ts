@@ -1,8 +1,8 @@
-// 交集率：POST /api/overlap { class_a, class_b }
-// 薄适配：形状校验 + 写闸 → 裁决流水线 overlapOf。
+// 交集率：POST /api/compute_overlap { class_a, class_b }
+// 薄适配：形状校验 + 写闸 → 裁决流水线 computeOverlap。
 
 import { z } from "zod";
-import { overlapOf } from "@/server/engine/pairs";
+import { computeOverlap } from "@/server/engine/adjudication/pairs";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z
@@ -14,6 +14,6 @@ export async function POST(req: Request) {
   if (denied) return denied;
   return respond(async () => {
     const { class_a, class_b } = bodySchema.parse(await bodyJson(req));
-    return overlapOf(wsOf(req), class_a, class_b);
+    return computeOverlap(wsOf(req), class_a, class_b);
   });
 }

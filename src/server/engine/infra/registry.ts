@@ -2,7 +2,7 @@
 // 问数与动作只认连接名；注册表是 SourceDriver 的一种（多方言混合，不带 dialect 属性）。
 
 import type { Condition, SourceDriver, TableInfo } from "./driver";
-import { EngineReject } from "./individual";
+import { EngineReject } from "../../errors";
 
 export class DriverRegistry implements SourceDriver {
   private drivers = new Map<string, SourceDriver>();
