@@ -9,25 +9,15 @@ import PairCard from "./cards/PairCard";
 import Bezel from "./cards/Bezel";
 import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";
 import QuestionsCard from "./cards/QuestionsCard";
-import { ActionForm, ConnectForm, CreateForm, FieldForm, LinkForm, PROP_TYPES, Section } from "./forms/forms";
-import { effectSummary, externalToast, formCompatible } from "./forms/actionView";
+import { ConnectForm, CreateForm, LinkForm } from "./forms/forms";
+import ObjectCard, { type ActionFormState } from "./cards/ObjectCard";
+import SchemaDrawer from "./cards/SchemaDrawer";
+import { effectSummary, formCompatible } from "./forms/actionView";
+import { externalToast, shouldCloseObjectCard, type OntologyResp } from "./ontFrame";
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/engine/config/lineage";
 import type { PairAdvice } from "../server/engine/llmSlot";
 
-interface OntologyResp {
-  rev: number; // Store.rev：轮询监视器按它判变没变（ETag 同值）
-  version: number;
-  dirty: boolean;
-  layout: Record<string, { x: number; y: number }>;
-  edgeBends: Record<string, { dx: number; dy: number }>; // 线的弯折点（界面状态，随摆位存）
-  edgePins: Record<string, { source?: { side: "top" | "bottom" | "left" | "right"; t: number }; target?: { side: "top" | "bottom" | "left" | "right"; t: number } }>; // 端点钉点
-  states: Record<string, "new" | "modified" | "same">;
-  deleted: string[];
-  action_changes: { added: string[]; overwritten: string[]; removed: string[] }; // 类名.动作名
-  object_types: Record<string, any>;
-  link_types: Record<string, any>;
-}
 interface IntrospectResp {
   sources: {
     connection: string;
@@ -54,7 +44,6 @@ export default function CanvasPage() {
   const [schema, setSchema] = useState<IntrospectResp | null>(null);
   const [card, setCard] = useState<Card>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [pairs, setPairs] = useState<PairAdvice[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [versionsData, setVersionsData] = useState<{ version: number; createdAt: string }[] | null>(null); // null = 读着呢
@@ -62,26 +51,15 @@ export default function CanvasPage() {
   const [generating, setGenerating] = useState(false);
   const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [fieldForm, setFieldForm] = useState<{ mode: "create" } | { mode: "edit"; name: string } | null>(null); // 字段区：列表 ↔ 表单
-  const [actionForm, setActionForm] = useState<{ mode: "create" } | { mode: "edit"; name: string } | null>(null); // 动作区：列表 ↔ 表单
-  const cardName = card?.kind === "object" ? card.name : null;
-  useEffect(() => setFieldForm(null), [cardName]); // 换卡收表单
-  useEffect(() => setActionForm(null), [cardName]);
-  // 监视器状态：lastRev/etag 跟服务端对齐；localBusy=本页正在写；formBusy=表单开着（不冲掉未保存内容）
+  // 对象编辑卡与表结构抽屉已各自成 module（cards/ObjectCard、cards/SchemaDrawer）。
+  // 页面只留：开哪张卡、监视器豁免要看的两个 ref（表单状态在卡内，经 ref 镜像上来）。
   const ontRef = useRef<OntologyResp | null>(null);
   const cardRef = useRef<Card>(null);
-  const actionFormRef = useRef<typeof actionForm>(null);
+  const actionFormRef = useRef<ActionFormState>(null); // 卡内动作表单的镜像：切对象前先看脏不脏
   const localBusy = useRef(false);
   const formBusy = useRef(false);
   const actionFormDirty = useRef(false);
-  const actionFormRev = useRef<number | null>(null); // 打开动作表单那一刻的 rev：保存时不一样要先问
   useEffect(() => { cardRef.current = card; }, [card]);
-  useEffect(() => { actionFormRef.current = actionForm; }, [actionForm]);
-  useEffect(() => { formBusy.current = Boolean(fieldForm || actionForm); }, [fieldForm, actionForm]);
-  useEffect(() => {
-    if (actionForm) actionFormRev.current = watcher.currentRev();
-    else { actionFormRev.current = null; actionFormDirty.current = false; }
-  }, [actionForm]);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []); // 卸载清定时器
 
@@ -101,17 +79,16 @@ export default function CanvasPage() {
     busy: () => localBusy.current,
     formBusy: () => formBusy.current,
     onFrame: (data) => {
-      const frame = data as unknown as OntologyResp;
       const prev = ontRef.current;
-      applyOnt(frame);
-      // 开着的对象卡对应类已不在草稿里：收卡
+      applyOnt(data);
+      // 开着的对象卡对应类已不在草稿里：收卡（策略在 ontFrame）
       const open = cardRef.current;
-      if (open?.kind === "object" && !(open.name in frame.object_types)) {
+      if (open?.kind === "object" && shouldCloseObjectCard(open.name, data)) {
         setCard(null);
         showToast("这个对象已从草稿里去掉");
         return;
       }
-      if (prev) showToast(externalToast(prev, frame)); // 首轮由 refresh 负责，不弹
+      if (prev) showToast(externalToast(prev, data)); // 首轮由 refresh 负责，不弹
     },
     onFormBlocked: () => showToast("草稿有更新，保存会盖掉外面刚写的"),
     onFailOnce: () => showToast("没法自动刷新画布，请重新打开本页"),
@@ -203,38 +180,28 @@ export default function CanvasPage() {
   };
 
   // Esc 关一切浮卡。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉。
-  // 动作表单开着时 Esc = 取消表单回到列表（有未保存改动先问一句），不是关掉整张对象卡
+  // Esc：动作表单开着时不关整卡（表单的取消在 ObjectCard 内自闭环，含脏改动确认）；否则关浮卡 / 面板 / 抽屉
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
-      if (actionFormRef.current) {
-        if (actionFormDirty.current && !window.confirm("动作表单里有没保存的改动，取消就丢了。确定取消？")) return;
-        setActionForm(null);
-        void refresh(); // 表单收口后再拉一次：开着期间轮询只记 rev 不刷视图
-        return;
-      }
+      if (actionFormRef.current) return; // 表单开着：ObjectCard 的 Esc 自理（取消表单，不关卡）
       setCard(null);
       setPanelOpen(false);
       setDrawerOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [refresh]);
+  }, []);
 
-  /** 多选表 → 生成对象 → 直接上画布并收起抽屉。 */
-  const generateFromTables = async () => {
+  /** 多选表 → 生成对象 → 直接上画布并收起抽屉（选表与按钮在 SchemaDrawer 里）。 */
+  const generateFromTables = async (tables: { connection: string; table: string }[]) => {
     if (generating) return;
     setGenerating(true);
     try {
       await withLocalWrite(async () => {
-        const tables = [...selectedTables].map((key) => {
-          const dot = key.indexOf("."); // 只切第一个点：连接名/表名里再有点不炸
-          return { connection: key.slice(0, dot), table: key.slice(dot + 1) };
-        });
         const data = await apiPost<{ created: string[] }>("/api/generate_objects", { tables });
         showToast(`已生成对象：${data.created.join("、")}（草稿，发布后生效）`);
-        setSelectedTables(new Set());
         setDrawerOpen(false);
         await refresh();
       });
@@ -642,243 +609,28 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 右侧：对象编辑卡 */}
+      {/* 右侧：对象编辑卡（cards/ObjectCard） */}
       {sel && card?.kind === "object" && (
-        <div className="float-card float-tr" style={{ width: 400, maxHeight: "calc(100% - 110px)" }}>
-          <Bezel pad={16} coreStyle={{ overflow: "auto", maxHeight: "calc(100vh - 140px)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
-              <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
-            </div>
-            <div style={{ color: "var(--ink-3)", fontSize: 11, margin: "2px 0 8px" }}>
-              {ont?.states?.[card.name] === "new" ? "草稿，发布后生效" : ont?.states?.[card.name] === "modified" ? "有未发布改动" : "与已发布一致"}
-            </div>
-              <Section title="描述">
-                <textarea
-                  key={card.name} /* 切换对象时强制重挂，否则旧描述会写进新对象 */
-                  className="ctl"
-                  defaultValue={sel.description ?? ""}
-                  rows={1}
-                  style={{ width: "100%" }}
-                  onBlur={(e) => {
-                    // 跟挂载时的值比（defaultValue），不跟实时 sel 比——编辑期间的别处 refresh 不换基准
-                    if (e.target.value !== e.target.defaultValue) void op({ op: "update_object", name: card.name, description: e.target.value });
-                  }}
-                />
-              </Section>
-              <Section title="唯一键">
-                <select
-                  className="ctl"
-                  value={sel.identity ?? ""}
-                  onChange={async (e) => {
-                    const ok = await op({ op: "set_identity", object: card.name, name: e.target.value });
-                    if (!ok) e.target.value = sel.identity ?? ""; // 被拒则回显（如选了派生字段）
-                  }}
-                >
-                  <option value="">未设置</option>
-                  {Object.entries(sel.properties).filter(([, d]: [string, any]) => !d.derived).map(([p]) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </Section>
-              <Section title="字段">
-                {fieldForm ? (
-                  <FieldForm
-                    initial={fieldForm.mode === "edit" ? { name: fieldForm.name, ...(sel.properties[fieldForm.name] as any) } : undefined}
-                    onSave={async (v) => {
-                      if (fieldForm.mode === "create") {
-                        return op({
-                          op: "add_property",
-                          object: card.name,
-                          name: v.name,
-                          type: v.type,
-                          description: v.description || undefined,
-                          values: v.type === "enum" && v.values.length ? v.values : undefined,
-                        });
-                      }
-                      return op({
-                        op: "update_property",
-                        object: card.name,
-                        name: fieldForm.name,
-                        new_name: v.name !== fieldForm.name ? v.name : undefined,
-                        type: v.type,
-                        description: v.description,
-                        values: v.type === "enum" ? v.values : undefined,
-                      });
-                    }}
-                    onCancel={() => setFieldForm(null)}
-                  />
-                ) : (
-                  <>
-                    {Object.entries(sel.properties).map(([p, d]: [string, any]) => (
-                      <div key={p} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          <code>{p}</code> <span style={{ color: "var(--ink-3)" }}>{d.type}{d.derived ? " · 派生" : ""}</span>
-                          {d.description ? <span style={{ color: "var(--ink-3)" }}> · {d.description}</span> : null}
-                          {d.type === "enum" && d.values?.length ? <span style={{ color: "var(--ink-3)" }}> · {d.values.join("/")}</span> : null}
-                        </span>
-                        <button className="chip" style={{ fontSize: 11 }} title="编辑这个字段" onClick={() => setFieldForm({ mode: "edit", name: p })}>编辑</button>
-                        <button
-                          className="x-btn"
-                          title={sel.identity === p ? "唯一键不能直接删，先在上方换一个" : "删除字段"}
-                          onClick={() => void op({ op: "remove_property", object: card.name, name: p })}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                    <button className="btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setFieldForm({ mode: "create" })}>加字段</button>
-                  </>
-                )}
-              </Section>
-              <Section title="动作">
-                {actionForm ? (
-                  <ActionForm
-                    clsName={card.name}
-                    ont={ont!}
-                    initial={actionForm.mode === "edit" ? { name: actionForm.name, def: sel.actions?.[actionForm.name] } : undefined}
-                    onDirtyChange={(d) => { actionFormDirty.current = d; }}
-                    onSave={async (name, def) => {
-                      // 保存仍不带 base_rev；表单开着期间外面改过了，先问一句再盖
-                      if (actionFormRev.current !== null && watcher.currentRev() !== null && watcher.currentRev() !== actionFormRev.current) {
-                        if (!window.confirm("外面已经改过这份草稿，还要按表单覆盖吗？")) return false;
-                      }
-                      const ok = await op({ op: "set_action", object: card.name, name, def });
-                      if (ok) {
-                        setActionForm(null);
-                        showToast(`动作 ${name} 已进草稿（发布后生效）`);
-                      }
-                      return ok;
-                    }}
-                    onCancel={() => {
-                      if (actionFormDirty.current && !window.confirm("动作表单里有没保存的改动，取消就丢了。确定取消？")) return;
-                      setActionForm(null);
-                      void refresh(); // 表单收口后再拉一次：开着期间轮询只记 rev 不刷视图
-                    }}
-                  />
-                ) : (
-                  <>
-                    {Object.entries(sel.actions ?? {}).map(([a, def]: [string, any]) => {
-                      const key = `${card.name}.${a}`;
-                      const ac = ont?.action_changes;
-                      const badge = ac?.added.includes(key) ? "新增" : ac?.overwritten.includes(key) ? "已修改" : null;
-                      return (
-                        <div key={a} style={{ fontSize: 12, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <code>{a}</code>
-                            {badge && <span className="tag tag-warn">{badge}</span>}
-                            <span style={{ flex: 1 }} />
-                            {/* 表单认不出的动作（超出附录 B 子集）只展示、只许删——点「编辑」再保存会把认不出的键丢掉 */}
-                            {formCompatible(def, card.name, ont!) && (
-                              <button className="chip" style={{ fontSize: 11 }} title="编辑这条动作" onClick={() => setActionForm({ mode: "edit", name: a })}>编辑</button>
-                            )}
-                            <button
-                              className="chip"
-                              style={{ fontSize: 11, color: "var(--danger)" }}
-                              title="删除这条动作"
-                              onClick={async () => {
-                                if (!window.confirm("删除这条动作？进草稿，发布后才从已发布里拿掉")) return;
-                                const ok = await op({ op: "remove_action", object: card.name, name: a });
-                                if (ok) showToast(`已删除动作 ${a}（进草稿，发布后生效）`);
-                              }}
-                            >
-                              删除
-                            </button>
-                          </div>
-                          {def.description && <div style={{ color: "var(--ink-3)", marginTop: 2 }}>{def.description}</div>}
-                          <div style={{ color: "var(--ink-3)", marginTop: 2 }}>
-                            前置：{def.pre && Object.keys(def.pre).length > 0 ? <code style={{ fontSize: 11, wordBreak: "break-all" }}>{JSON.stringify(def.pre)}</code> : "无前置"}
-                          </div>
-                          {effectSummary(def).map((line, i) => (
-                            <div key={i} style={{ color: "var(--ink-3)" }}>· {line}</div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                    {Object.keys(sel.actions ?? {}).length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>还没有动作——点下面新建，或让 Agent 写</div>}
-                    <button className="btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setActionForm({ mode: "create" })}>新建动作</button>
-                  </>
-                )}
-              </Section>
-              <Section title="来源">
-                {Object.keys(sel.sources ?? {}).length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>还没有来源——这个对象是手工建的，没挂任何表</div>}
-                {Object.entries(sel.sources ?? {}).map(([srcName, s]: [string, any]) => (
-                  <div key={srcName} style={{ fontSize: 12, lineHeight: 1.9 }}>
-                    <strong>{srcName}</strong>　<code>{s.connection}.{s.table}</code>
-                  </div>
-                ))}
-              </Section>
-              <Section title="危险区">
-                <button
-                  className="btn"
-                  style={{ color: "var(--danger)" }}
-                  onClick={async () => {
-                    const ok = await op({ op: "delete_object", name: card.name });
-                    if (ok) {
-                      setCard(null);
-                      showToast(`已删除 ${card.name}（发布后生效）`);
-                    }
-                  }}
-                >
-                  删除这个对象
-                </button>
-              </Section>
-          </Bezel>
-        </div>
+        <ObjectCard
+          key={card.name} // 换卡即重挂：卡内表单状态自然清
+          name={card.name}
+          sel={sel}
+          states={ont?.states}
+          actionChanges={ont?.action_changes}
+          ont={ont}
+          op={op}
+          refresh={refresh}
+          closeCard={() => setCard(null)}
+          showToast={showToast}
+          formBusy={formBusy}
+          actionFormRef={actionFormRef}
+          actionFormDirty={actionFormDirty}
+          currentRev={watcher.currentRev}
+        />
       )}
 
       {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象） */}
-      {drawerOpen && (
-        <div className="drawer">
-          {selectedTables.size > 0 && (
-            <div style={{ position: "sticky", top: 0, zIndex: 5, paddingBottom: 10, background: "var(--bg-deep)" }}>
-              <button className="btn-cta" style={{ fontSize: 13, padding: "6px 8px 6px 16px" }} onClick={generateFromTables}>
-                生成对象（{selectedTables.size} 张表）
-              </button>
-              <button className="btn" style={{ marginLeft: 8 }} onClick={() => setSelectedTables(new Set())}>清空选择</button>
-            </div>
-          )}
-          {schema?.sources.map((s) => (
-            <div key={s.connection} style={{ marginBottom: 20 }}>
-              <span className="eyebrow">{s.connection}</span>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10 }}>
-                {s.tables.map((t) => {
-                  const key = `${s.connection}.${t.name}`;
-                  const checked = selectedTables.has(key);
-                  return (
-                    <Bezel key={t.name} pad={12} style={{ minWidth: 260, outline: checked ? "2px solid var(--accent)" : "none" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setSelectedTables((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(key)) next.delete(key);
-                              else next.add(key);
-                              return next;
-                            })
-                          }
-                        />
-                        <code style={{ fontSize: 13 }}>{t.name}</code>
-                      </label>
-                      {t.columns.map((c) => (
-                        <div key={c.name} style={{ fontSize: 12, lineHeight: 1.9, display: "flex", justifyContent: "space-between", gap: 14 }}>
-                          <span>
-                            <code>{c.name}</code>
-                            <span style={{ color: "var(--ink-3)" }}> {c.type}{c.pk ? " · 主键" : ""}{c.comment ? ` · ${c.comment}` : ""}</span>
-                          </span>
-                          <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
-                        </div>
-                      ))}
-                    </Bezel>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {drawerOpen && <SchemaDrawer schema={schema} columnTarget={columnTarget} onGenerate={generateFromTables} />}
     </div>
   );
 }

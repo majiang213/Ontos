@@ -3,6 +3,7 @@
 // 纯结构（是不是对象/数组/非空）仍由 schema/config.ts 的 Zod 管；本文件管语境规则与表单子集标记。
 
 import { FROM_KEY_SET, isFromOnly, isPlainLiteral, propertyRef } from "./valueSpec";
+import type { ActionDef } from "../config";
 
 /* ---------- 位置规则：静态校验（validate 消费） ---------- */
 
@@ -86,4 +87,53 @@ export function formPreOk(v: unknown): boolean {
     if (keys.length === 1 && keys[0] === "ne" && isPlainLiteral((v as Record<string, unknown>).ne)) return true;
   }
   return false;
+}
+
+/** pre 的 $link 条目形状：只许 true / false（已发生 / 未发生），嵌套过滤表单不认。 */
+export function formLinkOk(sub: unknown): boolean {
+  return sub === true || sub === false;
+}
+
+/* ---------- 效应/告知的取值位置走查 ----------
+   效应种类 → 该种类下的取值位置，唯一出处。validate（查 VALUE_POSITIONS）与 formCompatible（查 FORM_SUBSET）共用；
+   加效应种类只改这里。结构条件（宿主类、无 filter、转化关系、认人写明）不在走查范围，留在消费方。 */
+
+type EffectItem = NonNullable<ActionDef["effect"]>[number];
+type UpdateItem = Extract<EffectItem, { update: unknown }>["update"];
+type DeleteItem = Extract<EffectItem, { delete: unknown }>["delete"];
+type CreateItem = Extract<EffectItem, { create: unknown }>["create"];
+type InformItem = NonNullable<ActionDef["inform"]>[number];
+
+export interface EffectValueVisit {
+  identity?: (op: "update" | "delete", item: UpdateItem | DeleteItem, v: unknown) => void;
+  filter?: (op: "update" | "delete", item: UpdateItem | DeleteItem, f: unknown) => void;
+  updateProp?: (item: UpdateItem, prop: string, v: unknown) => void;
+  createProp?: (item: CreateItem, prop: string, v: unknown) => void;
+  link?: (name: string) => void;
+  informProp?: (inf: InformItem, prop: string, v: unknown) => void;
+}
+
+/** 把一条动作定义里每个取值位置逐项交给消费方：认人键 / 效应过滤 / update 与 create 的属性值 / link 名 / inform 的属性值。 */
+export function walkEffectValues(def: Pick<ActionDef, "effect" | "inform">, visit: EffectValueVisit): void {
+  for (const item of def.effect ?? []) {
+    if ("link" in item) {
+      visit.link?.(item.link);
+      continue;
+    }
+    if ("create" in item) {
+      for (const [p, v] of Object.entries(item.create.properties)) visit.createProp?.(item.create, p, v);
+      continue;
+    }
+    if ("update" in item) {
+      visit.identity?.("update", item.update, item.update.identity); // 认人位必发事件：值可能缺，缺不缺由消费方判
+      if (item.update.filter) visit.filter?.("update", item.update, item.update.filter);
+      for (const [p, v] of Object.entries(item.update.properties)) visit.updateProp?.(item.update, p, v);
+      continue;
+    }
+    visit.identity?.("delete", item.delete, item.delete.identity);
+    if (item.delete.filter) visit.filter?.("delete", item.delete, item.delete.filter);
+  }
+  for (const inf of def.inform ?? []) {
+    for (const [p, v] of Object.entries(inf.properties)) visit.informProp?.(inf, p, v);
+  }
 }

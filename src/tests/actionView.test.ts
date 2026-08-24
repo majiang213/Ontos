@@ -1,11 +1,11 @@
-// 对象卡动作区纯函数测试：effectSummary 摘要、formCompatible 白名单、externalToast 判定顺序。
+// 对象卡动作区纯函数测试：effectSummary 摘要、formCompatible 白名单、动作表单往返恒等。轮询 toast 与收卡策略见 ontFrame.test。
 // 演示五条动作（convert/transfer/scrap/register/finish_repair）必须都不兼容——超出表单子集的动作只展示、只许删。
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
-import { effectSummary, externalToast, formCompatible, buildActionDef, prefillEff, prefillPre } from "../components/forms/actionView";
+import { effectSummary, formCompatible, buildActionDef, prefillEff, prefillPre } from "../components/forms/actionView";
 import { configSchema, type ActionDef } from "../server/schema/config";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -117,31 +117,5 @@ describe("effectSummary（效应摘要）", () => {
     const a = effectSummary({ effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "request" } } } }] } as ActionDef);
     const b = effectSummary({ effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: "D01" } } }] } as ActionDef);
     expect(a).toEqual(b);
-  });
-});
-
-describe("externalToast（轮询 toast 判定顺序）", () => {
-  const frame = (names: string[], ac?: { added?: string[]; overwritten?: string[]; removed?: string[] }) => ({
-    object_types: Object.fromEntries(names.map((n) => [n, {}])),
-    action_changes: { added: ac?.added ?? [], overwritten: ac?.overwritten ?? [], removed: ac?.removed ?? [] },
-  });
-
-  it("对象键增减与动作变化拼一句；只动作变化点名动作；只对象键走三句；都不变走默认句", () => {
-    // 1. 对象键有增减且动作差集非空
-    expect(externalToast(frame(["equipment"]), frame(["equipment", "vendor"], { added: ["equipment.convert"] }))).toBe(
-      "草稿有更新，已刷新（新对象：vendor；动作有更新：equipment.convert）"
-    );
-    // 2. 只有动作变化（对象键不变；同名覆盖也算）
-    expect(externalToast(frame(["equipment"]), frame(["equipment"], { overwritten: ["equipment.convert", "equipment.scrap"] }))).toBe(
-      "草稿有更新，已刷新（动作有更新：equipment.convert、equipment.scrap）"
-    );
-    // 3a. 只有新增
-    expect(externalToast(frame(["equipment"]), frame(["equipment", "vendor", "site"]))).toBe("草稿有更新，已刷新（新对象：vendor、site）");
-    // 3b. 只有去掉
-    expect(externalToast(frame(["equipment", "vendor"]), frame(["equipment"]))).toBe("草稿有更新，已刷新（已去掉：vendor）");
-    // 3c. 新增和去掉都有
-    expect(externalToast(frame(["equipment", "site"]), frame(["equipment", "vendor"]))).toBe("草稿有更新，已刷新（新对象：vendor；已去掉：site）");
-    // 4. 对象键不变、动作差集全空（只改了字段/关系/描述）
-    expect(externalToast(frame(["equipment"]), frame(["equipment"]))).toBe("草稿有更新，已刷新");
   });
 });

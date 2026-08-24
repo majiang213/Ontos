@@ -3,7 +3,7 @@
 
 import { type OntologyConfig } from "../../schema/config";
 import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
-import { checkActionValue } from "../../schema/spec/actionSpec";
+import { checkActionValue, walkEffectValues } from "../../schema/spec/actionSpec";
 
 export function validateSemantics(config: OntologyConfig): void {
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
@@ -157,43 +157,33 @@ export function validateActionShapes(config: OntologyConfig): void {
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       const where = `${clsName}.${actName}`;
+      // ① 效应 link 与 ④ 认人写明是结构条件（要查配置、要见整条 op），逐项直查；
+      // 取值形状（③）走 actionSpec.walkEffectValues——位置分派不再在这里另写一份
       for (const item of act.effect ?? []) {
         if ("link" in item) {
-          // ① 效应 link：必须是配置里已存在的转化关系，且挂在宿主类上
           const l = config.link_types[item.link];
           if (!l?.transition) throw new Error(`配置不合法：${where} 的效应 link 指向不存在的转化关系 ${item.link}`);
           if (l.from !== clsName || l.to !== clsName) throw new Error(`配置不合法：转化关系 ${item.link} 不在 ${clsName} 上`);
           continue;
         }
-        if ("create" in item) {
-          // create 投影没有 current 上下文；from: generated 只许落在带 generate 列表的属性上
-          const target = config.object_types[item.create.object];
-          for (const [p, v] of Object.entries(item.create.properties)) {
-            checkActionValue("effect.create.properties", v, `${where} 的效应（create ${item.create.object}.${p}）`, { hasGenerate: Boolean(target?.properties[p]?.generate) });
-          }
-          continue;
-        }
+        if ("create" in item) continue;
         const op = "update" in item ? item.update : item.delete;
-        // ④ 认人必须写明（identity 或 filter 二选一，不许都缺）——别等发布后执行才拒
         if (op.identity === undefined && !op.filter) {
           throw new Error(`配置不合法：${where} 的效应认人必须写明：${op.object} 缺 identity 或 filter`);
         }
-        // ③ 认人键：current 不可用（认人发生在逐个体求值之前）
-        if (op.identity !== undefined) checkActionValue("effect.identity", op.identity, `${where} 的效应认人`);
-        // ③ 效应过滤的取值：update/delete 逐个体求值，有 current 上下文
-        if (op.filter) checkFilterOperands(op.filter, `${where} 的效应过滤`);
-        if ("update" in item) {
-          for (const [p, v] of Object.entries(item.update.properties)) {
-            checkActionValue("effect.update.properties", v, `${where} 的效应（update ${item.update.object}.${p}）`);
-          }
-        }
       }
-      // ③ inform 的取值：没有 current 上下文，也没有 generated
-      for (const inf of act.inform ?? []) {
-        for (const [p, v] of Object.entries(inf.properties)) {
-          checkActionValue("inform.properties", v, `${where} 的 inform（${p}）`);
-        }
-      }
+      walkEffectValues(act, {
+        // create 投影没有 current 上下文；from: generated 只许落在带 generate 列表的属性上
+        createProp: (item, p, v) =>
+          checkActionValue("effect.create.properties", v, `${where} 的效应（create ${item.object}.${p}）`, { hasGenerate: Boolean(config.object_types[item.object]?.properties[p]?.generate) }),
+        // 认人键：current 不可用（认人发生在逐个体求值之前）
+        identity: (_op, _item, v) => checkActionValue("effect.identity", v, `${where} 的效应认人`),
+        // 效应过滤的取值：update/delete 逐个体求值，有 current 上下文
+        filter: (_op, _item, f) => checkFilterOperands(f as Record<string, unknown>, `${where} 的效应过滤`),
+        updateProp: (item, p, v) => checkActionValue("effect.update.properties", v, `${where} 的效应（update ${item.object}.${p}）`),
+        // inform 的取值：没有 current 上下文，也没有 generated
+        informProp: (_inf, p, v) => checkActionValue("inform.properties", v, `${where} 的 inform（${p}）`),
+      });
     }
   }
   // ② 转化成对：每条 transition 关系必须被至少一条动作的效应 link 引用

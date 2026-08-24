@@ -9,6 +9,8 @@ import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../schem
 import type { TableInfo } from "./infra/driver";
 import { TENDENCIES, VERDICT_LABELS, Verdict, type Tendency } from "./adjudication/verdict";
 import { demoQueries } from "./infra/fixture";
+import { resolveTableInfos } from "./infra/load";
+import type { DriverRegistry } from "./infra/registry";
 import { runtime } from "../runtime";
 import { EngineReject } from "../errors";
 import { z } from "zod";
@@ -200,4 +202,15 @@ export function getSlot(): LlmSlot {
     rt.llmSlot = new AiSdkSlot(xai.responses(model));
   }
   return rt.llmSlot;
+}
+
+/** 「表结构 → 对象建议」的组合原语：按连接内省定位 + 槽位产草稿。REST（generate_objects）与 MCP（propose_objects）共用；
+ *  notFound 产出的错误类型由调用方定（路由 DraftReject、MCP EngineReject）。 */
+export async function proposeObjectsFor(
+  registry: DriverRegistry,
+  tables: { connection: string; table: string }[],
+  notFound: (msg: string) => Error
+): Promise<Record<string, ObjectType>> {
+  const infos = await resolveTableInfos(registry, tables, notFound);
+  return getSlot().proposeObjects(infos);
 }

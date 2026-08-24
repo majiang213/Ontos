@@ -11,9 +11,9 @@ import { runAction } from "@/server/engine/action/action";
 import { EngineReject } from "@/server/errors";
 import { conversionAction } from "@/server/engine/adjudication/adjudicate";
 import { FIELDS_UPDATE_ACTION, fieldsUpdateAction } from "@/server/engine/config/skeletons";
-import { getSlot } from "@/server/engine/llmSlot";
+import { proposeObjectsFor } from "@/server/engine/llmSlot";
 import { listClasses, listClassesDraft, readClass, readClassDraft, search } from "@/server/engine/config/views";
-import { resolveTableInfos } from "@/server/engine/infra/load";
+import { listTables } from "@/server/engine/infra/load";
 import type { DriverRegistry } from "@/server/engine/infra/registry";
 import { applyDraft, getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
 import { metaStore } from "@/server/meta/store";
@@ -94,9 +94,8 @@ export const TOOLS: ToolDef[] = [
     inputSchema: json(z.object({ tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty() })),
     handler: async (ctx, args) => {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
-      // 按连接分组内省 + 逐表定位：引擎共享实现（generate 同款）
-      const infos = await resolveTableInfos(ctx.driver, tables, (m) => new EngineReject(m));
-      const draft = await getSlot().proposeObjects(infos);
+      // 按连接分组内省 + 逐表定位 + 槽位产草稿：组合原语（llmSlot.proposeObjectsFor，REST 同款）
+      const draft = await proposeObjectsFor(ctx.driver, tables, (m) => new EngineReject(m));
       return { payload: { object_types: draft } };
     },
   },
@@ -166,23 +165,11 @@ export const TOOLS: ToolDef[] = [
     description: "列出已连接库里的表和列（只读列定义，没有采样行，不保存连接）。入参：{ connection? }。不接受 space。",
     inputSchema: json(z.object({ connection: z.string().optional() })),
     handler: async (ctx, args) => {
-      // 只读列定义（不下发采样行）；按连接 try/catch，一个连接失败不让整个工具变成信封错误
+      // 只读列定义（不下发采样行）；逐连接降级在引擎原语里（infra/load.listTables，与 REST 同口径）
       const conn = args.connection !== undefined ? String(args.connection) : undefined;
-      if (conn !== undefined && !ctx.driver.has(conn)) {
-        return { payload: { sources: [{ connection: conn, tables: [], error: "没有这个连接" }] } };
-      }
-      const sources = [];
-      for (const connection of conn ? [conn] : ctx.driver.connectionNames()) {
-        try {
-          const tables = await ctx.driver.introspect(connection);
-          sources.push({
-            connection,
-            tables: tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type, pk: c.pk })) })),
-          });
-        } catch {
-          sources.push({ connection, tables: [], error: "连接失败或读取表结构失败" }); // 与 GET /api/list_tables 同口径：驱动内部主机/路径不出网
-        }
-      }
+      const sources = (await listTables(ctx.driver, { connection: conn })).map((s) =>
+        s.error ? s : { connection: s.connection, tables: s.tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type, pk: c.pk })) })) }
+      );
       return { payload: { sources } };
     },
   },
