@@ -7,7 +7,10 @@ export class VersionChainStore extends ConcernStore {
     const id = await this.wsId(ws);
     const row = await this.backend.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version DESC LIMIT 1`, [id]);
     if (row) return { version: row.version as number, yaml: row.yaml as string };
-    await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]); // 被元数据写抢注的空间：种子补成 v1
+    // 被元数据写抢注的空间：种子补成 v1。并发首访各插一行撞 UNIQUE(workspace_id, version)——
+    // insert-ignore 让败者无害（与 wsId/ensureWorkspace 同一条纪律，四个落点齐）
+    const ignore = this.backend.dialect === "mysql" ? "INSERT IGNORE" : "INSERT OR IGNORE";
+    await this.backend.run(`${ignore} INTO onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]);
     return { version: 1, yaml: seedYaml };
   }
 

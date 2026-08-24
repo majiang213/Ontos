@@ -46,7 +46,8 @@ export class MysqlBackend implements MetaBackend {
   readonly dialect = "mysql" as const;
   private pool: mysql.Pool;
   constructor(dsn: string) {
-    this.pool = mysql.createPool({ uri: dsn, connectionLimit: 4, namedPlaceholders: false });
+    // multipleStatements 必须开：MYSQL_DDL 九个 CREATE TABLE 一次下发（不开 mysql2 默认拒多语句，ready 永远 reject）
+    this.pool = mysql.createPool({ uri: dsn, connectionLimit: 4, namedPlaceholders: false, multipleStatements: true });
     this.ready = this.pool.query(MYSQL_DDL).then(() => undefined);
   }
   private ready: Promise<void>;

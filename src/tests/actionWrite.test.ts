@@ -125,6 +125,40 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
     expect(d.object_types.main.properties.status).toBeDefined(); // 派生阶段正常并入
   });
 
+  it("B 的动作引用 B 自身（set_fields 效应 object:B、pre 过滤 remapId）：随 B 消亡不搬进 A，裁决落地不弹回", async () => {
+    const s = await freshStore(tmp);
+    const { adjudicate } = await import("../server/engine/adjudication/adjudicate");
+    // main2 只有唯一键（无 set_fields）；aux 有可写字段（带 set_fields）且 identity 与 main2 不同名（remapId = serial_no）
+    await s.applyDraft(
+      {
+        op: "import_objects",
+        objects: {
+          main2: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", fields: { sn: "sn" } } } },
+          aux: {
+            kind: "thing",
+            identity: "serial_no",
+            properties: { serial_no: { type: "string" }, color: { type: "string" } },
+            sources: { sb: { connection: "device_sys", table: "device", fields: { serial_no: "serial_no", color: "name" } } },
+          },
+        },
+      },
+      WS
+    );
+    // aux 再带一条自定义动作：效应 object: aux（指向 dying 类），pre 过滤 serial_no（remapId 键）
+    await s.applyDraft(
+      { op: "set_action", object: "aux", name: "recolor", def: { pre: { serial_no: "SN-1" }, effect: [{ update: { object: "aux", identity: { from: "identity" }, properties: { color: { from: "request" } } } }] } },
+      WS
+    );
+    await adjudicate({ class_a: "main2", class_b: "aux" }, Verdict.Same, undefined, WS);
+    const d = (await s.getDraft(WS)).draft;
+    expect(d.object_types.aux).toBeUndefined();
+    expect(d.object_types.main2.properties.color).toBeDefined(); // 属性正常并入
+    // 旧守护只防垂死关系：set_fields（object: aux）与 recolor 都会搬进 main2 → 校验炸、裁决整步回退
+    expect(d.object_types.main2.actions?.set_fields).toBeUndefined();
+    expect(d.object_types.main2.actions?.recolor).toBeUndefined();
+    await expect(s.publish(WS)).resolves.toBeDefined(); // 关键断言：落地，不弹回
+  });
+
   it("历史已发布配置违反动作形状校验也能加载（loadPublished 不查）；但草稿写入会拦", async () => {
     const s = await freshStore(tmp);
     // 手工塞一个 v2：转化关系 orphan_tr 没有任何动作引用（② 违例）

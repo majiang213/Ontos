@@ -75,13 +75,13 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
       }
     }
   }
-  // B 的动作与公理带过来（同名跳过；引用了将随 B 消亡的关系的动作跳过——先阶段后合并的多跳裁决下，
-  // B 的 convert_to_* 随 B 的转化关系一起消亡，跟过去会被 validateActionShapes ① 整步回退，人的裁决关卡无解）
+  // B 的动作与公理带过来（同名跳过；随 B 消亡的动作跳过——见 actionDiesWith：跟过去必炸校验、整步回退，
+  // 人的裁决关卡无解。先阶段后合并的多跳裁决下 B 的 convert_to_* 随 B 的转化关系消亡，只是其中一种死法）
   if (B.actions) {
     A.actions = A.actions ?? {};
     for (const [name, act] of Object.entries(B.actions)) {
       if (A.actions[name]) continue;
-      if (actionRefsDyingLink(d, b, act, b)) continue;
+      if (actionDiesWith(d, b, act, b, remapId)) continue;
       A.actions[name] = act;
     }
   }
@@ -92,9 +92,11 @@ function mergeInto(d: OntologyConfig, a: string, b: string): void {
   dropClass(d, b);
 }
 
-/** 动作是否引用了将随 dying 类消亡的关系（pre / 效应 filter 的 $link、效应 link 项）：
- *  dropClass 撤掉 from/to 含 dying 的全部关系；引用已不存在的关系同样视为消亡（跟着过去必炸校验）。 */
-function actionRefsDyingLink(d: OntologyConfig, owner: string, act: ActionDef, dying: string): boolean {
+/** 动作是否随 dying 类消亡（合并时不搬进留下类——跟过去必炸 validateSemantics/validateActionShapes，整步回退）：
+ *  ① 引用将消亡的关系（pre / 效应 filter 的 $link、效应 link 项：dropClass 撤掉 from/to 含 dying 的全部关系）；
+ *  ② 引用 dying 类本身：效应（update/delete/create）或 inform 的对象是 dying；$request 的认人对象是 dying；
+ *  ③ pre / 效应 filter 读写 remapId（B 的识别属性不并过来，留下类上没有这个键）。 */
+function actionDiesWith(d: OntologyConfig, owner: string, act: ActionDef, dying: string, remapId?: string): boolean {
   let hit = false;
   const collect = (clsName: string, f: Record<string, unknown> | undefined) => {
     if (!f || hit) return;
@@ -102,6 +104,16 @@ function actionRefsDyingLink(d: OntologyConfig, owner: string, act: ActionDef, d
       link: (cls, ln) => {
         const r = resolveLink(d, cls, ln);
         if (!r || r.link.from === dying || r.link.to === dying) hit = true;
+      },
+      prop: (_cls, key, v) => {
+        if (key === remapId) hit = true; // 键侧：过滤了 B 的识别属性（不并过来）
+        if (remapId && v !== null && typeof v === "object" && !Array.isArray(v) && (v as Record<string, unknown>).property === remapId) hit = true; // 值侧：读 B 的识别属性
+      },
+      special: (_c, k, v) => {
+        if (k !== "$request" || !v || typeof v !== "object") return;
+        for (const cv of Object.values(v as Record<string, unknown>)) {
+          if (cv !== null && typeof cv === "object" && (cv as Record<string, unknown>).object === dying) hit = true; // $request 认人认到 dying 类
+        }
       },
     });
   };
@@ -111,9 +123,23 @@ function actionRefsDyingLink(d: OntologyConfig, owner: string, act: ActionDef, d
       const l = d.link_types[name];
       if (!l || l.from === dying || l.to === dying) hit = true;
     },
-    update: (item) => collect(item.object, item.filter as Record<string, unknown> | undefined),
-    delete: (item) => collect(item.object, item.filter as Record<string, unknown> | undefined),
+    update: (item) => {
+      if (item.object === dying) hit = true; // 效应指向 dying 类（set_fields 效应恒为宿主类，B 的一搬必炸）
+      else collect(item.object, item.filter as Record<string, unknown> | undefined);
+    },
+    create: (item) => {
+      if (item.object === dying) hit = true;
+    },
+    delete: (item) => {
+      if (item.object === dying) hit = true;
+      else collect(item.object, item.filter as Record<string, unknown> | undefined);
+    },
   });
+  if (!hit) {
+    for (const inf of act.inform ?? []) {
+      if (inf.object === dying) { hit = true; break; } // 告知对象是 dying 类
+    }
+  }
   return hit;
 }
 

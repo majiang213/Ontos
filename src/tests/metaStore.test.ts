@@ -28,7 +28,9 @@ describe("元数据库", () => {
     const o = { class_a: "eq_a", class_b: "eq_b", source_a: "s1", source_b: "s2" };
     await Promise.all(Array.from({ length: 10 }, (_, i) => store.recordOverlap(WS, { ...o, norm_rule: "raw", count_a: 10 + i, count_b: 20, count_hit: i, rate: i / 20 })));
     const rows = await store.listOverlaps(WS);
-    expect(rows.filter((r) => r.class_a === "eq_a" && r.class_b === "eq_b").length).toBe(1);
+    const pair = rows.filter((r) => r.class_a === "eq_a" && r.class_b === "eq_b");
+    expect(pair.length).toBe(1);
+    expect(pair[0].count_hit).toBe(9); // 最后一写赢（sqlite 同步驱动下 Promise.all 按发起序落库）
   });
 
   it("连接：保存/更新/列表/删除", async () => {
