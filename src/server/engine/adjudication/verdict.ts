@@ -29,3 +29,13 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
   [Verdict.NameSimilar]: "仅名称相似",
   [Verdict.Skip]: "跳过",
 };
+
+/** 候选对建议：跨源疑似同义的两个类 + 机器倾向 + 理由。裁决权在人，这只是建议（LLM 槽位产出，
+ *  /api/list_candidates 的响应形状，画布裁决面板消费）。放这里不放 llmSlot：它是裁决词汇，
+ *  且本模块是纯叶子，前端可安全引用。 */
+export interface PairAdvice {
+  class_a: string;
+  class_b: string;
+  tendency: Tendency;
+  reason: string;
+}

@@ -9,7 +9,8 @@ import { connectionsOf, hasSources, isCrossSource, pairEligible, pairKey, SAME_S
 import { EngineReject } from "../../errors";
 import { mustCls } from "../query/individual";
 import { getDriverRegistry } from "../infra/load";
-import { getSlot, type PairAdvice } from "../llmSlot";
+import { getSlot } from "../llmSlot";
+import { type PairAdvice } from "./verdict";
 import { overlapRate, type OverlapResult } from "./overlap";
 import { DEFAULT_WS } from "../infra/workspace";
 

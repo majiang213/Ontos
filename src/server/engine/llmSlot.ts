@@ -7,7 +7,7 @@ import type { QueryRequest } from "../schema/request";
 import { queryRequestSchema } from "../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../schema/config";
 import type { TableInfo } from "./infra/driver";
-import { TENDENCIES, VERDICT_LABELS, Verdict, type Tendency } from "./adjudication/verdict";
+import { TENDENCIES, VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "./adjudication/verdict";
 import { demoQueries } from "./infra/fixture";
 import { resolveTableInfos } from "./infra/load";
 import type { DriverRegistry } from "./infra/registry";
@@ -26,13 +26,6 @@ export interface LlmSlot {
   proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>>;
   /** 跨源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合（跨源判定在实现里做）。 */
   proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
-}
-
-export interface PairAdvice {
-  class_a: string;
-  class_b: string;
-  tendency: Tendency;
-  reason: string;
 }
 
 /* ---------- 离线确定性回退 ---------- */

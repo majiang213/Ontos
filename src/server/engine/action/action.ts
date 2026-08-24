@@ -10,6 +10,7 @@ import { createEnv, selectIndividuals } from "../query/assemble";
 import { evalDerived, evalFilterOnIndividual } from "../query/evaluate";
 import { currentView, keyColumn, mustCls, propValue, sourcesOf, type Cls, type Env, type Individual } from "../query/individual";
 import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "../query/expr";
+import { buildNotifications, type NotificationRecord } from "./notify";
 
 export interface ProjectionRecord {
   source: string;
@@ -26,23 +27,6 @@ export interface ActionResult {
   error?: string;
   projections: ProjectionRecord[];
   notifications?: NotificationRecord[];
-}
-
-/** 告知（inform）本期预留：引擎生成变更事件但不外发，随结果返回，不静默丢弃。 */
-export interface NotificationLine {
-  op: string;
-  object_class: string;
-  target: string | null;
-  change_id?: string;
-  line_id?: string;
-}
-export interface NotificationRecord {
-  object: string;
-  to: string[];
-  properties: Record<string, unknown>;
-  lines: NotificationLine[];
-  delivered: false;
-  note: string;
 }
 
 /* 发号计数器的默认实现驻内存（测试/纯引擎用）；路由层经 runAction 的 opts 注入元数据库版，重启不复位。 */
@@ -154,55 +138,10 @@ export async function runAction(
   return { ok, stage: ok ? undefined : "project", projections, ...(notifications.length ? { notifications } : {}) };
 }
 
-/** 变更事件按效应列表逐项生成条目。create 的 target 取解析出的识别值（from: generated 的不重复发号）。 */
-function buildNotifications(
-  config: OntologyConfig,
-  action: ActionDef,
-  plan: Planned[],
-  req: ActionRequest,
-  ctx: EvalContext,
-  projections: ProjectionRecord[]
-): NotificationRecord[] {
-  const anyFail = projections.some((r) => !r.ok);
-  return (action.inform ?? []).map((inf) => {
-    const properties = Object.fromEntries(Object.entries(inf.properties).map(([prop, spec]) => [prop, resolveValue(spec, prop, ctx)]));
-    // 事件 identity 不靠属性名约定：properties 没填事件类的 identity 时，把全部已解析值按声明顺序用 | 拼接（附录 B）
-    const idProp = config.object_types[inf.object]?.identity;
-    if (idProp && properties[idProp] == null) {
-      const vals = Object.values(properties);
-      if (vals.length > 0 && vals.every((v) => v != null)) properties[idProp] = vals.map(String).join("|");
-    }
-    const changeId = idProp ? properties[idProp] : undefined;
-    // 条目：效应逐项、项内每个目标个体各一条，带 op / object_class / target；能拿到 change_id 就补 change_id 与 line_id（change_id#序号）
-    const lines: NotificationLine[] = plan.flatMap((p): NotificationLine[] => {
-      if (p.kind === "create") {
-        const idPropOfCls = p.cls.def.identity;
-        const spec = idPropOfCls ? p.propSpec[idPropOfCls] : undefined;
-        const resolvable = spec !== undefined && !(typeof spec === "object" && spec !== null && (spec as Record<string, unknown>).from === "generated");
-        const v = resolvable ? resolveValue(spec, idPropOfCls!, ctx) : null;
-        return [{ op: p.kind, object_class: p.cls.name, target: v == null ? null : String(v) }];
-      }
-      const keys = p.kind === "link" ? [String(req.identity)] : p.targets.map((t) => t.key);
-      return keys.map((k) => ({ op: p.kind, object_class: p.kind === "link" ? req.object : p.cls.name, target: k }));
-    });
-    return {
-      object: inf.object,
-      to: inf.to,
-      properties,
-      lines: lines.map((l, i) =>
-        changeId == null ? l : { ...l, change_id: String(changeId), line_id: `${changeId}#${i + 1}` }
-      ),
-      delivered: false,
-      note: anyFail
-        ? "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）"
-        : "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
-    };
-  });
-}
-
 /* ---------- 效应计划 ---------- */
 
-type Planned =
+/** 效应计划：先解析出计划再投影（notify.ts 的变更事件生成也消费它）。 */
+export type Planned =
   | { kind: "update"; cls: Cls; targets: Individual[]; setSpec: Record<string, ValueSource> }
   | { kind: "create"; cls: Cls; propSpec: Record<string, ValueSource> }
   | { kind: "delete"; cls: Cls; targets: Individual[] }

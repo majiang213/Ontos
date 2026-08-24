@@ -18,7 +18,7 @@ import { effectSummary, formCompatible } from "./forms/actionView";
 import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/engine/config/lineage";
-import type { PairAdvice } from "../server/engine/llmSlot";
+import type { PairAdvice } from "../server/engine/adjudication/verdict";
 import type { ObjectType } from "../server/schema/config";
 
 interface IntrospectResp {

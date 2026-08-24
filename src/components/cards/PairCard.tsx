@@ -2,7 +2,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { PairAdvice } from "../../server/engine/llmSlot";
+import type { PairAdvice } from "../../server/engine/adjudication/verdict";
 import { VERDICTS, VERDICT_LABELS, Verdict } from "../../server/engine/adjudication/verdict";
 import { apiPost } from "../wsClient";
 
