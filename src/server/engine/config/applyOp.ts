@@ -203,10 +203,14 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
         if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}，先改引用它的动作再改名`);
         d.link_types[input.new_name] = l;
         delete d.link_types[input.name];
+        // 界面状态跟边改名走（边以关系名为键）：不跟就成孤儿，改名即丢
         if (state.edgePins[input.name]) {
-          // 钉点跟边改名走（边以关系名为键）：不跟就成孤儿，改名即丢钉点
           state.edgePins[input.new_name] = state.edgePins[input.name];
           delete state.edgePins[input.name];
+        }
+        if (state.edgeBends[input.name]) {
+          state.edgeBends[input.new_name] = state.edgeBends[input.name];
+          delete state.edgeBends[input.name];
         }
       }
       // 钉点随车（界面状态）：按端合并进既有钉点；改名了的写在新名下

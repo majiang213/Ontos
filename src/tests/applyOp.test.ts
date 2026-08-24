@@ -46,9 +46,13 @@ describe("applyOp（脱离队列与元库直测）", () => {
     // 改接按端合并：只给 target，source 端不动
     applyOp(state, { op: "update_link", name: "l1", pins: { target: { side: "right", t: 0.9 } } }, published);
     expect(state.edgePins.l1).toEqual({ source: { side: "top", t: 0.5 }, target: { side: "right", t: 0.9 } });
-    // 改名 + 钉点同车：写在新名下
+    // 改名：钉点写在新名下；弯折与钉点都跟边改名走（不成孤儿）
+    applyOp(state, { op: "save_edge_bend", name: "l1", bend: { dx: 5, dy: 6 } }, published);
     applyOp(state, { op: "update_link", name: "l1", new_name: "l2", pins: { source: { side: "bottom", t: 0.1 } } }, published);
     expect(state.edgePins.l2).toEqual({ source: { side: "bottom", t: 0.1 }, target: { side: "right", t: 0.9 } });
+    expect(state.edgePins.l1).toBeUndefined();
+    expect(state.edgeBends.l2).toEqual({ dx: 5, dy: 6 });
+    expect(state.edgeBends.l1).toBeUndefined();
   });
 
   it("内容 op 同样只改内存：create_object 落草稿，重复名 DraftReject", () => {
