@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import Bezel from "./Bezel";
 import { ActionForm } from "../forms/ActionForm";
-import { FieldForm, Section } from "../forms/forms";
+import { FieldForm, Section } from "./FieldForm";
 import { effectSummary, formCompatible } from "../forms/actionView";
 import type { ObjectType } from "../../server/schema/config";
 

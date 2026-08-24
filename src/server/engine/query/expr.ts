@@ -71,23 +71,31 @@ function evalNumberExpr(expr: string, ctx: EvalContext): number {
   return m[2] === "+" ? a + b : a - b;
 }
 
-/** 字符串字面量里的日期：ISO 串转 UTC Unix 秒；now 系按表达式求值；形似表达式但不合语法的拒绝。
- *  「形似」正则 EXPR_LIKE 收在 schema/spec/valueSpec（取值来源词表的唯一事实源）。 */
+/** ISO 日期串 → UTC Unix 秒：空格型（MySQL dateStrings）补 T…Z；T 型没写时区后缀的也按 UTC；自带时区的不动。 */
+function isoToSeconds(s: string): number {
+  const hasZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
+  const iso = s.includes("T") ? (hasZone ? s : `${s}Z`) : s.includes(" ") ? (hasZone ? s.replace(" ", "T") : `${s.replace(" ", "T")}Z`) : s;
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${s}`);
+  return Math.floor(ms / 1000);
+}
+
+/** 一个字符串字面量是什么意思（单源）：日期表达式按 now 求值；数字表达式（仅 allowNumber 侧）按 ctx 求值；
+ *  形似表达式但不合语法的拒绝（不当字面量写库）；ISO 日期串落 UTC 秒；其余原样。
+ *  「形似」正则 EXPR_LIKE 收在 schema/spec/valueSpec（取值来源词表的唯一事实源）。
+ *  过滤侧（resolveLiteral）与效应侧（resolveValue 字符串支路）同调这一份——差别只在数字表达式开不开。 */
+function resolveStringLiteral(s: string, ctx: EvalContext | undefined, allowNumber: boolean): unknown {
+  if (isDateExpr(s)) return evalDateExpr(s);
+  if (allowNumber && isNumberExpr(s)) return evalNumberExpr(s, ctx!);
+  if (EXPR_LIKE.test(s)) throw new Error(`非法表达式：${s}`);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return isoToSeconds(s);
+  return s;
+}
+
+/** 过滤侧的字面量解析：不开数字表达式（"1+2" 在过滤里就是字符串 "1+2"，在效应里才会求成 3）。 */
 export function resolveLiteral(v: unknown): unknown {
   if (typeof v !== "string") return v;
-  const s: string = v;
-  // isDateExpr 的类型谓词（v is string）会把 string 变量的假分支收成 never——Boolean() 包一层丢掉谓词
-  if (Boolean(isDateExpr(s))) return evalDateExpr(s);
-  if (EXPR_LIKE.test(s)) throw new Error(`非法表达式：${s}`);
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    // 日期契约是 UTC：空格型（MySQL dateStrings）补 T…Z；T 型没写时区后缀的也按 UTC；自带时区的不动
-    const hasZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
-    const iso = s.includes("T") ? (hasZone ? s : `${s}Z`) : s.includes(" ") ? (hasZone ? s.replace(" ", "T") : `${s.replace(" ", "T")}Z`) : s;
-    const ms = Date.parse(iso);
-    if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${s}`);
-    return Math.floor(ms / 1000);
-  }
-  return s;
+  return resolveStringLiteral(v, undefined, false);
 }
 
 /* ---------- 属性值来源 ----------
@@ -126,12 +134,7 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
     }
     throw new Error(`无法识别的取值来源：${JSON.stringify(v)}`);
   }
-  if (typeof v === "string") {
-    if (isDateExpr(v)) return evalDateExpr(v);
-    if (isNumberExpr(v)) return evalNumberExpr(v, ctx);
-    if (EXPR_LIKE.test(v)) throw new Error(`非法表达式：${v}`); // 形似表达式但不合语法，拒绝而不是当字面量写库
-    if (/^\d{4}-\d{2}-\d{2}/.test(v)) return resolveLiteral(v);
-  }
+  if (typeof v === "string") return resolveStringLiteral(v, ctx, true); // 效应侧：开数字表达式
   return v;
 }
 

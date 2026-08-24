@@ -1,20 +1,9 @@
-// 画布页的小表单组件：新建对象、连线、连接数据源、加字段，外加小节标题与字段类型词表。
-// 全是自包含展示组件，只靠窄回调 props 通信。
+// 画布页的小表单组件：新建对象、连线、连接数据源（同一消费者 CanvasPage）。
+// 字段表单与小节壳已随消费者搬走（cards/FieldForm.tsx，ObjectCard 配套）；全是自包含展示组件，只靠窄回调 props 通信。
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { apiPost } from "../wsClient";
-
-export const PROP_TYPES = ["string", "number", "boolean", "date", "enum"] as const;
-
-export function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>{title}</div>
-      {children}
-    </div>
-  );
-}
 
 export function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, description: string, kind: "thing" | "event") => void; onCancel: () => void }) {
   const [name, setName] = useState("");
@@ -168,67 +157,6 @@ export function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => voi
         <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }} disabled={busy}>
           {busy ? "测试中…" : "测试并保存"}
         </button>
-        <button type="button" className="btn" onClick={onCancel}>取消</button>
-      </div>
-    </form>
-  );
-}
-
-/** 字段表单：新建或改一个字段（名/类型/说明/枚举值各占一行）。枚举值只在类型为 enum 时出现。 */
-export function FieldForm({
-  initial, // 编辑模式给现有字段；新建为 undefined
-  onSave,
-  onCancel,
-}: {
-  initial?: { name: string; type: (typeof PROP_TYPES)[number]; description?: string; values?: (string | number)[] };
-  onSave: (v: { name: string; type: (typeof PROP_TYPES)[number]; description: string; values: (string | number)[] }) => Promise<boolean>;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState<(typeof PROP_TYPES)[number]>(initial?.type ?? "string");
-  const [description, setDescription] = useState(initial?.description ?? "");
-  const [values, setValues] = useState((initial?.values ?? []).join(","));
-  const [busy, setBusy] = useState(false);
-  const labelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--ink-3)" };
-  return (
-    <form
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!name.trim() || busy) return;
-        setBusy(true);
-        try {
-          const parsed = type === "enum" ? values.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) : [];
-          if (await onSave({ name: name.trim(), type, description: description.trim(), values: parsed })) onCancel();
-        } finally {
-          setBusy(false);
-        }
-      }}
-      style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}
-    >
-      <label style={labelStyle}>
-        字段名（小写字母/数字/下划线；被引用的字段改不了名）
-        <input className="ctl" value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
-      <label style={labelStyle}>
-        类型
-        <select className="ctl" value={type} onChange={(e) => setType(e.target.value as (typeof PROP_TYPES)[number])}>
-          {PROP_TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
-      </label>
-      <label style={labelStyle}>
-        说明（可选）
-        <input className="ctl" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="如：人员编号" />
-      </label>
-      {type === "enum" && (
-        <label style={labelStyle}>
-          枚举值（逗号分隔；取值要跟源数据一致）
-          <input className="ctl" value={values} onChange={(e) => setValues(e.target.value)} placeholder="如 in_transit,in_service" />
-        </label>
-      )}
-      <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
-        <button type="submit" className="btn-cta" style={{ fontSize: 12, padding: "6px 16px" }} disabled={busy}>{initial ? "保存" : "建好进草稿"}</button>
         <button type="button" className="btn" onClick={onCancel}>取消</button>
       </div>
     </form>

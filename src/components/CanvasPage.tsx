@@ -290,11 +290,9 @@ export default function CanvasPage() {
         onSelectLink={(name) => setCard({ kind: "linkDetail", name })}
         onConnectRequest={(from, to, pins) => setCard({ kind: "link", from, to, pins })}
         onReconnectLink={async (name, from, to, moved) => {
-          const ok = await op({ op: "update_link", name, from, to });
-          if (ok) {
-            if (moved?.pin) void op({ op: "save_edge_pin", name, end: moved.end, pin: moved.pin }); // 拖的那头钉新位置（静默）
-            showToast(`关系已改接为 ${from} → ${to}（发布后生效）`);
-          }
+          // 拖的那头钉新位置：pins 随 update_link 同车（界面状态一把落库，不再是接力 op）
+          const ok = await op({ op: "update_link", name, from, to, ...(moved?.pin ? { pins: { [moved.end]: moved.pin } } : {}) });
+          if (ok) showToast(`关系已改接为 ${from} → ${to}（发布后生效）`);
         }}
         onBendChange={(name, bend) => void op({ op: "save_edge_bend", name, bend })} // 拉弯/拉直：静默存，与摆位同理
         onLayoutChange={saveLayout}
@@ -464,11 +462,10 @@ export default function CanvasPage() {
               objects={ont?.object_types ?? {}}
               onCancel={() => setCard(null)}
               onSubmit={async (body) => {
-                const ok = await op(body);
+                // 钉点随建线同车（界面状态一把落库）：端点就是连的时候手选的位置
+                const pins = { ...(card.pins?.source ? { source: card.pins.source } : {}), ...(card.pins?.target ? { target: card.pins.target } : {}) };
+                const ok = await op(Object.keys(pins).length ? { ...body, pins } : body);
                 if (ok) {
-                  // 钉点随建线落存（静默）：端点就是连的时候手选的位置
-                  if (card.pins?.source) void op({ op: "save_edge_pin", name: body.name, end: "source", pin: card.pins.source });
-                  if (card.pins?.target) void op({ op: "save_edge_pin", name: body.name, end: "target", pin: card.pins.target });
                   setCard(null);
                   showToast("关系已进草稿（发布后生效）");
                 }

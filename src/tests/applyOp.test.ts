@@ -10,7 +10,10 @@ const published = { object_types: {}, link_types: {} } as OntologyConfig;
 
 const freshState = (): DraftState => ({
   draft: {
-    object_types: {},
+    object_types: {
+      a: { kind: "thing", properties: { x: { type: "string" } } },
+      b: { kind: "thing", properties: { y: { type: "string" } } },
+    },
     link_types: { belongs_to: { from: "a", to: "b", match: [{ from: "x", to: "y" }] } },
   } as unknown as DraftState["draft"],
   baseVersion: 1,
@@ -21,7 +24,7 @@ const freshState = (): DraftState => ({
 });
 
 describe("applyOp（脱离队列与元库直测）", () => {
-  it("save_layout / save_edge_bend / save_edge_pin 只改内存；关系不存在则 DraftReject", () => {
+  it("save_layout / save_edge_bend 只改内存；关系不存在则 DraftReject", () => {
     const state = freshState();
     applyOp(state, { op: "save_layout", positions: { equipment: { x: 1, y: 2 } } }, published);
     expect(state.layout.equipment).toEqual({ x: 1, y: 2 });
@@ -29,9 +32,23 @@ describe("applyOp（脱离队列与元库直测）", () => {
     expect(state.edgeBends.belongs_to).toEqual({ dx: 3, dy: 4 });
     applyOp(state, { op: "save_edge_bend", name: "belongs_to", bend: null }, published);
     expect(state.edgeBends.belongs_to).toBeUndefined(); // null = 拉直
-    applyOp(state, { op: "save_edge_pin", name: "belongs_to", end: "source", pin: { side: "top", t: 0.5 } }, published);
-    expect(state.edgePins.belongs_to).toEqual({ source: { side: "top", t: 0.5 } });
     expect(() => applyOp(state, { op: "save_edge_bend", name: "ghost", bend: null }, published)).toThrow(/关系不存在/);
+  });
+
+  it("钉点随建线/改接同车：create_link 写 edgePins；update_link 按端合并（改名写新名）", () => {
+    const state = freshState();
+    applyOp(
+      state,
+      { op: "create_link", name: "l1", from: "a", to: "b", match: { from: "x", to: "y" }, pins: { source: { side: "top", t: 0.5 }, target: { side: "left", t: 0.2 } } },
+      published
+    );
+    expect(state.edgePins.l1).toEqual({ source: { side: "top", t: 0.5 }, target: { side: "left", t: 0.2 } });
+    // 改接按端合并：只给 target，source 端不动
+    applyOp(state, { op: "update_link", name: "l1", pins: { target: { side: "right", t: 0.9 } } }, published);
+    expect(state.edgePins.l1).toEqual({ source: { side: "top", t: 0.5 }, target: { side: "right", t: 0.9 } });
+    // 改名 + 钉点同车：写在新名下
+    applyOp(state, { op: "update_link", name: "l1", new_name: "l2", pins: { source: { side: "bottom", t: 0.1 } } }, published);
+    expect(state.edgePins.l2).toEqual({ source: { side: "bottom", t: 0.1 }, target: { side: "right", t: 0.9 } });
   });
 
   it("内容 op 同样只改内存：create_object 落草稿，重复名 DraftReject", () => {

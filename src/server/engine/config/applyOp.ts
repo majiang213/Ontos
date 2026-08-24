@@ -1,9 +1,10 @@
-// op 解释器 —— 草稿 18 个编辑 op 的逐一解释（唯一解释点：REST 画布与 MCP apply_draft 同走这里）。
-// 只做内存修改：18 种 op 全归这里（含 save_* 的摆位/弯折/钉点）；落库与收尾方式由 applyDraft 按 ops.ts 的 UI_STATE_OPS 分流。
+// op 解释器 —— 草稿编辑 op 的逐一解释（唯一解释点：REST 画布与 MCP apply_draft 同走这里）。
+// 只做内存修改：全部 op 归这里（含 save_* 的摆位/弯折；钉点随建线/改接的 pins 键同车写）；
+// 落库与收尾方式由 applyDraft 按 ops.ts 的 UI_STATE_OPS 分流。
 // 认人/引用/锁定三类共享原语（mustType / dropClass / replaceBlockers）住本文件，views 与裁决从这里取。
 
 import type { ObjectType, OntologyConfig } from "../../schema/config";
-import { draftObjectSchema, type DraftOpInput as DraftOp } from "../../schema/ops";
+import { draftObjectSchema, type BorderPin, type DraftOpInput as DraftOp } from "../../schema/ops";
 import { DraftReject } from "../../errors";
 import { linkRefs, referencesOf } from "./refs";
 import { FIELDS_UPDATE_ACTION, fieldsUpdateAction, removeFieldsUpdateKeys, renameFieldsUpdateKey } from "./skeletons";
@@ -13,6 +14,12 @@ function mustType(d: OntologyConfig, name: string) {
   const t = d.object_types[name];
   if (!t) throw new DraftReject(`类不存在：${name}`);
   return t;
+}
+
+/** pins 键里实际给了的端（undefined 端不进记录）：至少一端返回记录，都没给返回 null。 */
+function definedEnds(pins: { source?: BorderPin; target?: BorderPin } | undefined): { source?: BorderPin; target?: BorderPin } | null {
+  const out = Object.fromEntries(Object.entries(pins ?? {}).filter(([, v]) => v !== undefined));
+  return Object.keys(out).length ? out : null;
 }
 
 /** 撤一个类，连同挂着它的关系（delete_object 与裁决的 mergeInto 共用）。 */
@@ -120,13 +127,6 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
       if (input.bend) state.edgeBends[input.name] = input.bend; else delete state.edgeBends[input.name]; // null = 拉直
       break;
     }
-    case "save_edge_pin": {
-      if (!state.draft.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
-      const cur = { ...state.edgePins[input.name] };
-      if (input.pin) cur[input.end] = input.pin; else delete cur[input.end]; // null = 回到浮动附着
-      if (cur.source || cur.target) state.edgePins[input.name] = cur; else delete state.edgePins[input.name];
-      break;
-    }
     case "create_link": {
       if (!/^[a-z][a-z0-9_]*$/.test(input.name)) throw new DraftReject("关系名必须是小写字母/数字/下划线，字母开头");
       if (d.link_types[input.name]) throw new DraftReject(`关系已存在：${input.name}`);
@@ -143,6 +143,9 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
         description: input.description,
         match: [{ from: input.match.from, to: input.match.to }], // 手动关系只说配对字段；转化关系由裁决产生
       };
+      // 钉点随车（界面状态）：建线一把落库，不再有 save_edge_pin 接力
+      const pins = definedEnds(input.pins);
+      if (pins) state.edgePins[input.name] = pins;
       break;
     }
     case "delete_link": {
@@ -200,6 +203,17 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
         if (refs.length) throw new DraftReject(`${input.name} 仍被引用：${refs.join("、")}，先改引用它的动作再改名`);
         d.link_types[input.new_name] = l;
         delete d.link_types[input.name];
+        if (state.edgePins[input.name]) {
+          // 钉点跟边改名走（边以关系名为键）：不跟就成孤儿，改名即丢钉点
+          state.edgePins[input.new_name] = state.edgePins[input.name];
+          delete state.edgePins[input.name];
+        }
+      }
+      // 钉点随车（界面状态）：按端合并进既有钉点；改名了的写在新名下
+      const pins = definedEnds(input.pins);
+      if (pins) {
+        const finalName = input.new_name && input.new_name !== input.name ? input.new_name : input.name;
+        state.edgePins[finalName] = { ...state.edgePins[finalName], ...pins };
       }
       break;
     }

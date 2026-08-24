@@ -1,5 +1,5 @@
 // 工作副本编辑操作的请求形状 —— /api/draft（REST 画布）与 MCP apply_draft 共用同一组判别联合。
-// MCP 侧抽掉 save_layout / save_edge_bend / save_edge_pin（摆位/弯折/钉点是界面状态，Agent 不写）。
+// MCP 侧抽掉 save_layout / save_edge_bend（摆位/弯折是界面状态，Agent 不写）。
 
 import { z } from "zod";
 import { actionSchema, objectTypeSchema } from "./config";
@@ -34,17 +34,12 @@ const setIdentityOp = z.object({ op: z.literal("set_identity"), object: z.string
 const saveLayoutOp = z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) });
 // 线的弯折点：相对两端节点中心连线中点的偏移；bend=null 拉直。与摆位一样是界面状态
 const saveEdgeBendOp = z.object({ op: z.literal("save_edge_bend"), name: z.string(), bend: z.object({ dx: z.number(), dy: z.number() }).nullable() });
-/** 端点钉点形状：钉在某条边的 t 比例处（0..1）。save_edge_pin 入参与画布包读回校验（configStore unpackCanvas）共用。 */
+/** 端点钉点形状：钉在某条边的 t 比例处（0..1）。建线/改接 op 的 pins 键与画布包读回校验（configStore unpackCanvas）共用。 */
 export const borderPinSchema = z.object({ side: z.enum(["top", "bottom", "left", "right"]), t: z.number() });
 /** 钉点类型单源（校验与类型同一出处）：画布几何、元库记录、轮询帧全引这一型。 */
 export type BorderPin = z.infer<typeof borderPinSchema>;
-// pin=null 回到浮动附着。界面状态
-const saveEdgePinOp = z.object({
-  op: z.literal("save_edge_pin"),
-  name: z.string(),
-  end: z.enum(["source", "target"]),
-  pin: borderPinSchema.nullable(),
-});
+/** 两端钉点（建线/改接的可选随车键）：界面状态，随所在 op 一把落库——不再有独立的 save_edge_pin 接力。 */
+const edgePinsField = z.looseObject({ source: borderPinSchema.optional(), target: borderPinSchema.optional() }).optional();
 // 手动连线：from 类 → to 类，必须给配对字段（match）——关系总得说清靠哪两个字段对上
 const createLinkOp = z.object({
   op: z.literal("create_link"),
@@ -55,6 +50,7 @@ const createLinkOp = z.object({
   card: z.string().optional(),
   description: z.string().optional(),
   match: z.object({ from: z.string(), to: z.string() }),
+  pins: edgePinsField,
 });
 const deleteLinkOp = z.object({ op: z.literal("delete_link"), name: z.string() });
 // 关系改名/改反向名/改描述/改两端/改配对字段（画布拖边改接走 from/to：转化关系与被引用的关系拒改，配对字段跟新端点修）
@@ -67,6 +63,7 @@ const updateLinkOp = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   match: z.object({ from: z.string(), to: z.string() }).optional(), // 单对配对，与 create_link 同形
+  pins: edgePinsField,
 });
 // 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象；MCP 侧是 propose_objects 的落地点）
 const importObjectsOp = z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) });
@@ -76,9 +73,9 @@ const replaceObjectOp = z.object({ op: z.literal("replace_object"), name: z.stri
 const setActionOp = z.object({ op: z.literal("set_action"), object: z.string(), name: z.string(), def: actionSchema });
 const removeActionOp = z.object({ op: z.literal("remove_action"), object: z.string(), name: z.string() });
 
-/** 界面状态 op（摆位/弯折/钉点）：唯一名单。不写本体——mcpDraftOpSchema 不含（Agent 不写界面状态）、
- *  affectedNames 返回空、applyDraft 只落库不校验不加 rev。 */
-export const UI_STATE_OPS = ["save_layout", "save_edge_bend", "save_edge_pin"] as const;
+/** 界面状态 op（摆位/弯折）：唯一名单。不写本体——mcpDraftOpSchema 不含（Agent 不写界面状态）、
+ *  affectedNames 返回空、applyDraft 只落库不校验不加 rev。钉点不是独立 op：随建线/改接的 pins 键同车。 */
+export const UI_STATE_OPS = ["save_layout", "save_edge_bend"] as const;
 export const isUiStateOp = (op: string): op is (typeof UI_STATE_OPS)[number] => (UI_STATE_OPS as readonly string[]).includes(op);
 
 const CONTENT_OP_SCHEMAS = [
@@ -97,7 +94,7 @@ const CONTENT_OP_SCHEMAS = [
   setActionOp,
   removeActionOp,
 ] as const;
-const UI_STATE_OP_SCHEMAS = [saveLayoutOp, saveEdgeBendOp, saveEdgePinOp] as const;
+const UI_STATE_OP_SCHEMAS = [saveLayoutOp, saveEdgeBendOp] as const;
 
 export const draftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS, ...UI_STATE_OP_SCHEMAS]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
