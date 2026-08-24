@@ -13,10 +13,10 @@ describe("版本历史与回滚", () => {
   });
 
   it("回到某版：覆盖当前工作副本，不插入新版本；问数仍读已发布", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     await restartRuntime(tmp); // 从干净内存态开始
-    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" });
-    await s.publishDraft(); // v2 含 vendor
+    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" });
+    await s.publish(); // v2 含 vendor
     expect((await s.getPublished()).version).toBe(2);
     const { version } = await s.rollbackTo(1); // 用 v1 覆盖草稿
     expect(version).toBe(1);
@@ -97,6 +97,29 @@ describe("验收问题集跑批（真路由）", () => {
     expect(list.version).toBe(1);
   });
 
+  it("对草稿试跑：用草稿的配置，不落验收记录；已发布跑批不受影响", async () => {
+    const meta = (await import("../server/meta/store")).metaStore();
+    const s = await import("../server/engine/config/configStore");
+    const { POST } = await import("../app/api/questions/route");
+    await meta.addQuestion("test", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
+    await meta.addQuestion("test", "有过保的设备吗", "1");
+    // 草稿里删掉派生属性 in_warranty（无引用可删）；已发布里它还在
+    await s.applyDraft({ op: "remove_property", object: "equipment", name: "in_warranty" }, "test");
+    // 草稿试跑：在役照过；过保这条在草稿里找不到 in_warranty，执行出错
+    const dres = await POST(new Request("http://x/api/questions?ws=test&run=1&target=draft", { method: "POST" }) as never);
+    const ddata = await dres.json();
+    expect(ddata.version).toBeNull();
+    expect(ddata.results.find((r: { question: string }) => r.question === "在役设备及其所属部门").status).toBe("通过");
+    expect(ddata.results.find((r: { question: string }) => r.question === "有过保的设备吗").status).toBe("执行出错");
+    // 不落库：两条仍是「未跑」
+    expect((await meta.listQuestions("test")).every((q) => q.status === "未跑")).toBe(true);
+    // 已发布跑批：in_warranty 还在，过保这条正常执行；状态与版本落库
+    const pres = await POST(new Request("http://x/api/questions?ws=test&run=1", { method: "POST" }) as never);
+    const pdata = await pres.json();
+    expect(pdata.results.find((r: { question: string }) => r.question === "有过保的设备吗").status).not.toBe("执行出错");
+    expect((await meta.listQuestions("test")).every((q) => q.version === 1)).toBe(true);
+  });
+
   it("期望写法不认识：新增时直接 400，白话提示", async () => {
     const { POST } = await import("../app/api/questions/route");
     const res = await POST(
@@ -142,7 +165,7 @@ describe("MCP 工具端点", () => {
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "query",
       "run_action",
-      "propose_ontology",
+      "propose_objects",
       "propose_action",
       "list_classes",
       "read_class",
@@ -172,14 +195,22 @@ describe("MCP 工具端点", () => {
     expect(r.result.isError).toBe(true);
   });
 
-  it("propose_ontology：对表产草稿建议（不落画布）", async () => {
-    const r = await call("propose_ontology", { tables: [{ connection: "device_sys", table: "department" }] });
+  it("propose_objects：对表产草稿建议（不落画布）", async () => {
+    const r = await call("propose_objects", { tables: [{ connection: "device_sys", table: "department" }] });
     expect(r.result.structuredContent.object_types.department.properties.dept_name).toBeDefined();
   });
 
   it("propose_action：有转化关系的类给转化模板", async () => {
     const r = await call("propose_action", { object: "equipment" });
+    expect(r.result.structuredContent.name).toBe("convert_to_in_service");
     expect(r.result.structuredContent.action.effect).toEqual([{ link: "converted" }]);
+  });
+
+  it("propose_action：非转化类给 set_fields 骨架（与导入自动生成同形同名）", async () => {
+    const r = await call("propose_action", { object: "department" });
+    const sc = r.result.structuredContent;
+    expect(sc.name).toBe("set_fields");
+    expect(sc.action.effect).toEqual([{ update: { object: "department", identity: { from: "identity" }, properties: { name: { from: "request" } } } }]); // dept_id 是唯一键，不进
   });
 
   it("未知工具 -32601；入参形状不合法 -32602；领域拒绝 -32000；坏 JSON -32700", async () => {
@@ -189,7 +220,7 @@ describe("MCP 工具端点", () => {
     expect((await rpc("tools/list", undefined, "not json")).error?.code).toBe(-32700);
   });
 
-  it("发现工具说明点明已发布/草稿；space 非法值 -32602；query/run_action/propose_ontology 不接受 space", async () => {
+  it("发现工具说明点明已发布/草稿；space 非法值 -32602；query/run_action/propose_objects 不接受 space", async () => {
     const list = await rpc("tools/list");
     const descOf = (n: string) => list.result.tools.find((t: { name: string }) => t.name === n).description as string;
     for (const n of ["list_classes", "read_class", "search", "propose_action"]) {
@@ -199,12 +230,12 @@ describe("MCP 工具端点", () => {
     expect((await call("search", { text: "设备", space: "working" })).error?.code).toBe(-32602);
     expect((await call("query", { query: { object: "equipment" }, space: "draft" })).error?.code).toBe(-32602);
     expect((await call("run_action", { action: "convert", object: "equipment", identity: "SN-40217", space: "draft" })).error?.code).toBe(-32602);
-    expect((await call("propose_ontology", { tables: [{ connection: "device_sys", table: "department" }], space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("propose_objects", { tables: [{ connection: "device_sys", table: "department" }], space: "draft" })).error?.code).toBe(-32602);
   });
 
   it("space=draft 看见未发布类（带状态与 rev）；缺省看不见；query/propose_action 不受草稿影响", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({ op: "create_object", name: "vendor", description: "供应商", kind: "thing" }, "test");
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({ op: "create_object", name: "vendor", description: "供应商", kind: "thing" }, "test");
     // 缺省已发布：看不见 vendor
     const pub = await call("list_classes", {});
     expect(pub.result.structuredContent.classes.map((c: { name: string }) => c.name)).not.toContain("vendor");
@@ -263,11 +294,11 @@ describe("MCP 工具端点", () => {
   });
 
   it("apply_draft 完整往返：读 rev → 写入 ok 且 rev+1 → 重放 stale base_rev 得 -32000 → query 仍读旧已发布", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     const list = await call("list_classes", { space: "draft" });
     const rev = list.result.structuredContent.rev as number;
     expect(rev).toBe(s.getRev("test"));
-    // 落地 import_objects（propose_ontology 的落地点）
+    // 落地 import_objects（propose_objects 的落地点）
     const imp = await call("apply_draft", {
       op: "import_objects",
       objects: { vendor: { kind: "thing", description: "供应商", identity: "vendor_no", properties: { vendor_no: { type: "string" } } } },
@@ -321,7 +352,7 @@ describe("MCP 工具端点", () => {
   });
 
   it("set_action 经 apply_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     const def = { description: "改名", effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
     const r = await call("apply_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: s.getRev("test") });
     expect(r.error).toBeUndefined();

@@ -7,17 +7,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { queryRequestSchema } from "../server/schema/request";
-import { runQuery } from "../server/engine/query";
-import { createEnv, EngineReject, selectIndividuals } from "../server/engine/individual";
-import { runAction } from "../server/engine/action";
-import { freshDriver } from "../server/engine/load";
-import { SqliteFixtureDriver, seedDemo } from "../server/engine/fixture";
-import { generateValue } from "../server/engine/expr";
+import { query } from "../server/engine/query/query";
+import { createEnv, selectIndividuals } from "../server/engine/query/individual";
+import { EngineReject } from "../server/errors";
+import { runAction } from "../server/engine/action/action";
+import { freshDriver } from "../server/engine/infra/load";
+import { SqliteFixtureDriver, seedDemo } from "../server/engine/infra/fixture";
+import { generateValue } from "../server/engine/query/expr";
 import type { QueryRequest } from "../server/schema/request";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
 
-const q = (req: QueryRequest) => runQuery(config, freshDriver(), req);
+const q = (req: QueryRequest) => query(config, freshDriver(), req);
 
 describe("M7 查询", () => {
   it("在役设备：派生 status 按 when 规则判定", async () => {
@@ -104,7 +105,7 @@ describe("M8 动作", () => {
     expect(res.ok).toBe(true);
     expect(res.projections.filter((p) => p.ok).length).toBe(3);
 
-    const after = await runQuery(config, driver, {
+    const after = await query(config, driver, {
       object: "equipment",
       identity: "SN-40217",
       properties: ["status", "in_warranty"],
@@ -113,7 +114,7 @@ describe("M8 动作", () => {
     expect(after.rows).toEqual([{ status: "in_service", in_warranty: true }]);
 
     // 转化关系成立：出发阶段的源有行，到达阶段整条命中
-    const linked = await runQuery(config, driver, { object: "equipment", identity: "SN-40217", filter: { $link: { converted: true } } });
+    const linked = await query(config, driver, { object: "equipment", identity: "SN-40217", filter: { $link: { converted: true } } });
     expect(linked.rows.length).toBe(1);
   });
 
@@ -141,14 +142,14 @@ describe("M8 动作", () => {
       action: "transfer", object: "equipment", identity: "SN-40085", request: { dept: "D07" },
     });
     expect(okRes.ok).toBe(true);
-    const after = await runQuery(config, driver, { object: "equipment", identity: "SN-40085", properties: ["dept"] });
+    const after = await query(config, driver, { object: "equipment", identity: "SN-40085", properties: ["dept"] });
     expect(after.rows[0].dept).toBe("D07");
   });
 
   it("报废：改的是源列属性 mark，派生 status 随后算成报废；报废不能再报废", async () => {
     const driver = freshDriver();
     expect((await runAction(config, driver, { action: "scrap", object: "equipment", identity: "SN-40085" })).ok).toBe(true);
-    const after = await runQuery(config, driver, { object: "equipment", identity: "SN-40085", properties: ["status"] });
+    const after = await query(config, driver, { object: "equipment", identity: "SN-40085", properties: ["status"] });
     expect(after.rows[0].status).toBe("scrapped");
     expect((await runAction(config, driver, { action: "scrap", object: "equipment", identity: "SN-40085" })).ok).toBe(false);
   });
@@ -168,11 +169,33 @@ describe("M8 动作", () => {
     expect(res.projections[0].source).toBe("device");
   });
 
+  it("登记履历：两个请求参数相比，日期倒置被前置拒；放行则插履历表、编号按 generate 发出", async () => {
+    const bad = await runAction(config, freshDriver(), {
+      action: "register_assignment", object: "equipment", identity: "SN-90001",
+      request: { dept_id: "D07", valid_from: "2026-03-01", valid_to: "2026-01-01" },
+    });
+    expect(bad.ok).toBe(false); // 生效晚于失效
+    expect(bad.stage).toBe("pre");
+
+    const driver = freshDriver();
+    const res = await runAction(config, driver, {
+      action: "register_assignment", object: "equipment", identity: "SN-90001",
+      request: { dept_id: "D07", valid_from: "2026-01-01", valid_to: "2026-03-01" },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.projections.length).toBe(1); // 履历只有 history 一个源
+    expect(res.projections[0].source).toBe("history");
+    const after = await query(config, driver, { object: "assignment", filter: { serial_no: "SN-90001" }, properties: ["asgn_no", "dept_id"] });
+    expect(after.rows.length).toBe(1);
+    expect(after.rows[0].dept_id).toBe("D07");
+    expect(String(after.rows[0].asgn_no)).toMatch(/^SN-90001-\d{8}-0001$/); // generate：identity + 日期 + 序号
+  });
+
   it("结束维修：前置用设备出发的关系名，效应过滤落在维修自己的字段上", async () => {
     const driver = freshDriver();
     const res = await runAction(config, driver, { action: "finish_repair", object: "equipment", identity: "SN-40085" });
     expect(res.ok).toBe(true);
-    const repairs = await runQuery(config, driver, { object: "repair", filter: { serial_no: "SN-40085" }, properties: ["is_open"] });
+    const repairs = await query(config, driver, { object: "repair", filter: { serial_no: "SN-40085" }, properties: ["is_open"] });
     expect(repairs.rows[0].is_open).toBe(false);
   });
 
@@ -182,7 +205,7 @@ describe("M8 动作", () => {
       action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" },
     });
     expect(res.ok).toBe(true);
-    const after = await runQuery(config, driver, {
+    const after = await query(config, driver, {
       object: "person", identity: "P001",
       expand: [{ relation: "appointments", properties: ["title", "dept", "is_current", "appt_no"] }],
     });
@@ -238,7 +261,7 @@ describe("过滤与展开的边界", () => {
     expect((await q({ object: "equipment", filter: { in_warranty: false } })).rows.length).toBe(181);
     const driver = freshDriver();
     await runAction(config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
-    const after = await runQuery(config, driver, { object: "equipment", properties: ["serial_no"], filter: { in_warranty: false } });
+    const after = await query(config, driver, { object: "equipment", properties: ["serial_no"], filter: { in_warranty: false } });
     expect(after.rows.length).toBe(180);
     expect(after.rows.every((r) => r.serial_no !== "SN-40217")).toBe(true);
   });
@@ -255,7 +278,7 @@ describe("过滤与展开的边界", () => {
     // 同一 serial_no 插两行不同 started_at，组内多行；ended_at 留空验 count 字段语义
     await driver.insert("device_sys", "repair", { repair_no: "R-X1", serial_no: "SN-GRP", started_at: 100, ended_at: null });
     await driver.insert("device_sys", "repair", { repair_no: "R-X2", serial_no: "SN-GRP", started_at: 300, ended_at: null });
-    const { rows } = await runQuery(config, driver, {
+    const { rows } = await query(config, driver, {
       object: "repair",
       filter: { serial_no: "SN-GRP" },
       aggregate: { group_by: ["serial_no"], metrics: [{ avg: "started_at" }, { min: "started_at" }, { max: "started_at" }, { sum: "started_at" }, { count: "*" }, { count: "ended_at" }] },
@@ -277,14 +300,14 @@ describe("M8 动作的边界与补偿", () => {
   it("转化关系的展开：验收后 converted 带回自身行", async () => {
     const driver = freshDriver();
     await runAction(config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
-    const { rows } = await runQuery(config, driver, { object: "equipment", identity: "SN-40217", expand: [{ relation: "converted", properties: ["serial_no"] }] });
+    const { rows } = await query(config, driver, { object: "equipment", identity: "SN-40217", expand: [{ relation: "converted", properties: ["serial_no"] }] });
     expect(rows[0].converted).toEqual([{ serial_no: "SN-40217" }]);
   });
 
   it("条件更新未命中：读到的值被并发改掉，该条投影判失败", async () => {
     class SneakyDriver extends SqliteFixtureDriver {
       private done = false;
-      async update(connection: string, table: string, set: Record<string, unknown>, conditions: import("../server/engine/driver").Condition[]): Promise<number> {
+      async update(connection: string, table: string, set: Record<string, unknown>, conditions: import("../server/engine/infra/driver").Condition[]): Promise<number> {
         if (table === "device" && !this.done) {
           this.done = true;
           await super.update("device_sys", "device", { dept_id: "D99" }, [{ column: "serial_no", op: "eq", value: "SN-40085" }]);
@@ -359,7 +382,7 @@ describe("M8 动作的边界与补偿", () => {
     const res = await runAction(c2, driver, { action: "unregister", object: "equipment", identity: "SN-40085" });
     expect(res.ok).toBe(true);
     expect(res.projections.length).toBe(2); // purchase + device 都有行
-    expect((await runQuery(config, driver, { object: "equipment", identity: "SN-40085" })).rows.length).toBe(0);
+    expect((await query(config, driver, { object: "equipment", identity: "SN-40085" })).rows.length).toBe(0);
 
     c2.object_types.equipment.actions!.bad_delete = { effect: [{ delete: { object: "equipment" } }] };
     const bad = await runAction(c2, freshDriver(), { action: "bad_delete", object: "equipment", identity: "SN-40085" });
@@ -390,8 +413,9 @@ describe("M8 动作的边界与补偿", () => {
     expect(res.notifications?.[0].delivered).toBe(false);
     expect(res.notifications?.[0].to).toEqual(["payroll"]);
     expect(res.notifications?.[0].lines.map((l) => l.op)).toEqual(["update", "create"]);
-    expect(res.notifications?.[0].lines[1].targets).toEqual([]); // create 行的识别值是 from: generated，不重复发号
-    expect(String(res.notifications?.[0].properties.change_id)).toMatch(/^transfer_post\|P001\|\d+$/); // change_id 三项合成
+    expect(res.notifications?.[0].lines[1].target).toBeNull(); // create 行的识别值是 from: generated，不重复发号
+    expect(String(res.notifications?.[0].properties.change_id)).toMatch(/^transfer_post\|\d+\|P001\|person$/); // identity 未填：按 inform.properties 声明序拼接
+    expect(res.notifications?.[0].lines[0].line_id).toBe(`${res.notifications?.[0].properties.change_id}#1`); // 条目带 change_id 与 line_id
   });
 });
 
@@ -419,7 +443,7 @@ describe("源条目级对齐键 key", () => {
         y: { connection: "sb", table: "t2", pk: "id", key: "card_no", fields: { card_no: "card_no", v2: "v2" } },
       },
     };
-    const { rows } = await runQuery(c2, driver, { object: "employee", identity: "E1", properties: ["v1", "v2"] });
+    const { rows } = await query(c2, driver, { object: "employee", identity: "E1", properties: ["v1", "v2"] });
     expect(rows).toEqual([{ v1: "甲", v2: "乙" }]);
   });
 });
@@ -444,7 +468,7 @@ describe("表达式与发号", () => {
       action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" },
     });
     expect(res.ok).toBe(true);
-    const after = await runQuery(c2, driver, {
+    const after = await query(c2, driver, {
       object: "person", identity: "P001",
       expand: [{ relation: "appointments", properties: ["appt_no", "is_current"] }],
     });
@@ -457,7 +481,7 @@ describe("第三轮修复的回归", () => {
   it("源库脏数据不崩：脏日期串参与两属性相比按原值处理", async () => {
     const driver = freshDriver();
     await driver.insert("device_sys", "assignment", { asgn_no: "A-DIRTY", sn: "SN-X", dept_id: "D01", valid_from: "2024-13-99", valid_to: null });
-    const { rows } = await runQuery(config, driver, { object: "assignment", filter: { valid_from: { lte: { property: "valid_to" } } } });
+    const { rows } = await query(config, driver, { object: "assignment", filter: { valid_from: { lte: { property: "valid_to" } } } });
     expect(rows.length).toBe(2); // 不抛错；与「至今」比，任何值都不晚于至今
   });
 
@@ -584,7 +608,7 @@ describe("第五轮修复的回归", () => {
 
   it("派生求值中的源库故障不被误报成 422（基础设施故障原样上抛）", async () => {
     class Fault extends SqliteFixtureDriver {
-      override async select(c: string, t: string, cols: string[], conds: import("../server/engine/driver").Condition[], limit?: number) {
+      override async select(c: string, t: string, cols: string[], conds: import("../server/engine/infra/driver").Condition[], limit?: number) {
         if (c === "asset_sys") throw new Error("库宕了");
         return super.select(c, t, cols, conds, limit);
       }
@@ -592,7 +616,7 @@ describe("第五轮修复的回归", () => {
     const driver = new Fault();
     seedDemo(driver);
     // in_warranty 派生经 $link covers 查 asset_sys.warranty_card：源库故障必须原样上抛，不能包成 EngineReject
-    const err = await runQuery(config, driver, { object: "equipment", identity: "SN-40000", properties: ["in_warranty"] }).then(() => null, (e) => e);
+    const err = await query(config, driver, { object: "equipment", identity: "SN-40000", properties: ["in_warranty"] }).then(() => null, (e) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(EngineReject);
   });
@@ -601,7 +625,7 @@ describe("第五轮修复的回归", () => {
     const seen: unknown[] = [];
     class SpyMysql extends SqliteFixtureDriver {
       override readonly dialect = "mysql" as const;
-      override async select(c: string, t: string, cols: string[], conds: import("../server/engine/driver").Condition[], limit?: number) {
+      override async select(c: string, t: string, cols: string[], conds: import("../server/engine/infra/driver").Condition[], limit?: number) {
         for (const c2 of conds) seen.push(c2.value);
         return super.select(c, t, cols, conds, limit);
       }
@@ -609,19 +633,19 @@ describe("第五轮修复的回归", () => {
     const mysqlDriver = new SpyMysql();
     seedDemo(mysqlDriver);
     // 只断言绑参形态（fixture 内层是 INTEGER 秒，mysql 方言的串绑参查不到行是当然的——这里验的是下推归一）
-    await runQuery(config, mysqlDriver, { object: "assignment", filter: { valid_from: { gte: "2025-01-01" } } });
+    await query(config, mysqlDriver, { object: "assignment", filter: { valid_from: { gte: "2025-01-01" } } });
     expect(seen.some((v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v as string))).toBe(true);
     // sqlite 对照：绑定的是 Unix 秒数字
     const seen2: unknown[] = [];
     class SpySqlite extends SqliteFixtureDriver {
-      override async select(c: string, t: string, cols: string[], conds: import("../server/engine/driver").Condition[], limit?: number) {
+      override async select(c: string, t: string, cols: string[], conds: import("../server/engine/infra/driver").Condition[], limit?: number) {
         for (const c2 of conds) seen2.push(c2.value);
         return super.select(c, t, cols, conds, limit);
       }
     }
     const liteDriver = new SpySqlite();
     seedDemo(liteDriver);
-    await runQuery(config, liteDriver, { object: "assignment", filter: { valid_from: { gte: "2025-01-01" } } });
+    await query(config, liteDriver, { object: "assignment", filter: { valid_from: { gte: "2025-01-01" } } });
     expect(seen2.some((v) => typeof v === "number")).toBe(true);
   });
 
@@ -639,7 +663,7 @@ describe("第五轮修复的回归", () => {
     d.fail = false;
     const retry = await runAction(config, d, { action: "convert", object: "equipment", identity: "SN-40217" });
     expect(retry.ok).toBe(true);
-    const cards = await runQuery(config, d, { object: "warranty_card", filter: { serial_no: "SN-40217" } });
+    const cards = await query(config, d, { object: "warranty_card", filter: { serial_no: "SN-40217" } });
     expect(cards.rows.length).toBe(1); // 不是两张
   });
 
@@ -662,7 +686,7 @@ describe("第五轮修复的回归", () => {
     const driver = freshDriver();
     await runAction(config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
     await expect(
-      runQuery(config, driver, {
+      query(config, driver, {
         object: "equipment",
         identity: "SN-40217",
         expand: [{ relation: "converted", properties: ["serial_no"], expand: [{ relation: "belongs_to" }] }],

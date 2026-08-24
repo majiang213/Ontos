@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { join } from "node:path";
 import { cleanupRuntime, setupRuntime } from "./helpers";
-import { Verdict } from "../server/engine/verdict";
+import { Verdict } from "../server/engine/adjudication/verdict";
 
 let tmp: string;
 
@@ -54,7 +54,7 @@ describe("错误分层：400 / 422 / 500", () => {
     expect((await post("query", "not json")).status).toBe(400);
     expect((await post("query", JSON.stringify({ object: "ghost" }))).status).toBe(422);
     // 注入一个必炸的驱动顶替 purchase_sys：引擎故障落 500，不是 422
-    const { getDriverRegistry } = await import("../server/engine/load");
+    const { getDriverRegistry } = await import("../server/engine/infra/load");
     (await getDriverRegistry(TEST)).register("purchase_sys", {
       select: async () => { throw new Error("库炸了"); },
       insert: async () => {},
@@ -67,21 +67,21 @@ describe("错误分层：400 / 422 / 500", () => {
   });
 
   it("decisions：自配对 400；同源对 422", async () => {
-    expect((await post("decisions", JSON.stringify({ class_a: "equipment", class_b: "equipment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(400);
+    expect((await post("decide", JSON.stringify({ class_a: "equipment", class_b: "equipment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(400);
     // repair 与 assignment 都来自 device_sys：同源，不是跨源候选对
-    expect((await post("decisions", JSON.stringify({ class_a: "repair", class_b: "assignment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(422);
+    expect((await post("decide", JSON.stringify({ class_a: "repair", class_b: "assignment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(422);
   });
 
   it("overlap：自配对 400", async () => {
-    expect((await post("overlap", JSON.stringify({ class_a: "equipment", class_b: "equipment" }), undefined, TEST)).status).toBe(400);
+    expect((await post("compute_overlap", JSON.stringify({ class_a: "equipment", class_b: "equipment" }), undefined, TEST)).status).toBe(400);
   });
 
   it("overlap：无源类 422（幻影 rate 不产）；同源对 422（不全列扫）", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源
-    expect((await post("overlap", JSON.stringify({ class_a: "equipment", class_b: "vendor" }), undefined, TEST)).status).toBe(422);
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源
+    expect((await post("compute_overlap", JSON.stringify({ class_a: "equipment", class_b: "vendor" }), undefined, TEST)).status).toBe(422);
     // repair 与 assignment 都来自 device_sys：同源不算疑似重复
-    expect((await post("overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }), undefined, TEST)).status).toBe(422);
+    expect((await post("compute_overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }), undefined, TEST)).status).toBe(422);
   });
 
   it("connections：相对路径 sqlite 按运行态 cwd 解析（不读 process.cwd）", async () => {
@@ -94,9 +94,20 @@ describe("错误分层：400 / 422 / 500", () => {
   });
 });
 
+describe("查询留痕", () => {
+  it("log_query 落 query_json 原文（不是函数序列化出来的空）", async () => {
+    const body = { object: "equipment", properties: ["name"], filter: { status: "in_transit" } };
+    expect((await post("query", JSON.stringify(body), undefined, TEST)).status).toBe(200);
+    const meta = (await import("../server/meta/store")).metaStore();
+    const logs = await meta.listQueryLogs(TEST);
+    expect(logs.length).toBe(1);
+    expect(JSON.parse(logs[0].query_json as string)).toEqual(body);
+  });
+});
+
 describe("GET /api/ontology：rev + ETag 监视器口径", () => {
   it("200 带 rev/ETag/no-store；If-None-Match 命中回 304（也带 no-store）；内容变后旧 ETag 失效", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     const r1 = await get("ontology", undefined, TEST);
     expect(r1.status).toBe(200);
     expect(r1.data.rev).toBe(s.getRev(TEST));
@@ -109,7 +120,7 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
     expect(r2.headers.get("cache-control")).toBe("no-store");
     expect(r2.headers.get("etag")).toBe(etag);
     // 写一步之后 rev +1，旧 ETag 不再命中
-    await s.applyOp({ op: "create_object", name: "vendor", kind: "thing" }, TEST);
+    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST);
     const r3 = await get("ontology", { "if-none-match": etag! }, TEST);
     expect(r3.status).toBe(200);
     expect(r3.data.rev).toBe(s.getRev(TEST));
@@ -117,22 +128,22 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
   });
 
   it("action_changes：未动过动作时三数组全空；新增/同名改内容/删除各就各位", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     const r1 = await get("ontology", undefined, TEST);
     expect(r1.data.action_changes).toEqual({ added: [], overwritten: [], removed: [] }); // 种子有 convert 等动作，但没改就不算
     const def = { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
-    await s.applyOp({ op: "set_action", object: "equipment", name: "rename", def }, TEST);
+    await s.applyDraft({ op: "set_action", object: "equipment", name: "rename", def }, TEST);
     const convertDef = structuredClone((await s.getDraft(TEST)).draft.object_types.equipment.actions!.convert);
     convertDef.description = "改过的验收入库";
-    await s.applyOp({ op: "set_action", object: "equipment", name: "convert", def: convertDef }, TEST);
-    await s.applyOp({ op: "remove_action", object: "equipment", name: "scrap" }, TEST);
+    await s.applyDraft({ op: "set_action", object: "equipment", name: "convert", def: convertDef }, TEST);
+    await s.applyDraft({ op: "remove_action", object: "equipment", name: "scrap" }, TEST);
     const r2 = await get("ontology", undefined, TEST);
     expect(r2.data.action_changes.added).toEqual(["equipment.rename"]);
     expect(r2.data.action_changes.overwritten).toEqual(["equipment.convert"]);
     expect(r2.data.action_changes.removed).toEqual(["equipment.scrap"]);
     // 同名同内容写回不算 overwritten
     const seed = structuredClone((await s.getPublished(TEST)).config.object_types.equipment.actions!.transfer);
-    await s.applyOp({ op: "set_action", object: "equipment", name: "transfer", def: seed }, TEST);
+    await s.applyDraft({ op: "set_action", object: "equipment", name: "transfer", def: seed }, TEST);
     const r3 = await get("ontology", undefined, TEST);
     expect(r3.data.action_changes.overwritten).not.toContain("equipment.transfer");
   });
@@ -140,13 +151,13 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
 
 describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   it("「同一」合并两个跨源类，留痕带证据；草稿可直接发布", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     // 造一对跨源候选：采购视角的 po_a × 设备视角的 po_b（不同名识别字段）
-    await s.applyOp({ op: "import_objects", objects: {
+    await s.applyDraft({ op: "import_objects", objects: {
       po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
       po_b: { kind: "thing", identity: "serial_no", properties: { serial_no: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { serial_no: "serial_no" } } } },
     } }, TEST);
-    const r = await post("decisions", JSON.stringify({
+    const r = await post("decide", JSON.stringify({
       class_a: "po_a", class_b: "po_b", verdict: Verdict.Same,
       evidence: { norm_rule: "serial", count_a: 121, count_b: 100, count_hit: 40, rate: 0.33 },
     }), undefined, TEST);
@@ -161,18 +172,18 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
     expect(dec.evidence?.count_hit).toBe(40);
     expect(dec.version).toBeNull();
     // 发布后回填版本
-    await s.publishDraft(TEST);
+    await s.publish(TEST);
     expect((await meta.listDecisions(TEST))[0].version).toBe(2);
   });
 
   it("裁决被校验闸回退时不留幻影记录", async () => {
-    const s = await import("../server/engine/configStore");
-    await s.applyOp({ op: "import_objects", objects: {
+    const s = await import("../server/engine/config/configStore");
+    await s.applyDraft({ op: "import_objects", objects: {
       po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, status: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", status: "sn" } } } },
       po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no" } } } },
     } }, TEST);
     // po_a 已有 status 属性，「阶段」裁决撞名 → 422，且不留痕
-    const r = await post("decisions", JSON.stringify({ class_a: "po_a", class_b: "po_b", verdict: Verdict.Stage, stage_names: { from: "在途", to: "在役" } }), undefined, TEST);
+    const r = await post("decide", JSON.stringify({ class_a: "po_a", class_b: "po_b", verdict: Verdict.Stage, stage_names: { from: "在途", to: "在役" } }), undefined, TEST);
     expect(r.status).toBe(422);
     const meta = (await import("../server/meta/store")).metaStore();
     expect((await meta.listDecisions(TEST)).length).toBe(0);
@@ -180,9 +191,9 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   });
 
   it("「跳过」不动草稿但留痕", async () => {
-    const s = await import("../server/engine/configStore");
+    const s = await import("../server/engine/config/configStore");
     const before = JSON.stringify((await s.getDraft(TEST)).draft);
-    const r = await post("decisions", JSON.stringify({ class_a: "equipment", class_b: "person", verdict: Verdict.Skip }), undefined, TEST);
+    const r = await post("decide", JSON.stringify({ class_a: "equipment", class_b: "person", verdict: Verdict.Skip }), undefined, TEST);
     expect(r.status).toBe(200);
     expect(JSON.stringify((await s.getDraft(TEST)).draft)).toBe(before);
     expect((await s.getDraft(TEST)).dirty).toBe(false);

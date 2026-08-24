@@ -2,9 +2,9 @@
 // 顺序：找动作 → 读个体 → 核前置 → 定效应 → 校公理 → 按写回逐条投影 → 留痕。
 // 跨库没有分布式事务：已成功的投影不回滚，失败条目进结果；补偿是重发同一动作。
 
-import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../schema/config";
-import type { ActionRequest } from "../schema/request";
-import { dialectFor, toColumnValue, type SourceDriver } from "./driver";
+import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../../schema/config";
+import type { ActionRequest } from "../../schema/request";
+import { dialectFor, toColumnValue, type SourceDriver } from "../infra/driver";
 import {
   assertFilterShapes,
   createEnv,
@@ -19,8 +19,8 @@ import {
   type Cls,
   type Env,
   type Individual,
-} from "./individual";
-import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "./expr";
+} from "../query/individual";
+import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "../query/expr";
 
 export interface ProjectionRecord {
   source: string;
@@ -40,11 +40,18 @@ export interface ActionResult {
 }
 
 /** 告知（inform）本期预留：引擎生成变更事件但不外发，随结果返回，不静默丢弃。 */
+export interface NotificationLine {
+  op: string;
+  object_class: string;
+  target: string | null;
+  change_id?: string;
+  line_id?: string;
+}
 export interface NotificationRecord {
   object: string;
   to: string[];
   properties: Record<string, unknown>;
-  lines: { op: string; object: string; targets: string[] }[];
+  lines: NotificationLine[];
   delivered: false;
   note: string;
 }
@@ -151,7 +158,7 @@ export async function runAction(
   // 第 10 步：告知本期预留——生成变更事件随结果返回，不外发
   let notifications: NotificationRecord[] = [];
   try {
-    notifications = buildNotifications(action, plan, req, ctx, projections);
+    notifications = buildNotifications(config, action, plan, req, ctx, projections);
   } catch (e) {
     notifications = [{ object: "-", to: [], properties: {}, lines: [], delivered: false, note: `变更事件生成失败：${err(e)}` }];
   }
@@ -160,6 +167,7 @@ export async function runAction(
 
 /** 变更事件按效应列表逐项生成条目。create 的 target 取解析出的识别值（from: generated 的不重复发号）。 */
 function buildNotifications(
+  config: OntologyConfig,
   action: ActionDef,
   plan: Planned[],
   req: ActionRequest,
@@ -169,28 +177,32 @@ function buildNotifications(
   const anyFail = projections.some((r) => !r.ok);
   return (action.inform ?? []).map((inf) => {
     const properties = Object.fromEntries(Object.entries(inf.properties).map(([prop, spec]) => [prop, resolveValue(spec, prop, ctx)]));
-    // change_id 由 action + subject + occurred_at 合成（§6.5）
-    if (properties.action != null && properties.subject != null && properties.occurred_at != null) {
-      properties.change_id = `${properties.action}|${properties.subject}|${properties.occurred_at}`;
+    // 事件 identity 不靠属性名约定：properties 没填事件类的 identity 时，把全部已解析值按声明顺序用 | 拼接（附录 B）
+    const idProp = config.object_types[inf.object]?.identity;
+    if (idProp && properties[idProp] == null) {
+      const vals = Object.values(properties);
+      if (vals.length > 0 && vals.every((v) => v != null)) properties[idProp] = vals.map(String).join("|");
     }
+    const changeId = idProp ? properties[idProp] : undefined;
+    // 条目：效应逐项、项内每个目标个体各一条，带 op / object_class / target；能拿到 change_id 就补 change_id 与 line_id（change_id#序号）
+    const lines: NotificationLine[] = plan.flatMap((p): NotificationLine[] => {
+      if (p.kind === "create") {
+        const idPropOfCls = p.cls.def.identity;
+        const spec = idPropOfCls ? p.propSpec[idPropOfCls] : undefined;
+        const resolvable = spec !== undefined && !(typeof spec === "object" && spec !== null && (spec as Record<string, unknown>).from === "generated");
+        const v = resolvable ? resolveValue(spec, idPropOfCls!, ctx) : null;
+        return [{ op: p.kind, object_class: p.cls.name, target: v == null ? null : String(v) }];
+      }
+      const keys = p.kind === "link" ? [String(req.identity)] : p.targets.map((t) => t.key);
+      return keys.map((k) => ({ op: p.kind, object_class: p.kind === "link" ? req.object : p.cls.name, target: k }));
+    });
     return {
       object: inf.object,
       to: inf.to,
       properties,
-      lines: plan.map((p) => {
-        if (p.kind === "create") {
-          const idProp = p.cls.def.identity;
-          const spec = idProp ? p.propSpec[idProp] : undefined;
-          const resolvable = spec !== undefined && !(typeof spec === "object" && spec !== null && (spec as Record<string, unknown>).from === "generated");
-          const v = resolvable ? resolveValue(spec, idProp!, ctx) : null;
-          return { op: p.kind, object: p.cls.name, targets: v == null ? [] : [String(v)] };
-        }
-        return {
-          op: p.kind,
-          object: p.kind === "link" ? req.object : p.cls.name,
-          targets: p.kind === "link" ? [String(req.identity)] : p.targets.map((t) => t.key),
-        };
-      }),
+      lines: lines.map((l, i) =>
+        changeId == null ? l : { ...l, change_id: String(changeId), line_id: `${changeId}#${i + 1}` }
+      ),
       delivered: false,
       note: anyFail
         ? "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）"

@@ -122,6 +122,22 @@ object_types:
                 name: { from: request }
                 dept: { from: request }
                 serial_no: { from: identity }  # 序列号=请求顶上的 identity
+      register_assignment:
+        description: 登记履历                      # 对一台全新设备登记第一条履历
+        pre:
+          $exists: false                       # 各源都还没有这个序列号
+          $request:
+            valid_from: { lte: { property: valid_to, from: request } }  # 生效日不晚于失效日；不读源
+            dept_id: { object: department }    # request.dept_id 必须能认到已有部门
+        effect:
+          - create:
+              object: assignment
+              properties:
+                asgn_no: { from: generated }   # 履历编号按 generate 发出，编号里含设备序列号
+                serial_no: { from: identity }  # 设备序列号=请求顶上的 identity
+                dept_id: { from: request }
+                valid_from: { from: request }
+                valid_to: { from: request }
       finish_repair:
         description: 结束维修
         pre:
@@ -301,7 +317,7 @@ object_types:
           - object: change
             to: [payroll]
             properties:
-              action: { from: action }
+              action_name: { from: action }
               occurred_at: now
               subject: { from: identity }
               subject_class: { from: object }
@@ -357,12 +373,12 @@ object_types:
   change:
     description: 变更                            # 一次动作做完后的那包变更
     kind: event
-    identity: change_id                         # 由 action、subject、occurred_at 合成
+    identity: change_id                         # inform 没给时，按 inform.properties 的值声明序拼接
     properties:
       change_id:
         type: string
         description: 变更编号
-      action:
+      action_name:
         type: string
         description: 动作名                      # inform：{ from: action }
       occurred_at:
@@ -390,7 +406,7 @@ object_types:
         type: enum
         values: [update, create, delete, link]
         description: 操作种类，与效应相同
-      object:
+      object_class:
         type: string
         description: 被操作个体的类名
       target:

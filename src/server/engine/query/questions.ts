@@ -1,13 +1,14 @@
 // 验收问题集跑批 —— 逐条经 LLM 槽位编译后交引擎执行，失败分阶段记：
 //   编译失败（模型没产出结构化查询）/ 执行出错（本体或映射有误）/ 答案不符（查出来了但对不上期望）。
 // 答错即本体或映射有误，回画布改对象或来源映射再跑；失败原因落 detail，界面点开能看。
+// target=draft 时对当前草稿试跑：用工作副本的配置，结果不落验收记录（草稿没有版本可锚）。
 // 路由只做解析与错误阶梯，跑批逻辑收在这里（薄路由）。
 
-import { runQuery } from "./query";
-import { getSlot, type LlmSlot } from "./llmSlot";
-import { getDriverRegistry } from "./load";
-import { getPublished } from "./configStore";
-import { metaStore } from "../meta/store";
+import { query } from "./query";
+import { getSlot, type LlmSlot } from "../llmSlot";
+import { getDriverRegistry } from "../infra/load";
+import { getDraft, getPublished } from "../config/configStore";
+import { metaStore } from "../../meta/store";
 
 /** 期望结果的合法写法：留空（能查出就算过）/ 纯数字（比对行数）/ 字段=值（至少一行对上）。 */
 export type Expected = { kind: "any" } | { kind: "rows"; n: number } | { kind: "cell"; field: string; value: string };
@@ -44,9 +45,11 @@ export interface QuestionRunResult {
   detail: string;
 }
 
-/** 跑批：全量；onlyId 给了就只跑那一条。slot 可注入假实现（测试用），缺省按环境选（无 key 走离线回退）。 */
-export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: LlmSlot } = {}): Promise<{ results: QuestionRunResult[]; version: number }> {
-  const { config, version } = await getPublished(ws);
+/** 跑批：全量；onlyId 给了就只跑那一条。target=draft 对当前草稿试跑，状态不落库、版本返回 null。
+ *  slot 可注入假实现（测试用），缺省按环境选（无 key 走离线回退）。 */
+export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: LlmSlot; target?: "published" | "draft" } = {}): Promise<{ results: QuestionRunResult[]; version: number | null }> {
+  const draft = opts.target === "draft";
+  const { config, version } = draft ? { config: (await getDraft(ws)).draft, version: null } : await getPublished(ws);
   const slot = opts.slot ?? getSlot();
   const registry = await getDriverRegistry(ws);
   const all = await metaStore().listQuestions(ws);
@@ -56,9 +59,9 @@ export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: L
     let status = "通过";
     let detail = "";
     try {
-      const query = await slot.nlToQuery(q.question, config);
+      const parsed = await slot.nlToQuery(q.question, config);
       try {
-        const { rows } = await runQuery(config, registry, query);
+        const { rows } = await query(config, registry, parsed);
         const bad = checkExpected(q.expected, rows);
         if (bad) {
           status = "答案不符";
@@ -72,7 +75,7 @@ export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: L
       status = "编译失败";
       detail = e instanceof Error ? e.message : String(e);
     }
-    await metaStore().setQuestionStatus(ws, q.id, status, version, detail || undefined);
+    if (!draft) await metaStore().setQuestionStatus(ws, q.id, status, version ?? undefined, detail || undefined); // 试跑不碰验收记录
     results.push({ id: q.id, question: q.question, status, detail });
   }
   return { results, version };
