@@ -131,7 +131,7 @@ _UI 说法_：交集率（配一句"两库同一批人的比例"级注解）。
 _UI 说法_：统一格式。_Avoid_：normalize 直出
 
 **三层证据链** 🔴：
-LLM 建议（软）→ 数据交集率（硬）→ 人工裁决+业务测试问题集（定案）。合并判错类型比不合并更糟。
+LLM 建议（软）→ 数据交集率（硬）→ 人工裁决（定案）。合并判错类型比不合并更糟。验收问题集不参与裁决：它是核对本体的验收基准，对已发布版本或当前草稿都能跑批（草稿试跑不落验收记录）。
 
 **上位对象** 🔴：
 ②的产物：承载公共属性的父对象，各源对象只留特有属性。
@@ -176,6 +176,29 @@ _UI 说法_：取数路径。
 内省（→读取表结构）、出码（→生成）、正向生成器、动力层/语义层、Ontology-as-Code、落地（→落库/保存）、golden record、CDC、物化。
 这些可以留在代码注释、设计文档和本文件里。
 
+## 入口对照（同一动作在各层的名字）
+
+同一个业务动作在 UI、路由、引擎、MCP 各层叫法不同，排查时按本表对，不要脑内翻译。UI 列是白话（用户看得见），其余列是工程词（代码符号）。
+
+| 业务动作 | UI | HTTP 路由 | 引擎 | MCP 工具 |
+|---|---|---|---|---|
+| 生成对象（一键 = 建议+落地） | 「生成对象」 | `/api/generate_objects` | `proposeObjects` + `import_objects` | `propose_objects`（只建议不落地）+ `apply_draft`（落地） |
+| 表结构 | 「表结构」抽屉 | `/api/list_tables` | `resolveTableInfos` | `list_tables` |
+| 疑似重复 | 「疑似重复」 | `/api/list_candidates` | `listCandidates`（建议原语 `proposePairs`） | 无（关卡在人） |
+| 交集率 | 「算一算交集率」 | `/api/compute_overlap` | `computeOverlap`（底层算率 `overlapRate`） | 无（关卡在人） |
+| 裁决 | 「同一/部分重叠/阶段…」 | `/api/decide` | `decide` → `applyVerdict` | 无（关卡在人） |
+| 发布 / 放弃 | 「发布 vN+1」「放弃」 | `/api/publish` | `publish` / `discard` | 无（关卡在人） |
+| 画布编辑 | 对象卡、连线 | `/api/apply_draft` | `applyDraft`，18 个 op（`create_object`、`set_action`…） | `apply_draft`（吃同一批 op） |
+| 问数 | 问题集「全量跑一遍」 | `/api/questions`、`/api/query` | `nlToQuery` + `query` | `query`（入参已是结构化查询，Ontos 不编） |
+| 动作执行 | 无（站外 Agent 驱动） | — | `runAction` | `run_action` |
+
+五条纪律：
+- 同名同义才许同名：路由、引擎、MCP 三层同一个名字指同一个行为；行为不同（如 `propose_objects` 只建议、`generate_objects` 建议+落地）必须不同名。
+- 通道与载荷分开：`apply_draft` 是通道（路由、引擎、MCP 同名），18 个 op 是载荷——op 名在页面内部调用和 MCP 入参里是同一个词。
+- 页面暴露任务层（一个按钮一个动作），MCP 暴露 op 层——粒度不同是设计，不是遗漏。裁决、发布、交集率没有 MCP 工具是刻意的：关卡留给人。
+- 新加入口时词干从本表已有工程词里取，不另造。只建议不落地的工具一律 `propose_` 前缀（`propose_objects` / `propose_action`）。
+- 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
+
 ## 本体论要素 × 落地（附录对照，写代码按此表）
 
 | 要素 | 现状 |
@@ -188,7 +211,7 @@ _UI 说法_：取数路径。
 | ④子类型 / `parent` | **未做**（V2） |
 | 事物 vs 事件 `kind` | **字段有**，未约束 |
 | 部分—整体 | **未做** |
-| 公理 / 谓词 / 动作 | 动作 **已落地**（`engine/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词 **未做** |
+| 公理 / 谓词 / 动作 | 动作 **已落地**（`engine/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词 **未做**。导入落草稿时每类自动补一条 `set_fields`（按 identity 认人、写字段，唯一键与派生属性不可写，无可写字段不生成；字段改名/删除、部分重叠上移时级联跟随）；转化动作由阶段裁决自动立（`convert_to_<晚阶段>`）；业务动作经 `set_action` 由人/Agent 写 |
 | 推理机 / OWL | **未做** |
 
 ## 写与 Agent（实现时按此，详见设计文档 §8）

@@ -22,7 +22,7 @@ description: 通过 MCP 在 Ontos 本体画布的工作副本（草稿）里编�
 |---|---|---|
 | `list_classes` | 列草稿里的类（顺带拿 `outlets`——inform 的合法出站名列表） | `{ space: "draft" }` |
 | `read_class` | 读草稿里一个类的完整动作定义（`actions[].def` 原样，可读回-改-写回）与关系 | `{ name, space: "draft" }` |
-| `propose_action` | 对某个类产一条动作建议（不落地）。**一律传 `space: "draft"`**——缺省读已发布，对草稿类会空转 | `{ object, space: "draft" }` |
+| `propose_action` | 对某个类产一条动作建议（不落地）。返回 `{ name, action }`。**一律传 `space: "draft"`**——缺省读已发布，对草稿类会空转 | `{ object, space: "draft" }` |
 | `apply_draft` | 落地动作定义（op 只用 `set_action` / `remove_action`），必带 `base_rev` | `{ op, ...，base_rev }` |
 
 发现类工具必须传 `space: "draft"`。`apply_draft` 不接受 `space`。
@@ -30,7 +30,7 @@ description: 通过 MCP 在 Ontos 本体画布的工作副本（草稿）里编�
 ## 方法论（四步）：看现有动作 → 取模板或读回 def → 完善 → 落地请人发布
 
 1. **发现**：`list_classes { space: "draft" }`（拿 `rev` 与 `outlets`）→ `read_class { name, space: "draft" }` 看该类现有动作（完整定义）与关系。
-2. **组装**：`propose_action { object, space: "draft" }` 拿模板——类上已有转化关系时它只给转化模板，改属性动作要按下面的骨架自己拼。把模板里的占位键（如「属性名」）替换成真实属性名、补前置，作为 `set_action.def`。**要改现有动作**：从 `read_class` 的 `actions[].def` 读回完整定义，改完塞回 `set_action.def`（同名覆盖）——不要盲覆盖。**要删**：`remove_action`。
+2. **组装**：`propose_action { object, space: "draft" }` 拿模板——返回 `{ name, action }`，`action` 直接作 `set_action.def`。类上已有转化关系时给 `convert_to_<晚阶段>` 转化模板，否则给 `set_fields` 骨架（属性已从类定义接好，与导入时自动生成的那条同形同名）。带前置的业务动作（调拨、报废）在这个骨架上补前置、调效应。**要改现有动作**：从 `read_class` 的 `actions[].def` 读回完整定义，改完塞回 `set_action.def`（同名覆盖）——不要盲覆盖。**要删**：`remove_action`。
 3. **应用**：`apply_draft { op: "set_action", object, name, def, base_rev }`。失败读 `-32000` 的 message 修 `def` 再发；「草稿已变」就重新拿 `rev`。
 4. **停下**：告诉人「草稿已改，画布上该类的动作区会显示新动作、发布条会点名变化；生效请点发布」。
 

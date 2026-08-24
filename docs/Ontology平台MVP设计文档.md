@@ -459,7 +459,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 **循环分三种，只禁一种。** 禁止的是模型自转的 ReAct 循环：建模没有即时反馈信号，数据库不会告诉模型建错了，模型自己判自己对错只会漂移；每次循环走的路径不同，标注库回归就没法跑；循环的中间产物没人读，裁决权也就丢了。要保留的是人驱动的再生成，以及确定性流水线里嵌多个模型槽位：表多了逐批产类，由代码做确定性合并，再产关系建议与动作草稿——下一步走什么由代码决定，停不停由人决定，模型只在槽位里填空。槽位再多也落在「写出配置」这一个用途里；模型的另一个用途是把自然语言编成查询或写入请求，两个用途之外没有模型。真想要 agent 式探索，循环放在 Ontos 之外，由外部 Agent 驱动，Ontos 内部永远保持确定性。
 
-**入口两个，内核同一套**：画布点「生成对象」走后端 `generateObject`；Claude Code 等外部 Agent 经 MCP 调 `propose_ontology` / `propose_action` / `query` / `run_action`。
+**入口两个，内核同一套**：画布点「生成对象」走后端 `generateObject`；Claude Code 等外部 Agent 经 MCP 调 `propose_objects` / `propose_action` / `query` / `run_action`。
 
 **持久化与即用即弃**：本体、映射、动作定义、`log_query`、`log_action` 持久化；每次执行编出的 SQL 即用即弃；业务行留在原库。
 

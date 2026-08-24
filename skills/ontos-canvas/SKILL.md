@@ -33,18 +33,18 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 | 工具 | 用途 | 入参 |
 |---|---|---|
 | `list_tables` | 列出已连接库里的表和列（只读列定义，没有采样行） | `{ connection? }` |
-| `propose_ontology` | 对选中的表产对象建议（**不落到画布**） | `{ tables: [{ connection, table }] }` |
+| `propose_objects` | 对选中的表产对象建议（**不落到画布**） | `{ tables: [{ connection, table }] }` |
 | `list_classes` | 列草稿里的类（带 `state` / `dirty` / `rev` / `outlets`） | `{ space: "draft" }` |
 | `read_class` | 读草稿里一个类的字段、关系、来源对照、能不能整份替换（`replaceable` / `replace_blockers`） | `{ name, space: "draft" }` |
 | `search` | 在草稿的类名、说明、关系名里检索 | `{ text, space: "draft" }` |
 | `apply_draft` | 改草稿，一次只改一步 | `{ op, ...，必带 base_rev }` |
 
-**发现类工具必须传 `space: "draft"`**——缺省读已发布，你会看不见人还没发布的改动，也会盖掉它们。`list_tables` / `propose_ontology` / `apply_draft` **不接受** `space`（传了 `-32602`）。
+**发现类工具必须传 `space: "draft"`**——缺省读已发布，你会看不见人还没发布的改动，也会盖掉它们。`list_tables` / `propose_objects` / `apply_draft` **不接受** `space`（传了 `-32602`）。
 
 ## 方法论（四步）：发现草稿 → 组装 op → 应用 → 停下请人发布
 
 1. **发现（草稿）**：`list_classes { space: "draft" }` 拿类清单和 **`rev`**；`read_class { name, space: "draft" }` 看字段与来源对照。需要表名时用 `list_tables`，不要编连接名。`query` 读的是已发布快照，**不能当画布真相**。
-2. **组装**：严格按下表拼**一条** op。从某张表建新对象：先 `propose_ontology`（不落地），检查类名是否已在草稿里。
+2. **组装**：严格按下表拼**一条** op。从某张表建新对象：先 `propose_objects`（不落地），检查类名是否已在草稿里。
 3. **应用**：`apply_draft`，带上刚读到的 `rev` 作为 `base_rev`。`-32000` 说「草稿已变」就是 rev 过期——重新 `list_classes { space: "draft" }` 拿新 `rev` 再发；别的 `-32000` 读 message 修 op 再发。**同一个错误不要原样重发。**
 4. **停下**：告诉人「草稿已改，请到画布上看；要问数/动作生效，请在画布上点发布」。新建了跨源对象时，请人点「疑似重复」做裁决。**不要**寻找发布、放弃、裁决、回滚工具——没有这些工具。
 
@@ -64,12 +64,12 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 | `import_objects` | `{ objects: { 类名: 类体 } }` | 整批导入新类；撞名整批拒。类体里的 `actions` / `axioms` 会被剥掉（动作走 `ontos-action`） |
 | `replace_object` | `{ name, def: 类体 }` | 整份替换**未锁定**的类；关系与摆位保留 |
 
-`replace_object` 的 `def` **只**取 `propose_ontology` 返回的 `object_types[类名]`（单个类体，不是整张 map）。禁止把 `read_class` 的返回塞回去（那是视图，形状不合法）。锁定规则（`read_class` 的 `replace_blockers` 会列出来）：已经发布过 / 含派生字段 / 含动作 / 含公理 / 挂了多个来源 / 有来源且含未对照到表列的字段——命中一条就拒，改走 `add_property` 等逐步操作。
+`replace_object` 的 `def` **只**取 `propose_objects` 返回的 `object_types[类名]`（单个类体，不是整张 map）。禁止把 `read_class` 的返回塞回去（那是视图，形状不合法）。锁定规则（`read_class` 的 `replace_blockers` 会列出来）：已经发布过 / 含派生字段 / 含动作 / 含公理 / 挂了多个来源 / 有来源且含未对照到表列的字段——命中一条就拒，改走 `add_property` 等逐步操作。
 
 落地建议的分支（不要发明第三条路）：
 
 ```
-propose_ontology 得到 object_types
+propose_objects 得到 object_types
   ├─ 草稿里没有这个类名 → apply_draft import_objects
   └─ 草稿里已有这个类名 → read_class 看 replaceable
        ├─ true  → apply_draft replace_object（def = object_types 里那个类体）
@@ -85,5 +85,5 @@ propose_ontology 得到 object_types
 4. 不对已锁定类（含已经发布过的类）`delete_object` 再 `import_objects` 来绕过锁定（会拆关系）。引擎不拦这条路，靠这条红线和人点发布/放弃。
 5. 不调用、不臆造 `publish` / `discard` / `decide` / `rollback` / `generate` / `save_layout` 工具。摆位（节点位置）不归你写。
 6. 不编造类名、字段名、连接名、表名——拿不准就 `list_classes space=draft` / `list_tables`。
-7. `query` / `run_action` / `propose_ontology` / `apply_draft` / `list_tables` 不要传 `space`。
+7. `query` / `run_action` / `propose_objects` / `apply_draft` / `list_tables` 不要传 `space`。
 8. 同一次会话里 `initialize` 只做一次；`notifications/*` 等不到响应是正常的。

@@ -90,7 +90,7 @@ src/
 
 四条主线：
 
-- **建模流**：画布操作 → `POST /api/draft` 写工作副本 → `publish` 走 `validate` 校验 → `configStore` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 也能经 MCP 的 `apply_draft` 写工作副本（带 `base_rev` 防盖写），开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
+- **建模流**：画布操作 → `POST /api/apply_draft` 写工作副本 → `publish` 走 `validate` 校验 → `configStore` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 也能经 MCP 的 `apply_draft` 写工作副本（带 `base_rev` 防盖写），开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
 - **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/questions`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
 - **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具（用法见 `skills/ontos-action-run/SKILL.md`）→ `engine/action` 核前置、定效应、按 `project` 写回源库并留痕。
 - **边界**：业务数据永不进平台，引擎只在内存拼装；`src/server/config` 里只有本体模板和平台自己的元库。
@@ -104,15 +104,15 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
 | `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码）、保存（先测连通再落库）、删除 | `forms.tsx`（仅 POST） |
-| `/api/introspect` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释） + 3 行脱敏采样，源表只读 | `CanvasPage.tsx`（两处） |
+| `/api/list_tables` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释） + 3 行脱敏采样，源表只读 | `CanvasPage.tsx`（两处） |
 
 ### 本体构建（画布页）
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/generate` POST | 逆向建模：选中的表 → 内省 → LLM 产草稿 → 对象以草稿态上画布 | `CanvasPage.tsx` |
+| `/api/generate_objects` POST | 逆向建模：选中的表 → 内省 → LLM 产草稿 → 对象以草稿态上画布，每个新类自动带一条 `set_fields` 动作 | `CanvasPage.tsx` |
 | `/api/ontology` GET | 本体视图：画布读工作副本，`states` 标出新增/改过/一致；带 `rev` 与 `action_changes`（动作差集），支持 ETag/304——画布每 2 秒轮询它当监视器 | `CanvasPage.tsx` |
-| `/api/draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx` |
+| `/api/apply_draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx` |
 | `/api/publish` POST/DELETE | 发布草稿（升版本、立即可查）/ 放弃草稿回退到已发布快照 | `CanvasPage.tsx` |
 | `/api/versions` GET/POST | 版本历史列表 / 把指定版覆盖到当前工作副本（不插入新版本） | `CanvasPage.tsx` |
 
@@ -120,15 +120,15 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/candidates` GET | 候选对：已上画布对象之间找跨源候选配对，附倾向与依据 | `CanvasPage.tsx` |
-| `/api/overlap` POST | 交集率：归一化后算两类识别字段的集合重合度，只读采样 | `PairCard.tsx` |
-| `/api/decisions` POST | 裁决：人对候选对定案（五种结论），写草稿 + 留痕（含证据快照） | `PairCard.tsx` |
+| `/api/list_candidates` GET | 候选对：已上画布对象之间找跨源候选配对，附倾向与依据 | `CanvasPage.tsx` |
+| `/api/compute_overlap` POST | 交集率：归一化后算两类识别字段的集合重合度，只读采样 | `PairCard.tsx` |
+| `/api/decide` POST | 裁决：人对候选对定案（五种结论），写草稿 + 留痕（含证据快照） | `PairCard.tsx` |
 
 ### 问数与动作（对外执行入口，前端不调）
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/mcp` POST | MCP 端点：JSON-RPC 2.0，外部 Agent 调 Ontos 工具（initialize / tools/list / tools/call）；九个工具：query / run_action / propose_ontology / propose_action / list_classes / read_class / search / list_tables / apply_draft。发现类工具可选 `space: "draft"` 读工作副本（缺省已发布）；`apply_draft` 写工作副本（必带 `base_rev`）。用法见 `skills/` 四个目录 | 无——外部 Agent 用 |
+| `/api/mcp` POST | MCP 端点：JSON-RPC 2.0，外部 Agent 调 Ontos 工具（initialize / tools/list / tools/call）；九个工具：query / run_action / propose_objects / propose_action / list_classes / read_class / search / list_tables / apply_draft。发现类工具可选 `space: "draft"` 读工作副本（缺省已发布）；`apply_draft` 写工作副本（必带 `base_rev`）。用法见 `skills/` 四个目录 | 无——外部 Agent 用 |
 | `/api/query` POST | 查询服务：直接执行结构化查询 JSON，返回答案行 + 取数路径 + 留痕 | 无——REST 形态的只读入口 |
 
 ### 验收
@@ -150,10 +150,10 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 按下面的顺序读，半小时能建立全貌。每个文件头部注释先写职责，先看注释再读实现。
 
 1. `src/server/config/ontology.yaml` 配 `src/server/schema/config.ts`：先读本体的真实形状和它的校验，知道引擎在执行什么。
-2. `src/server/engine/driver.ts`：引擎与源库之间的唯一接口。再看 `fixture.ts`（内存实现，演示与测试都靠它）和 `sqlDriver.ts`（MySQL/PG 实现）。
-3. `src/server/engine/individual.ts` 配 `query.ts`：读个体（下推、对齐、派生）在 individual；问数树投影在 query。
-4. `src/server/engine/action.ts`：写的路径——前置、效应、投影、留痕；读个体走 individual，不经过 query。
-5. `src/server/engine/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。引用扫描在 `refs.ts`（纯函数），资格谓词在 `eligibility.ts`，进程级单例收口在 `runtime.ts`。
+2. `src/server/engine/infra/driver.ts`：引擎与源库之间的唯一接口。再看 `fixture.ts`（内存实现，演示与测试都靠它）和 `sqlDriver.ts`（MySQL/PG 实现），同在 `infra/`。
+3. `src/server/engine/query/individual.ts` 配 `query/query.ts`：读个体（下推、对齐、派生）在 individual；问数树投影在 query。
+4. `src/server/engine/action/action.ts`：写的路径——前置、效应、投影、留痕；读个体走 individual，不经过 query。
+5. `src/server/engine/config/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。引用扫描在 `config/refs.ts`（纯函数），资格谓词在 `adjudication/eligibility.ts`，进程级单例收口在 `runtime.ts`。
 6. `src/app/api/mcp/route.ts` 配 `tools.ts` 与 `skills/`（四个目录）：外部 Agent 的完整入口——route 只剩信封与调度，九个工具登记在 tools.ts 一张表（说明/inputSchema/space/令牌/handler），skill 正文是调用方法论。
 7. `src/tests/engine.test.ts`：引擎的行为约定。改引擎先跑 `npm test`，全绿再谈别的。
 
