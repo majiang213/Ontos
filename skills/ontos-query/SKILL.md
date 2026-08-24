@@ -16,8 +16,10 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 
 ## 接入
 
+<!-- BEGIN SHARED: mcp-access -->
 - 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
+<!-- END SHARED: mcp-access -->
 - 鉴权：查数工具全只读，不要令牌。
 - 错误都在信封里（HTTP 总是 200）：
   - `-32602` 入参形状不合法——检查 JSON 结构；
@@ -56,6 +58,7 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 
 ## 查询 JSON 语法
 
+<!-- BEGIN SHARED: query-syntax -->
 ```json
 {
   "object": "equipment",                      // 必填。根类：从哪个类查
@@ -107,6 +110,7 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 ```
 
 返回的每个个体上多一个以关系名为键的数组字段（如 `belongs_to: [{ name: "仓储部" }]`）。`expand` 节点自己还能带 `filter` 和下一层 `expand`。
+<!-- END SHARED: query-syntax -->
 
 ## 完整剧本示范：聚合问数——"每个部门多少台在役设备？"
 

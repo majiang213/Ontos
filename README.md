@@ -44,7 +44,7 @@
 | `docs/ontos-article.md` | 概念长文：本体论要素、本体与已有系统、跨源对齐方法论、查询与写入的求值过程、局限、配置附录 |
 | `docs/Ontology平台MVP设计文档.md` | MVP 设计文档：产品定位、系统架构、元模型骨架、计划与红线 |
 | `AGENTS.md` | 仓库工作约定：语言规则、术语表、交互架构约定 |
-| `skills/` | 给外部 Agent（Claude Code 等 ReAct 循环）的接入技能，按「世界 × 读写」分四个自包含目录：`ontos-query`（已发布·查数）、`ontos-action-run`（已发布·执行动作）、`ontos-canvas`（草稿·改画布）、`ontos-action`（草稿·写动作定义） |
+| `skills/` | 给外部 Agent（Claude Code 等 ReAct 循环）的接入技能，按「世界 × 读写」分四个自包含目录：`ontos-query`（已发布·查数）、`ontos-action-run`（已发布·执行动作）、`ontos-canvas`（草稿·改画布）、`ontos-action`（草稿·写动作定义）。四份 SKILL.md 是**生成物**：共享段（查询语法、接入样板）的源在 `skills/_shared/`，改完跑 `node scripts/build-skills.mjs` 重新生成（skillsSync 测试把守「生成物 = 源」） |
 | `src/` | Next.js 应用（前后端一体）：页面与路由 `src/app/`、前端组件 `src/components/`、引擎 `src/server/engine/`、测试 `src/tests/` |
 
 ## 代码结构

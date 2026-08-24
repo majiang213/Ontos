@@ -59,7 +59,7 @@ export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: L
     let status = "通过";
     let detail = "";
     try {
-      const parsed = await slot.nlToQuery(q.question, config);
+      const parsed = await slot.nlToQuery(q.question, config, ws);
       try {
         const { rows } = await query(config, registry, parsed);
         const bad = checkExpected(q.expected, rows);

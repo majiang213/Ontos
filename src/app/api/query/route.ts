@@ -6,7 +6,7 @@ import { queryRequestSchema } from "@/server/schema/request";
 import { query } from "@/server/engine/query/query";
 import { getDriverRegistry } from "@/server/engine/infra/load";
 import { getPublished } from "@/server/engine/config/configStore";
-import { withQueryLog } from "@/server/engine/infra/logging";
+import { withQueryLog } from "@/server/engine/logging";
 import { bodyJson, respond, wsOf } from "@/app/api/_shared";
 
 export async function POST(req: Request) {

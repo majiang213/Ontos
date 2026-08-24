@@ -39,10 +39,10 @@ export function getRev(ws: string = DEFAULT_WS): number {
 }
 
 /* 每工作空间一条写队列：applyDraft 校验之后有 await（摆位/取已发布），两个请求在 await 处交错时备份回退会对错对象。
-   失败也续链（prev.then(task, task)）：前一次 DraftReject 不拖死后续写入。全仓只有这一层队列——MCP / REST 不许再套。 */
-const tails = new Map<string, Promise<void>>();
-
+   失败也续链（prev.then(task, task)）：前一次 DraftReject 不拖死后续写入。全仓只有这一层队列——MCP / REST 不许再套。
+   队列挂在 runtime() 上（与它保护的 stores 同一层）：挂模块级会在 Next dev 多路由包下各持一条，串行化恰好失效。 */
 function enqueue<T>(ws: string, task: () => Promise<T>): Promise<T> {
+  const tails = (runtime().tails ??= new Map());
   const prev = tails.get(ws) ?? Promise.resolve();
   const run = prev.then(task, task); // 前一次拒绝也跑这一次
   tails.set(ws, run.then(() => undefined, () => undefined)); // 只续链，吞掉结果；拒绝仍传给调用方
@@ -85,15 +85,21 @@ export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
       store.draft = { draft: structuredClone(draft), baseVersion: version, dirty: !sameConfig(draft, config), layout: {}, edgeBends: {}, edgePins: {} };
       applyPack(store.draft, pack, fallback);
     } else {
-      // 还没有工作行：从已发布造一行落库——此后这空间恒有可变头
-      store.draft = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: {}, edgeBends: {}, edgePins: {} };
-      applyPack(store.draft, {}, fallback);
-      await persistWorkingCopy(ws, store.draft);
+      store.draft = await ensureWorkingCopy(ws, config, version, fallback); // 首次访问造工作行：此后这空间恒有可变头
     }
   }
   store.draft.edgeBends ??= {}; // 热更新前建的内存态没有这字段
   store.draft.edgePins ??= {};
   return store.draft;
+}
+
+/** 还没有工作行时从已发布造一行并落库——「空间恒有可变头」这个不变量由本函数维持（名字把副作用说出来：
+ *  getDraft 是读接口，首次调用会经这里写一行，行为与旧内联一致）。 */
+async function ensureWorkingCopy(ws: string, config: OntologyConfig, version: number, fallback: Pick<DraftState, "layout" | "edgeBends" | "edgePins">): Promise<DraftState> {
+  const state: DraftState = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: {}, edgeBends: {}, edgePins: {} };
+  applyPack(state, {}, fallback);
+  await persistWorkingCopy(ws, state);
+  return state;
 }
 
 /* ---------- 写路径的收尾原语（applyDraft / mutateDraft / publish / rollback 共用） ---------- */
@@ -110,13 +116,20 @@ function gcCanvasState(state: DraftState): void {
   for (const name of Object.keys(state.edgePins)) if (!state.draft.link_types[name]) delete state.edgePins[name];
 }
 
-/** 每步改完立即校验（结构 + 语义 + 动作形状四查），不合法整体回退——坏草稿不能攒到发布一刻才炸。
- *  动作形状四查只走草稿写入/发布路径；loadPublished/rollbackTo 不查（历史坏配置加载放行）。 */
+/** 三道校验单源（结构 + 语义 + 动作形状四查）：草稿写入与发布同调这一份。
+ *  rollbackTo/loadPublished 只用前两道（configSchema.parse + validateSemantics，不走本函数）——
+ *  历史已发布的坏配置加载放行，运行期由 action.ts 兜底；「哪里查几道」的边界就是有没有调本函数。 */
+function validateFull(raw: OntologyConfig): OntologyConfig {
+  const parsed = configSchema.parse(structuredClone(raw));
+  validateSemantics(parsed);
+  validateActionShapes(parsed);
+  return parsed;
+}
+
+/** 每步改完立即校验（三查见 validateFull），不合法整体回退——坏草稿不能攒到发布一刻才炸。 */
 function validateDraftOrThrow(state: DraftState, backup: OntologyConfig): void {
   try {
-    const parsed = configSchema.parse(structuredClone(state.draft));
-    validateSemantics(parsed);
-    validateActionShapes(parsed);
+    validateFull(state.draft);
   } catch (e) {
     state.draft = backup;
     throw new DraftReject(e instanceof Error ? e.message : String(e));
@@ -180,10 +193,9 @@ export async function publish(ws: string = DEFAULT_WS): Promise<{ version: numbe
   return enqueue(ws, async () => {
   const state = await getDraft(ws);
   if (!state.dirty) return { version: state.baseVersion }; // 无改动不产空版本
-  const config = configSchema.parse(structuredClone(state.draft)); // 结构校验
+  let config: OntologyConfig;
   try {
-    validateSemantics(config); // 语义校验
-    validateActionShapes(config); // 动作形状四查（效应 link/转化成对/取值来源/认人写明）
+    config = validateFull(state.draft); // 三查单源（结构 + 语义 + 动作形状四查，与草稿写入同闸）
   } catch (e) {
     throw new DraftReject(e instanceof Error ? e.message : String(e)); // 归一到类型，路由不用嗅探文案
   }

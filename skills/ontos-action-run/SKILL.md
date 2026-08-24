@@ -12,8 +12,10 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 
 ## 接入
 
+<!-- BEGIN SHARED: mcp-access -->
 - 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
+<!-- END SHARED: mcp-access -->
 - 鉴权：`run_action` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回错误码 `-32001`。`read_class` / `query` 只读放开。
 - 错误都在信封里（HTTP 总是 200）：
   - `-32602` 入参形状不合法——检查 JSON 结构；
@@ -45,15 +47,16 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 2. **执行**：`run_action { action, object, identity, request? }`。前置不满足 = 业务失败：先查目标个体当前状态，确认哪条前置不满足，该修正修正、该放弃放弃——**不要原样重发**。
 3. **复查**：执行成功后，用 `query` 查同一 `identity`，把最新状态展示给用户。**部分失败不回滚**——`structuredContent.projections` 是逐源表的投影成败清单（`source.table op ok/error`），有失败项时把明细如实报告给用户，补偿手段（修正后重发同一动作或人工修库）由人决定。
 
-## 查询 JSON 语法（前置核对与复查用，与 ontos-query 同文）
+## 查询 JSON 语法（前置核对与复查用）
 
+<!-- BEGIN SHARED: query-syntax -->
 ```json
 {
   "object": "equipment",                      // 必填。根类：从哪个类查
   "identity": "SN-40217",                     // 可选。认准一个体（识别字段的取值）
   "properties": ["name", "status"],           // 可选。只取这些属性；省略=返回全部属性（含派生），空值属性不出现
   "filter": { ... },                          // 可选。见下
-  "order": { "name": "asc" },                 // 可选。单键 asc/desc；排序字段必须是返回的属性
+  "order": { "name": "asc" },                 // 可选。单键 asc/desc；排序字段必须是返回的属性（在 properties 里；不写 properties 则任意属性均可）
   "limit": 50,                                // 可选。默认 200，最大 1000
   "aggregate": { ... },                       // 可选。分组统计，见下
   "expand": [ ... ]                           // 可选。按关系展开，见下
@@ -74,7 +77,7 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 // 有到期日不早于今天的保修卡的设备（=在保）
 ```
 
-- 关系名必须用**从根类出发能用的那个名字**（正向名或反向名），`read_class` 的 `relations` 列出来的就是可用的。`$link` 嵌套最多三层。动作前置里常见 `$link` 与嵌套子过滤（演示四个动作的前置全含 `$link`）——核对前置时就用同一语法查。
+- 关系名必须用**从根类出发能用的那个名字**（正向名或反向名），`read_class` 的 `relations` 列出来的就是可用的。`$link` 嵌套最多三层。
 - **查询里禁止 `$request` 和 `$exists`**（它们只属于动作前置），否则被 `-32000` 拒绝。
 
 ### aggregate：分组统计（与 expand 互斥）
@@ -98,6 +101,9 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 ```
 
 返回的每个个体上多一个以关系名为键的数组字段（如 `belongs_to: [{ name: "仓储部" }]`）。`expand` 节点自己还能带 `filter` 和下一层 `expand`。
+<!-- END SHARED: query-syntax -->
+
+核对动作前置也用这套语法：演示四个动作的前置全含 `$link` 与嵌套子过滤。
 
 ## 动作 JSON 语法
 

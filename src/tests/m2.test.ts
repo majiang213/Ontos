@@ -49,9 +49,9 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     const { AiSdkSlot } = await import("../server/engine/llmSlot");
     const good = { object: "equipment", filter: { status: "in_service" }, properties: ["name"] };
     const slot = new AiSdkSlot(fakeModel, (async () => ({ output: good })) as never);
-    expect((await slot.nlToQuery("在役设备", config)).object).toBe("equipment");
+    expect((await slot.nlToQuery("在役设备", config, "test")).object).toBe("equipment");
     const bad = new AiSdkSlot(fakeModel, (async () => ({ output: { object: 123 } })) as never);
-    await expect(bad.nlToQuery("x", config)).rejects.toThrow();
+    await expect(bad.nlToQuery("x", config, "test")).rejects.toThrow();
   });
 
   it("getSlot：没 OPENAI_API_KEY 回退罐头；有 key 没指定模型报错；有 key 有模型走真模型", async () => {
@@ -67,10 +67,18 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     delete process.env.OPENAI_MODEL;
   });
 
+  it("罐头问数只服务 test 空间：别的空间即使有 equipment 类也拒（不静默编成演示查询）", async () => {
+    const { CannedSlot } = await import("../server/engine/llmSlot");
+    const slot = new CannedSlot();
+    // 回归：守卫曾是类名巧合——config 里有 equipment 就放行，任何问法都被编成演示剧本（错答案）
+    await expect(slot.nlToQuery("随便问点什么", config, "default")).rejects.toThrow(/只覆盖 test 演示空间/);
+    await expect(slot.nlToQuery("随便问点什么", config, "sandbox")).rejects.toThrow(/只覆盖 test 演示空间/);
+  });
+
   it("罐头问数只对上了类的剧本编得动：空配置下不编幽灵查询，明说该配模型 Key", async () => {
     const { CannedSlot } = await import("../server/engine/llmSlot");
     const slot = new CannedSlot();
-    await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never)).rejects.toThrow(/离线回退只覆盖演示剧本/);
+    await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never, "test")).rejects.toThrow(/离线回退只覆盖演示剧本/);
   });
 });
 
@@ -78,23 +86,23 @@ describe("LLM 槽位离线回退", () => {
   const slot = new CannedSlot();
 
   it("演示四问编成正确查询（整体比对，不许片段正确）", async () => {
-    expect(await slot.nlToQuery("在役设备及其所属部门", config)).toEqual({
+    expect(await slot.nlToQuery("在役设备及其所属部门", config, "test")).toEqual({
       object: "equipment",
       properties: ["name"],
       filter: { status: "in_service" },
       expand: [{ relation: "belongs_to", properties: ["name"] }],
     });
-    expect(await slot.nlToQuery("还有多少在途设备", config)).toEqual({
+    expect(await slot.nlToQuery("还有多少在途设备", config, "test")).toEqual({
       object: "equipment",
       properties: ["name", "serial_no"],
       filter: { status: "in_transit" },
     });
-    expect(await slot.nlToQuery("哪些设备过保了", config)).toEqual({
+    expect(await slot.nlToQuery("哪些设备过保了", config, "test")).toEqual({
       object: "equipment",
       properties: ["name", "serial_no"],
       filter: { in_warranty: false },
     });
-    expect(await slot.nlToQuery("每个部门多少台在役设备", config)).toEqual({
+    expect(await slot.nlToQuery("每个部门多少台在役设备", config, "test")).toEqual({
       object: "equipment",
       filter: { status: "in_service" },
       aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] },

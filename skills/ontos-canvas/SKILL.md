@@ -11,8 +11,12 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 
 ## 接入
 
-- 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。**工具入参不带空间名**；空间只由 URL 决定。人开着哪个空间的画布，你就用哪个 `ws`，不然人看不见你的改动。
+<!-- BEGIN SHARED: mcp-access -->
+- 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
+<!-- END SHARED: mcp-access -->
+
+**工具入参不带空间名**；空间只由 URL 决定。人开着哪个空间的画布，你就用哪个 `ws`，不然人看不见你的改动。
 - 鉴权：`apply_draft` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回 `-32001`。发现类工具只读放开。
 - 错误都在信封里（HTTP 总是 200）：
   - `-32602` 入参形状不合法——缺 `base_rev`、`base_rev` 是字符串、`space` 传错工具，都在这档；

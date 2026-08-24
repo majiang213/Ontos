@@ -16,7 +16,7 @@ import { listTables } from "@/server/engine/infra/load";
 import type { DriverRegistry } from "@/server/engine/infra/registry";
 import { applyDraft, getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
 import { metaStore } from "@/server/meta/store";
-import { withActionLog, withQueryLog } from "@/server/engine/infra/logging";
+import { withActionLog, withQueryLog } from "@/server/engine/logging";
 
 /** 处理器上下文：空间、驱动、space 选择与取配置的两个入口。 */
 export interface ToolContext {

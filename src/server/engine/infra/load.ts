@@ -10,6 +10,7 @@ import { runtime } from "../../runtime";
 import { getPublished } from "../config/configStore";
 import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
+import { SqliteDriver } from "./sqliteDriver";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
 import { ConnectionReject } from "../../errors";
@@ -46,7 +47,8 @@ export function registerSaved(registry: DriverRegistry, rec: { name: string; typ
       console.warn(`[ontos] 连接 ${rec.name} 的 sqlite 文件不存在，跳过注册：${p}`);
       return;
     }
-    const d = new SqliteFixtureDriver();
+    // 用户接入的 sqlite 文件库：裸 SqliteDriver——生产路径不背演示机器（种子/注释/剧本在 fixture 子类）
+    const d = new SqliteDriver();
     d.registerFile(rec.name, p);
     registry.register(rec.name, d);
   } else {

@@ -10,6 +10,7 @@ import type { TableInfo } from "./infra/driver";
 import { TENDENCIES, VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "./adjudication/verdict";
 import { demoQueries } from "./infra/fixture";
 import { resolveTableInfos } from "./infra/load";
+import { TEST_WS } from "./infra/workspace";
 import type { DriverRegistry } from "./infra/registry";
 import { runtime } from "../runtime";
 import { EngineReject } from "../errors";
@@ -20,8 +21,9 @@ import { createXai } from "@ai-sdk/xai";
 export interface LlmSlot {
   /** 实现名，留痕用（离线回退 / 真模型名） */
   readonly name: string;
-  /** NL → 查询 JSON（问数槽位） */
-  nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest>;
+  /** NL → 查询 JSON（问数槽位）。ws 说出「哪个空间在问」：罐头剧本只服务 test 空间（演示数据），
+   *  没有这条论元守卫只能借 config 拐弯——任何空间恰好有同名类就会被静默编成演示查询。 */
+  nlToQuery(question: string, config: OntologyConfig, ws: string): Promise<QueryRequest>;
   /** 表结构 → 本体草稿（逆向建模槽位） */
   proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>>;
   /** 跨源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合（跨源判定在实现里做）。 */
@@ -32,7 +34,10 @@ export interface LlmSlot {
 
 export class CannedSlot implements LlmSlot {
   readonly name = "canned-离线回退";
-  async nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest> {
+  async nlToQuery(question: string, config: OntologyConfig, ws: string): Promise<QueryRequest> {
+    // 空间守门（真实约束，写进签名的原因）：剧本是 test 空间的演示数据，别的空间问数必须配模型 Key——
+    // 不能靠「config 里有没有同名类」巧合放行，否则别的空间任何问法都会被静默编成演示查询（错答案比报错糟）
+    if (ws !== TEST_WS) throw new EngineReject("离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问");
     // 剧本在 fixture.demoQueries（test 空间的演示数据）：正则顺序即优先级，末条兜底。
     // 形状与 generateText + Output.object 产物一致，过同一道 Zod。
     // 无模型时问数没有通用编译法，剧本只对上了类才编；对不上说明不是演示问题，得配模型 Key
@@ -134,7 +139,8 @@ export class AiSdkSlot implements LlmSlot {
     this.name = `ai-sdk:${typeof model === "string" ? model : model.modelId}`;
   }
 
-  async nlToQuery(question: string, config: OntologyConfig): Promise<QueryRequest> {
+  async nlToQuery(question: string, config: OntologyConfig, _ws: string): Promise<QueryRequest> {
+    // 真模型各空间通用：ws 论元只在罐头实现里当守门用（见 LlmSlot 接口注释）
     const classes = Object.entries(config.object_types).map(([name, t]) => ({
       name,
       description: t.description,

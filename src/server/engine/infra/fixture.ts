@@ -1,29 +1,15 @@
-// SQLite fixture 驱动 —— 每个连接一个内存库，用真实 SQL 执行下推与写回。
-// 三种用途：引擎 golden 测试；test 空间的离线演示种子；用户接入的 sqlite 文件库的驱动（load.ts registerSaved 复用本类）。
+// SQLite fixture 驱动 —— 演示层：继承裸驱动 SqliteDriver（sqliteDriver.ts），只加演示关注点
+// （列注释覆写 / seedDemo 种子 / seeded 工厂 / demoQueries 问数剧本）。
+// 两种用途：引擎 golden 测试；test 空间的离线演示种子。用户接入的 sqlite 文件库不走本类（裸 SqliteDriver）。
 // 种子数据按演示剧本：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）。
 // 演示问数剧本也住这里（demoQueries）：test 空间离线回退的确定性编译脚本，引擎 llmSlot 只读不写。
 
-import { DatabaseSync } from "node:sqlite";
-import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
+import type { TableInfo } from "./driver";
 import type { QueryRequest } from "../../schema/request";
-import { EngineReject } from "../../errors";
+import { SqliteDriver } from "./sqliteDriver";
 
-// node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
-// node:sqlite 不认 boolean，绑定前归一成 1/0。
-const bind = (params: unknown[]) => params.map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v)) as never[];
-
-export class SqliteFixtureDriver implements SourceDriver {
-  readonly dialect: "sqlite" | "mysql" | "pg" = "sqlite"; // 测试可覆写模拟他种方言的写回行为
-  private dbs = new Map<string, DatabaseSync>();
+export class SqliteFixtureDriver extends SqliteDriver {
   private comments = new Map<string, Map<string, Record<string, string>>>(); // connection → table → 列名 → 中文注释（SQLite 没有列注释，演示注释由种子手写）
-
-  /** 注册一个连接，返回它的内存库（建表、插种子用）。同名覆盖先关旧句柄。 */
-  register(connection: string): DatabaseSync {
-    this.dbs.get(connection)?.close();
-    const db = new DatabaseSync(":memory:");
-    this.dbs.set(connection, db);
-    return db;
-  }
 
   /** 给某张表的列挂中文注释（SQLite 无列注释，演示数据靠这里补）。 */
   setComments(connection: string, table: string, map: Record<string, string>): void {
@@ -32,74 +18,22 @@ export class SqliteFixtureDriver implements SourceDriver {
     this.comments.set(connection, perTable);
   }
 
-  /** 注册一个 SQLite 文件库作为连接（连接表单里的 sqlite 类型走这里）。同名覆盖先关旧句柄。 */
-  registerFile(connection: string, path: string): void {
-    this.dbs.get(connection)?.close();
-    this.dbs.set(connection, new DatabaseSync(path));
-  }
-
-  private db(connection: string): DatabaseSync {
-    const db = this.dbs.get(connection);
-    if (!db) throw new EngineReject(`未注册的连接：${connection}`);
-    return db;
-  }
-
-  async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
-    const { sql, params } = buildSelect(table, columns, conditions, "sqlite", limit);
-    return this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
-  }
-
-  async insert(connection: string, table: string, row: Record<string, unknown>) {
-    const { sql, params } = buildInsert("sqlite", table, row);
-    this.db(connection).prepare(sql).run(...bind(params));
-  }
-
-  async update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): Promise<number> {
-    const { sql, params } = buildStatement("sqlite", "update", table, { set, conditions });
-    const res = this.db(connection).prepare(sql).run(...bind(params));
-    return Number(res.changes);
-  }
-
-  async delete(connection: string, table: string, conditions: Condition[]): Promise<number> {
-    const { sql, params } = buildStatement("sqlite", "delete", table, { conditions });
-    const res = this.db(connection).prepare(sql).run(...bind(params));
-    return Number(res.changes);
-  }
-
-  async sample(connection: string, table: string, limit = 3) {
-    const { sql, params } = buildSelect(table, [], [], "sqlite", limit);
-    const rows = this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
-    return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, maskValue(k, v)])));
-  }
-
-  /** 释放全部库句柄（删连接、测试收尾用）。 */
-  async close(): Promise<void> {
-    for (const db of this.dbs.values()) db.close();
-    this.dbs.clear();
+  /** 内省叠加演示列注释（裸驱动没有注释概念）。 */
+  override async introspect(connection: string): Promise<TableInfo[]> {
+    const tables = await super.introspect(connection);
+    return tables.map((t) => ({
+      ...t,
+      columns: t.columns.map((c) => {
+        const comment = this.comments.get(connection)?.get(t.name)?.[c.name];
+        return comment ? { ...c, comment } : c;
+      }),
+    }));
   }
 
   static seeded(): SqliteFixtureDriver {
     const d = new SqliteFixtureDriver();
     seedDemo(d);
     return d;
-  }
-
-  /** M1 雏形：连接清单与表结构（内省）。 */
-  connections(): string[] {
-    return [...this.dbs.keys()];
-  }
-
-  async introspect(connection: string): Promise<TableInfo[]> {
-    const db = this.db(connection);
-    const tables = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
-      .all() as { name: string }[];
-    return tables.map((t) => ({
-      name: t.name,
-      columns: (db.prepare(`PRAGMA table_info("${t.name}")`).all() as { name: string; type: string; pk: number }[]).map(
-        (c) => ({ name: c.name, type: c.type, pk: c.pk === 1, ...(this.comments.get(connection)?.get(t.name)?.[c.name] ? { comment: this.comments.get(connection)!.get(t.name)![c.name] } : {}) })
-      ),
-    }));
   }
 }
 

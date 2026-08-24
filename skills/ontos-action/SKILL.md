@@ -11,8 +11,12 @@ description: 通过 MCP 在 Ontos 本体画布的工作副本（草稿）里编�
 
 ## 接入
 
-- 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。工具入参不带空间名。
+<!-- BEGIN SHARED: mcp-access -->
+- 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
+<!-- END SHARED: mcp-access -->
+
+工具入参不带空间名。
 - 鉴权：`apply_draft` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回 `-32001`。发现类工具只读放开。
 - 错误都在信封里（HTTP 总是 200）：`-32602` 入参形状不合法；`-32000` 领域拒绝（message 中文、指明错在哪——「效应 link 指向不存在的转化关系」「删掉转化关系唯一引用动作」「取值来源不认识」都按 message 改）；`-32001` 缺写令牌。
 
