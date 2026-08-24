@@ -82,7 +82,7 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, args) => {
       const config = await ctx.published(); // 动作永远读已发布，不可改成草稿
       const action = actionRequestSchema.parse(args);
-      const result = await withActionLog(ctx.ws, action, () => runAction(config, ctx.driver, action, { nextSequence: (k, s) => metaStore().nextSeq(ctx.ws, k, s) }));
+      const result = await withActionLog(ctx.ws, action, () => runAction(config, ctx.driver, action, { ws: ctx.ws, nextSequence: (k, s) => metaStore().nextSeq(ctx.ws, k, s) }));
       // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
       return { payload: result, isError: !result.ok };
     },

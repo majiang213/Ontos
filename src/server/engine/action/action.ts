@@ -10,6 +10,7 @@ import { createEnv, selectIndividuals } from "../query/assemble";
 import { evalDerived, evalFilterOnIndividual } from "../query/evaluate";
 import { currentView, keyColumn, mustCls, propValue, sourcesOf, type Cls, type Env, type Individual } from "../query/individual";
 import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "../query/expr";
+import { enqueueKeyed, runtime } from "../../runtime";
 import { buildNotifications, type NotificationRecord } from "./notify";
 
 export interface ProjectionRecord {
@@ -47,7 +48,18 @@ export async function runAction(
   config: OntologyConfig,
   driver: SourceDriver,
   req: ActionRequest,
-  opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number> } // 路由层注入元数据库发号器（异步）；缺省用内存版
+  opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number>; ws?: string } // 路由层注入元数据库发号器（异步）；缺省用内存版。ws = 串行键（哪份本体世界的动作互斥；缺省 default）
+): Promise<ActionResult> {
+  // 每空间一条动作串行队列（runtime.actionTails）：发号与 create 幂等都是 check-then-act，
+  // 并发裸奔会发出重号、补偿重发会插重复行——串行化后这两条在队列内天然互斥
+  return enqueueKeyed(runtime().actionTails ??= new Map(), opts?.ws ?? "default", () => runActionInner(config, driver, req, opts));
+}
+
+async function runActionInner(
+  config: OntologyConfig,
+  driver: SourceDriver,
+  req: ActionRequest,
+  opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number> }
 ): Promise<ActionResult> {
   if (!config.object_types[req.object]) return reject("pre", `配置中没有类：${req.object}`);
   const cls = mustCls(config, req.object);

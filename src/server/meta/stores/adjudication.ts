@@ -31,13 +31,18 @@ export class AdjudicationStore extends ConcernStore {
     await this.backend.run(`UPDATE adj_decision SET version = -1 WHERE workspace_id = ? AND version IS NULL`, [id]);
   }
 
-  /** 交集按对更新（同一对重复计算只留最新计数）。 */
+  /** 交集按对更新（同一对重复计算只留最新计数——由 UNIQUE(workspace_id, class_a, class_b) 兜底，方言 upsert 原子写；
+   *  旧形态 DELETE+INSERT 两条，并发重算同一对会双行并存）。 */
   async recordOverlap(ws: string, o: OverlapRec): Promise<void> {
     const id = await this.wsId(ws);
-    await this.backend.run(`DELETE FROM adj_overlap WHERE workspace_id = ? AND class_a = ? AND class_b = ?`, [id, o.class_a, o.class_b]);
+    const vals = [id, o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate];
     await this.backend.run(
-      `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate]
+      this.backend.dialect === "mysql"
+        ? `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE norm_rule = VALUES(norm_rule), count_a = VALUES(count_a), count_b = VALUES(count_b), count_hit = VALUES(count_hit), rate = VALUES(rate)`
+        : `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(workspace_id, class_a, class_b) DO UPDATE SET norm_rule = excluded.norm_rule, count_a = excluded.count_a, count_b = excluded.count_b, count_hit = excluded.count_hit, rate = excluded.rate`,
+      vals
     );
   }
 

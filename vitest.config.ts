@@ -6,6 +6,6 @@ export default defineConfig({
     alias: { "@": resolve(__dirname, "src") }, // 与 tsconfig 的 paths 对齐
   },
   test: {
-    pool: "forks", // 测试用 process.chdir 隔离临时目录，必须每文件独立进程；别改成 threads
+    pool: "forks", // 全局运行态（globalThis 上的 runtime）需进程级隔离，必须每文件独立进程；别改成 threads
   },
 });

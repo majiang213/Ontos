@@ -9,7 +9,7 @@ import { configSchema, type OntologyConfig } from "../../schema/config";
 import { isUiStateOp, type DraftOpInput as DraftOp } from "../../schema/ops";
 import { metaStore } from "../../meta/store";
 import { DraftReject } from "../../errors";
-import { runtime } from "../../runtime";
+import { enqueueKeyed, runtime } from "../../runtime";
 import { validateActionShapes, validateSemantics } from "./validate";
 import { DEFAULT_WS, seedYamlFor } from "../infra/workspace";
 import { applyOp } from "./applyOp";
@@ -39,14 +39,11 @@ export function getRev(ws: string = DEFAULT_WS): number {
 }
 
 /* 每工作空间一条写队列：applyDraft 校验之后有 await（摆位/取已发布），两个请求在 await 处交错时备份回退会对错对象。
-   失败也续链（prev.then(task, task)）：前一次 DraftReject 不拖死后续写入。全仓只有这一层队列——MCP / REST 不许再套。
+   失败也续链（prev.then(task, task)）：前一次 DraftReject 不拖死后续写入。
+   全仓两层队列各护各的：本层护草稿写入，runAction 的 actionTails 护动作执行（发号与 create 幂等）——原语同在 runtime.enqueueKeyed。
    队列挂在 runtime() 上（与它保护的 stores 同一层）：挂模块级会在 Next dev 多路由包下各持一条，串行化恰好失效。 */
 function enqueue<T>(ws: string, task: () => Promise<T>): Promise<T> {
-  const tails = (runtime().tails ??= new Map());
-  const prev = tails.get(ws) ?? Promise.resolve();
-  const run = prev.then(task, task); // 前一次拒绝也跑这一次
-  tails.set(ws, run.then(() => undefined, () => undefined)); // 只续链，吞掉结果；拒绝仍传给调用方
-  return run;
+  return enqueueKeyed(runtime().tails ??= new Map(), ws, task);
 }
 
 async function loadPublished(ws: string): Promise<{ config: OntologyConfig; version: number }> {

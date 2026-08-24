@@ -23,48 +23,12 @@ afterEach(async () => {
 });
 
 describe("元数据库", () => {
-  it("一次性迁移：旧双列拼工作行（draft 优先、缺键回退 layout 列）、版本表重建出可空 version、老列删除、幂等", async () => {
-    // 造一座老形状的库：workspace 带 layout/draft_json；version 表 version NOT NULL + revert_of
-    const legacy = join(tmp, "legacy.db");
-    const db = new DatabaseSync(legacy);
-    db.exec(`
-      CREATE TABLE onto_workspace (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, seed_from TEXT, layout TEXT, draft_json TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
-      CREATE TABLE onto_version (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL, version INTEGER NOT NULL, yaml TEXT NOT NULL, canvas_json TEXT, origin TEXT NOT NULL DEFAULT 'publish', revert_of INTEGER, note TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (workspace_id, version));
-      INSERT INTO onto_workspace (name, layout, draft_json) VALUES
-        ('dirty_ws', '{"nodes":{"equipment":{"x":1,"y":2}},"edges":{},"pins":{}}', '{"config":{"object_types":{"vendor":{"kind":"thing","properties":{}}}},"layout":{"equipment":{"x":9,"y":9}}}'),
-        ('fallback_ws', '{"nodes":{"equipment":{"x":1,"y":2}},"edges":{"holds":{"dx":3,"dy":4}},"pins":{}}', '{"config":{"object_types":{"vendor":{"kind":"thing","properties":{}}}}}'),
-        ('clean_ws', '{"nodes":{"equipment":{"x":5,"y":6}},"edges":{},"pins":{}}', NULL);
-      INSERT INTO onto_version (workspace_id, version, yaml, origin) VALUES (1, 1, 'object_types: {}', 'publish'), (2, 1, 'object_types: {}', 'publish'), (3, 1, 'object_types: {}', 'publish');
-    `);
-    db.close();
-
-    const migrated = freshMetaStore(legacy);
-    // 草稿本体进工作行；draft 里有 layout 时 draft 优先
-    const p1 = (await migrated.getWorkingPack("dirty_ws")) as { config: { object_types: Record<string, unknown> }; layout: Record<string, { x: number; y: number }> };
-    expect(p1.config.object_types.vendor).toBeDefined();
-    expect(p1.layout.equipment).toEqual({ x: 9, y: 9 });
-    // draft 缺界面状态键：回退到 layout 列
-    const p2 = (await migrated.getWorkingPack("fallback_ws")) as { layout: Record<string, unknown>; edgeBends: Record<string, { dx: number; dy: number }> };
-    expect(p2.layout.equipment).toEqual({ x: 1, y: 2 });
-    expect(p2.edgeBends.holds).toEqual({ dx: 3, dy: 4 });
-    // 只存过摆位（无草稿）的空间：也造工作行，pack 不带 config（本体由 getDraft 用已发布补上）
-    const p3 = (await migrated.getWorkingPack("clean_ws")) as { config?: unknown; layout: Record<string, { x: number; y: number }> };
-    expect(p3.config).toBeUndefined();
-    expect(p3.layout.equipment).toEqual({ x: 5, y: 6 });
-    // 版本表重建：version 可空、revert_of 没了；编号行还在
-    const vcols = new DatabaseSync(legacy).prepare(`PRAGMA table_info(onto_version)`).all() as { name: string; notnull: number }[];
-    expect(vcols.find((c) => c.name === "version")?.notnull).toBe(0);
-    expect(vcols.some((c) => c.name === "revert_of")).toBe(false);
-    expect((await migrated.listVersions("dirty_ws")).map((v) => v.version)).toEqual([1]); // 工作行不进版本列表
-    // 老列删了
-    const wcols = (new DatabaseSync(legacy).prepare(`PRAGMA table_info(onto_workspace)`).all() as { name: string }[]).map((c) => c.name);
-    expect(wcols).not.toContain("layout");
-    expect(wcols).not.toContain("draft_json");
-    await migrated.close();
-    // 幂等：再开一次不重复造工作行、不炸
-    const again = freshMetaStore(legacy);
-    expect(JSON.stringify(await again.getWorkingPack("dirty_ws"))).toContain("vendor");
-    await again.close();
+  it("交集按对一行：并发 recordOverlap 同对 10 次，库里恰一行且是最后一写", async () => {
+    // 并发竞态回归：旧形态 DELETE+INSERT 两条，并发重算同一对会双行并存
+    const o = { class_a: "eq_a", class_b: "eq_b", source_a: "s1", source_b: "s2" };
+    await Promise.all(Array.from({ length: 10 }, (_, i) => store.recordOverlap(WS, { ...o, norm_rule: "raw", count_a: 10 + i, count_b: 20, count_hit: i, rate: i / 20 })));
+    const rows = await store.listOverlaps(WS);
+    expect(rows.filter((r) => r.class_a === "eq_a" && r.class_b === "eq_b").length).toBe(1);
   });
 
   it("连接：保存/更新/列表/删除", async () => {

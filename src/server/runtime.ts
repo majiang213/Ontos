@@ -21,6 +21,18 @@ export interface OntosRuntime {
   /** 每工作空间一条写队列（configStore.enqueue）：与它保护的 stores 挂同一层——
    *  挂模块级会在 Next dev 多路由包下各持一条，串行化承诺恰好失效；installRuntime 整套换掉才真隔离。 */
   tails?: Map<string, Promise<void>>;
+  /** 每空间一条动作串行队列（runAction）：发号（generate sequence）与 create 幂等都是 check-then-act，
+   *  没有串行化，两个并发动作会发出重号、补偿重发会插重复行。 */
+  actionTails?: Map<string, Promise<void>>;
+}
+
+/** 键控串行队列（configStore 的 tails 与 runAction 的 actionTails 同款，一处维护）：
+ *  prev 失败也续链（前一次拒绝不拖死后续）；拒绝仍传给调用方。 */
+export function enqueueKeyed<T>(map: Map<string, Promise<void>>, key: string, task: () => Promise<T>): Promise<T> {
+  const prev = map.get(key) ?? Promise.resolve();
+  const run = prev.then(task, task); // 前一次拒绝也跑这一次
+  map.set(key, run.then(() => undefined, () => undefined)); // 只续链，吞掉结果；拒绝仍传给调用方
+  return run;
 }
 
 /** 缺省取进程cwd与 ONTOS_META_DSN；测试传 { cwd: 临时目录 }。 */
