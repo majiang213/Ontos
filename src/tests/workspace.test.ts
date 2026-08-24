@@ -16,10 +16,10 @@ afterEach(async () => {
 
 describe("空间隔离", () => {
   it("两个空间各自发布升级，互不干扰；新空间与 default 空白起步，演示模板与 fixture 只属于 test", async () => {
-    const s = await import("../server/engine/config/configStore");
+    const s = await import("../server/engine/draft");
     const meta = (await import("../server/meta/store")).metaStore();
     // default 建对象并发布 → v2
-    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" }, "default");
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, "default");
     expect((await s.publish("default")).version).toBe(2);
     // lab 首次访问：空白起步（v1、空本体）；default 也空白起步（没有模板类）——模板只属于 test
     expect((await s.getPublished("lab")).version).toBe(1);
@@ -31,7 +31,7 @@ describe("空间隔离", () => {
     expect((await getDriverRegistry("test")).connectionNames()).toContain("purchase_sys");
     expect((await getDriverRegistry("default")).connectionNames()).toEqual([]);
     // lab 自己发布：default 的版本与内容都不受影响
-    await s.applyDraft({ op: "create_object", name: "person_x", kind: "thing" }, "lab");
+    await s.editDraft({ op: "create_object", name: "person_x", kind: "thing" }, "lab");
     expect((await s.publish("lab")).version).toBe(2);
     expect((await s.getPublished("default")).version).toBe(2);
     expect((await s.getPublished("default")).config.object_types.person_x).toBeUndefined();
@@ -54,8 +54,8 @@ describe("空间隔离", () => {
   });
 
   it("摆位按空间分开存（onto_version 的工作行）", async () => {
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({ op: "save_layout", positions: { equipment: { x: 1, y: 2 } } }, "default");
+    const s = await import("../server/engine/draft");
+    await s.editDraft({ op: "save_layout", positions: { equipment: { x: 1, y: 2 } } }, "default");
     expect((await s.getDraft("default")).layout.equipment).toEqual({ x: 1, y: 2 });
     expect((await s.getDraft("lab")).layout.equipment).toBeUndefined();
   });

@@ -3,7 +3,7 @@
 // 失败分阶段记（编译失败/执行出错/答案不符），原因落 detail。跑批逻辑在 engine/questions。
 
 import { z } from "zod";
-import { getPublished } from "@/server/engine/config/configStore";
+import { getPublished } from "@/server/engine/draft/current";
 import { EXPECTED_HINT, parseExpected, runQuestions } from "@/server/engine/query/questions";
 import { metaStore } from "@/server/meta/store";
 import { BadRequest, bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";

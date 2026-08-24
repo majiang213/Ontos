@@ -143,8 +143,8 @@ describe("连接生命周期", () => {
 
     writeFileSync(join(tmp, "used.db"), "");
     await saveConnection("test", { name: "used_db", type: "sqlite", db_name: "used.db" }, false);
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({
+    const s = await import("../server/engine/draft");
+    await s.editDraft({
       op: "import_objects",
       objects: {
         gadget: {

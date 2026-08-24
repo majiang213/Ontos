@@ -7,7 +7,7 @@
 import { query } from "./query";
 import { getSlot, type LlmSlot } from "../llmSlot";
 import { getDriverRegistry } from "../infra/load";
-import { getDraft, getPublished } from "../config/configStore";
+import { getDraft, getPublished } from "../draft/current";
 import { metaStore } from "../../meta/store";
 
 /** 期望结果的合法写法：留空（能查出就算过）/ 纯数字（比对行数）/ 字段=值（至少一行对上）。 */

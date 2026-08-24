@@ -1,10 +1,13 @@
-// 画布包编解码 —— 工作副本的序列化形状：本体 config + 界面状态三键（layout / edgeBends / edgePins）。
+// 画布包 —— 「工作副本怎么存取」：本体 config + 界面状态三键（layout / edgeBends / edgePins）⇆ canvas_json 的编解码，
+// 工作行的读回水合（含迁移降级）与首访造行（「空间恒有可变头」由 readWorkingCopy 维持）。
 // DraftState 也定义在这里：它就是「画布包」解开后的内存形。读回校验坏键当没有（按键降级），不拖死整包。
 
 import { z } from "zod";
-import type { OntologyConfig } from "../../schema/config";
+import { configSchema, type OntologyConfig } from "../../schema/config";
 import { borderPinSchema, type BorderPin } from "../../schema/ops";
 import { metaStore } from "../../meta/store";
+import { DraftReject } from "../../errors";
+import { sameConfig } from "./sameConfig";
 
 export interface DraftState {
   draft: OntologyConfig;
@@ -60,4 +63,33 @@ export function applyPack(
  *  dirty 与否都写——界面状态也以这为家。save_* 路径也走这里：界面状态不算本体改动（不碰 dirty、不过校验、不加 rev）。 */
 export async function persistWorkingCopy(ws: string, state: DraftState): Promise<void> {
   await metaStore().setWorkingPack(ws, canvasSnapshot(state));
+}
+
+/** 读工作行并水合成 DraftState；还没有工作行就从已发布造一行并落库——「空间恒有可变头」这个不变量由本函数维持。
+ *  迁移降级：摆位-only 的老工作行本体用已发布（首次写入即补全 pack）；界面状态缺键用已发布版的画布包后备。 */
+export async function readWorkingCopy(ws: string, config: OntologyConfig, version: number): Promise<DraftState> {
+  const saved = await metaStore().getWorkingPack(ws);
+  // 界面状态的后备：最近已发布版的画布包（老行可能只有 yaml，那就空着，画布走 dagre）
+  const pubPack = unpackCanvas((await metaStore().versionCanvas(ws, version)) ?? {});
+  const fallback = { layout: pubPack.layout ?? {}, edgeBends: pubPack.edgeBends ?? {}, edgePins: pubPack.edgePins ?? {} };
+  if (saved === undefined) {
+    const state: DraftState = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: {}, edgeBends: {}, edgePins: {} };
+    applyPack(state, {}, fallback);
+    await persistWorkingCopy(ws, state); // 首次访问造工作行：此后这空间恒有可变头
+    return state;
+  }
+  const pack = unpackCanvas(saved);
+  let draft: OntologyConfig;
+  if (pack.config === undefined) {
+    draft = structuredClone(config); // 迁移留下的摆位-only 工作行：本体用已发布，首次写入即补全 pack
+  } else {
+    try {
+      draft = configSchema.parse(pack.config);
+    } catch (e) {
+      throw new DraftReject(`工作副本读不回来：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const state: DraftState = { draft: structuredClone(draft), baseVersion: version, dirty: !sameConfig(draft, config), layout: {}, edgeBends: {}, edgePins: {} };
+  applyPack(state, pack, fallback);
+  return state;
 }

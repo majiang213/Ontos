@@ -17,7 +17,7 @@ import SchemaDrawer from "./cards/SchemaDrawer";
 import { effectSummary, formCompatible } from "./forms/actionView";
 import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
 import { useRevWatcher } from "./revWatcher";
-import { columnTarget as columnTargetOf } from "../server/engine/config/lineage";
+import { columnTarget as columnTargetOf } from "../server/engine/draft/lineage";
 import type { PairAdvice } from "../server/engine/adjudication/verdict";
 import type { ObjectType } from "../server/schema/config";
 
@@ -138,7 +138,7 @@ export default function CanvasPage() {
   const op = useCallback(
     async (body: Record<string, unknown>) =>
       withLocalWrite(async () => {
-        await apiPost("/api/apply_draft", body);
+        await apiPost("/api/edit_draft", body);
         await refresh();
       }),
     [withLocalWrite, refresh]
@@ -211,14 +211,16 @@ export default function CanvasPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /** 多选表 → 生成对象 → 直接上画布并收起抽屉（选表与按钮在 SchemaDrawer 里）。 */
+  /** 多选表 → 生成对象 → 直接上画布并收起抽屉（选表与按钮在 SchemaDrawer 里）。
+   *  与 MCP 同两步：propose_objects 只建议，edit_draft import_objects 才落地。 */
   const generateFromTables = async (tables: { connection: string; table: string }[]) => {
     if (generating) return;
     setGenerating(true);
     try {
       await withLocalWrite(async () => {
-        const data = await apiPost<{ created: string[] }>("/api/generate_objects", { tables });
-        showToast(`已生成对象：${data.created.join("、")}（草稿，发布后生效）`);
+        const { object_types } = await apiPost<{ object_types: Record<string, unknown> }>("/api/propose_objects", { tables });
+        await apiPost("/api/edit_draft", { op: "import_objects", objects: object_types });
+        showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）`);
         setDrawerOpen(false);
         await refresh();
       });

@@ -140,12 +140,12 @@ describe("验收问题集跑批（真路由）", () => {
 
   it("对草稿试跑：用草稿的配置，不落验收记录；已发布跑批不受影响", async () => {
     const meta = (await import("../server/meta/store")).metaStore();
-    const s = await import("../server/engine/config/configStore");
+    const s = await import("../server/engine/draft");
     const { POST } = await import("../app/api/questions/route");
     await meta.addQuestion("test", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
     await meta.addQuestion("test", "有过保的设备吗", "1");
     // 草稿里删掉派生属性 in_warranty（无引用可删）；已发布里它还在
-    await s.applyDraft({ op: "remove_property", object: "equipment", name: "in_warranty" }, "test");
+    await s.editDraft({ op: "remove_property", object: "equipment", name: "in_warranty" }, "test");
     // 草稿试跑：在役照过；过保这条在草稿里找不到 in_warranty，执行出错
     const dres = await POST(new Request("http://x/api/questions?ws=test&run=1&target=draft", { method: "POST" }) as never);
     const ddata = await dres.json();

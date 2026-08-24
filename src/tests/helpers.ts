@@ -26,10 +26,10 @@ export async function cleanupRuntime(tmp: string): Promise<void> {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-/** 重启运行态后取配置存储：每用例一份干净内存态（configStore 是运行态携带的单例，重启后 import 到的就是它）。 */
+/** 重启运行态后取草稿链门面：每用例一份干净内存态（draft 的 Store 是运行态携带的单例，重启后 import 到的就是它）。 */
 export async function freshStore(tmp: string) {
   await restartRuntime(tmp);
-  return import("../server/engine/config/configStore");
+  return import("../server/engine/draft");
 }
 
 /** 当前运行态的元库门面（配合 freshStore 用：重启由 freshStore 管）。 */

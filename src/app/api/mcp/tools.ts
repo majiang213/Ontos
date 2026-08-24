@@ -11,10 +11,11 @@ import { runAction } from "@/server/engine/action/action";
 import { EngineReject } from "@/server/errors";
 import { actionSkeletonFor } from "@/server/engine/adjudication/adjudicate";
 import { proposeObjectsFor } from "@/server/engine/llmSlot";
-import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/engine/config/views";
+import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/engine/draft/views";
 import { listTables } from "@/server/engine/infra/load";
 import type { DriverRegistry } from "@/server/engine/infra/registry";
-import { applyDraft, getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
+import { editDraft } from "@/server/engine/draft/editDraft";
+import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
 import { metaStore } from "@/server/meta/store";
 import { withActionLog, withQueryLog } from "@/server/engine/logging";
 
@@ -47,13 +48,13 @@ export interface ToolDef {
 
 const spaceField = z.enum(["published", "draft"]).optional();
 
-/** apply_draft 的信封：base_rev 必填数字（缺了、或 "12" 这种字符串都 -32602）；其余键原样留给 op 联合 parse。 */
-const applyDraftEnvelope = z.looseObject({
+/** edit_draft 的信封：base_rev 必填数字（缺了、或 "12" 这种字符串都 -32602）；其余键原样留给 op 联合 parse。 */
+const editDraftEnvelope = z.looseObject({
   base_rev: z.number().int().nonnegative(),
 });
 
-/** apply_draft 的 inputSchema：op 联合由 mcpDraftOpSchema 派生（天然没有 save_*：摆位/弯折/钉点是界面状态），再并上必填的 base_rev。 */
-const applyDraftInputSchema = {
+/** edit_draft 的 inputSchema：op 联合由 mcpDraftOpSchema 派生（天然没有 save_*：摆位/弯折/钉点是界面状态），再并上必填的 base_rev。 */
+const editDraftInputSchema = {
   ...(z.toJSONSchema(mcpDraftOpSchema) as Record<string, unknown>),
   properties: { base_rev: { type: "integer", minimum: 0, description: "先 list_classes space=draft 拿到的 rev" } },
   required: ["base_rev"],
@@ -61,7 +62,7 @@ const applyDraftInputSchema = {
 
 const json = (s: z.ZodType) => z.toJSONSchema(s) as Record<string, unknown>;
 
-/** 顺序即 tools/list 顺序（测试钉死）：query → run_action → propose_* → 三个发现 → list_tables → apply_draft。 */
+/** 顺序即 tools/list 顺序（测试钉死）：query → run_action → propose_* → 三个发现 → list_tables → edit_draft。 */
 export const TOOLS: ToolDef[] = [
   {
     name: "query",
@@ -158,16 +159,16 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "apply_draft",
+    name: "edit_draft",
     description:
       "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（set_action / remove_action）。不能发布、放弃、裁决、回滚；摆位、线的弯折和端点钉点是界面状态，也不归这里。不接受 space。",
-    inputSchema: applyDraftInputSchema,
+    inputSchema: editDraftInputSchema,
     auth: true,
     handler: async (ctx, args) => {
-      const { base_rev, ...rest } = applyDraftEnvelope.parse(args); // 先剥信封再 parse op（判别联合不收信封字段）
+      const { base_rev, ...rest } = editDraftEnvelope.parse(args); // 先剥信封再 parse op（判别联合不收信封字段）
       const op = mcpDraftOpSchema.parse(rest); // 无 save_layout；Zod 失败 -32602
-      // 不在路由里比 getRev、不再套一层队列：base_rev 的比较在 applyDraft 的 enqueue task 开头
-      const next = await applyDraft(op, ctx.ws, { base_rev });
+      // 不在路由里比 getRev、不再套一层队列：base_rev 的比较在 editDraft 的 enqueue task 开头
+      const next = await editDraft(op, ctx.ws, { base_rev });
       return { payload: { ok: true, dirty: next.dirty, rev: getRev(ctx.ws), base_version: next.baseVersion, op: op.op, names: affectedNames(op) } };
     },
   },

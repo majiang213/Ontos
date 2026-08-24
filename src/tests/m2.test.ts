@@ -5,7 +5,7 @@ import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
-import { listClasses, readClass, search } from "../server/engine/config/views";
+import { listClasses, readClass, search } from "../server/engine/draft/views";
 import { Verdict } from "../server/engine/adjudication/verdict";
 import { CannedSlot } from "../server/engine/llmSlot";
 

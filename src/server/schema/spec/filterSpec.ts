@@ -1,5 +1,5 @@
 // 过滤树走查器 + 操作数形状规则 —— 附录 B「过滤」一节的单一事实源。
-// 校验（validate）、值形状核对（individual）、引用扫描（configStore）、下推（query）都消费它。
+// 校验（validate）、值形状核对（individual）、引用扫描（draft/refs）、下推（query）都消费它。
 // 新增保留字只改这里；关系解析也随之收在本文件（schema 层，引擎各文件不再各自心算）。
 
 import type { Filter, LinkType, OntologyConfig } from "../config";

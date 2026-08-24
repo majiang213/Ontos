@@ -1,9 +1,9 @@
 // applyOp 直测：解释器只做内存修改——手工 DraftState + published 即可，不经队列、不碰元库。
-// save_* 的落库在 applyDraft 的界面状态分流（configStore.test 的 rev 纪律覆盖），这里证「改内存」这一半。
+// save_* 的落库在 editDraft 的界面状态分流（editDraft.test 的 rev 纪律覆盖），这里证「改内存」这一半。
 
 import { describe, expect, it } from "vitest";
-import { applyOp } from "../server/engine/config/applyOp";
-import type { DraftState } from "../server/engine/config/pack";
+import { applyOp } from "../server/engine/draft/ops";
+import type { DraftState } from "../server/engine/draft/canvasPack";
 import type { OntologyConfig } from "../server/schema/config";
 
 const published = { object_types: {}, link_types: {} } as OntologyConfig;

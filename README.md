@@ -55,16 +55,18 @@ src/
 │   ├── page.tsx            入口：空间切换 + 画布页
 │   ├── globals.css         全部样式（设计 token + 组件类）
 │   └── api/                14 个路由：query（执行结构化查询）、
-│                           apply_draft（写工作副本）、publish（发布）、
-│                           generate_objects（AI 生成对象）、list_tables（读表结构）、
+│                           edit_draft（写工作副本）、publish（发布）、
+│                           propose_objects（AI 产对象建议，不落地）、list_tables（读表结构）、
 │                           list_candidates / compute_overlap / decide（整合三步）、
 │                           connections / workspaces、ontology / versions、
 │                           questions、mcp（外部 Agent 入口）
 ├── components/             CanvasPage.tsx（构建页壳：状态机与工具条）、
-│                           canvas/（OntologyCanvas、FloatingEdge / FloatingConnectionLine、layout 分层布局、router 走线）、
-│                           cards/（Bezel 卡面壳、ObjectCard 对象编辑卡、LinkDetailCard 关系详情、
-│                           VersionsCard 版本历史、PairCard 裁决面板、QuestionsCard 验收问题集卡、SchemaDrawer 表结构抽屉）、
-│                           forms/（forms 连接/新建对象/字段表单、ActionForm 动作表单、actionView 动作区纯函数）、
+│                           canvas/（OntologyCanvas、FloatingEdge / FloatingConnectionLine、
+│                           layout 分层布局、router 走线、geometry 钉点几何、connectSession 拖线会话）、
+│                           cards/（Bezel 卡面壳、ObjectCard 对象编辑卡、FieldForm 字段表单、
+│                           LinkDetailCard 关系详情、VersionsCard 版本历史、PairCard 裁决面板、
+│                           QuestionsCard 验收问题集卡、SchemaDrawer 表结构抽屉）、
+│                           forms/（forms 连接/新建对象/连线表单、ActionForm 动作表单、actionView 动作区纯函数）、
 │                           ontFrame.ts（帧→视图模型：轮询 toast、收卡策略、版本/发布钮文案）、
 │                           revWatcher.ts（轮询纪律）、wsClient.ts（API 适配器）
 ├── server/                 后端：引擎、校验、元库、运行态、种子配置
@@ -73,23 +75,30 @@ src/
 │   │   │                   assemble（下推对齐组装 + createEnv）、evaluate（when/派生/过滤求值）、
 │   │   │                   compare（行级比较与过滤形状校验）、expr（表达式）、
 │   │   │                   filterOp（过滤运算符表）、questions（验收跑批：失败分阶段 + 期望比对）
-│   │   ├── action/         动作执行（核前置、定效应、写回、留痕）
-│   │   ├── config/         configStore（工作副本与已发布的唯一出入口）、applyOp（编辑操作落草稿）、
-│   │   │                   pack（画布快照打包）、refs（删除前的引用扫描）、validate（语义校验 + 动作形状四查）、
+│   │   ├── action/         动作执行（核前置、定效应、写回、留痕）+ notify（告知：变更事件拼装，外发预留）
+│   │   ├── draft/          改工作副本这条链：editDraft（受理：排队/base_rev/分流）、commit（落定：三查回退/收尾）、
+│   │   │                   current（当前两份：已发布 + 工作副本）、versions（版本链：发布/放弃/回滚）、
+│   │   │                   canvasPack（画布包编解码与水合）、canvasState（界面状态三键跟随）、
+│   │   │                   ops/（op 分派 index + 厚不变量 editObject/editProperty/editLink/importObjects/replaceObject）、
+│   │   │                   refs（删除前的引用扫描）、sameConfig（结构比较）、validate（语义校验 + 动作形状四查）、
 │   │   │                   skeletons（set_fields 骨架与级联）、views（配置三视图）、lineage（列→属性反查）
 │   │   ├── adjudication/   adjudicate（裁决落地 + 转化骨架）、pairs（裁决流水线：候选/交集率/定案）、
 │   │   │                   eligibility（候选对资格谓词）、overlap / normalize（交集率与归一化）、
 │   │   │                   verdict（五关系类型枚举与倾向文案）
-│   │   ├── infra/          driver（源驱动接口 + 方言）、fixture / sqlDriver（两种实现）、
-│   │   │                   registry / load（驱动注册表 + 连接保存/删除生命周期）、
-│   │   │                   logging（问数/动作留痕编排）、workspace（工作空间）
+│   │   ├── infra/          driver（源驱动接口 + 方言）、sqlDriver（MySQL/PG）、sqliteDriver（SQLite 文件）、
+│   │   │                   fixture（演示内存库，继承 sqliteDriver）、registry / load（驱动注册表 + 连接生命周期）、
+│   │   │                   workspace（工作空间）
+│   │   ├── logging.ts      问数/动作留痕编排
 │   │   └── llmSlot.ts      模型槽位 + 离线回退
 │   ├── schema/             Zod 形状：config（本体配置）、request（问数/动作请求）、ops（编辑操作）
 │   │   └── spec/           形状规约：filterSpec（$link 过滤树的唯一遍历入口与关系解析）、
 │   │                       valueSpec（取值来源原语：{ from: X } 词表的唯一事实源）、
 │   │                       actionSpec（动作形状规约：位置规则、表单子集、效应种类/取值位置走查）
 │   ├── meta/               平台元数据库：store.ts（门面）+ backends.ts（SQLite / MySQL 两种后端，ONTOS_META_DSN 切换）
-│   │                       + types.ts + stores/（工作空间/版本链/连接/裁决/问题集/留痕/序号 七个关切存储）
+│   │                       + ddl/（sqlite.ts / mysql.ts，方言各一份）+ types.ts
+│   │                       + stores/（工作空间/版本链/连接/裁决/问题集/留痕/序号 七个关切存储）
+│   ├── errors.ts           引擎/草稿/连接/空间拒绝类型
+│   ├── etag.ts             画布轮询 ETag/304
 │   ├── runtime.ts          运行态（元库/注册表/配置存储的进程级单例，测试可整套换掉）
 │   └── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
 └── tests/                  vitest；引擎行为约定钉在测试里
@@ -97,9 +106,9 @@ src/
 
 四条主线：
 
-- **建模流**：画布操作 → `POST /api/apply_draft` 写工作副本 → `publish` 走 `validate` 校验 → `configStore` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 也能经 MCP 的 `apply_draft` 写工作副本（带 `base_rev` 防盖写），开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
+- **建模流**：勾表「生成对象」→ `POST /api/propose_objects`（只建议）→ `POST /api/edit_draft` `{ op: import_objects }` 写工作副本 → `publish` 走 `validate` 校验 → `versions` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 同一套名字：MCP `propose_objects` 再 `edit_draft`（带 `base_rev` 防盖写）。开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
 - **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/query/questions`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
-- **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具（用法见 `skills/ontos-action-run/SKILL.md`）→ `engine/action` 核前置、定效应、按 `project` 写回源库并留痕。
+- **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具（用法见 `skills/ontos-action-run/SKILL.md`）→ `engine/action` 核前置、定效应、按效应和 `sources` 写回源库并留痕；有 `inform` 时拼装变更事件随结果返回（外发本期预留）。
 - **边界**：业务数据永不进平台，引擎只在内存拼装；`src/server/config` 里只有本体模板和平台自己的元库。
 
 ## 接口一览
@@ -110,16 +119,16 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码）、保存（先测连通再落库）、删除 | `forms.tsx`（仅 POST） |
-| `/api/list_tables` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释） + 3 行脱敏采样，源表只读 | `CanvasPage.tsx`（两处） |
+| `/api/connections` GET/POST/DELETE | 连接管理：列表（剥掉密码、options、db_name）、保存（先测连通再落库；type 为 mysql / pg / sqlite）、删除 | `forms.tsx`（仅 POST） |
+| `/api/list_tables` GET | 表结构内省：每个连接的表定义（列名/类型/主键/中文注释）+ 3 行脱敏采样；抽屉只画列定义，采样不展示。MCP 的同名工具不下发采样 | `CanvasPage.tsx`（两处） |
 
 ### 本体构建（画布页）
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/generate_objects` POST | 逆向建模：选中的表 → 内省 → LLM 产草稿 → 对象以草稿态上画布，每个新类自动带一条 `set_fields` 动作 | `CanvasPage.tsx` |
+| `/api/propose_objects` POST | 逆向建模建议：选中的表 → 内省 → LLM 产 `object_types`，不写工作副本。与 MCP `propose_objects` 同名同义；落地由画布再发 `edit_draft` `{ op: import_objects }` | `CanvasPage.tsx` |
 | `/api/ontology` GET | 本体视图：画布读工作副本，`states` 标出新增/改过/一致；带 `rev` 与 `action_changes`（动作差集），支持 ETag/304——画布每 2 秒轮询它当监视器 | `CanvasPage.tsx` |
-| `/api/apply_draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx` |
+| `/api/edit_draft` POST | 工作副本编辑：形状不合法 400，操作不合法（重名、被引用等）422 | `CanvasPage.tsx` |
 | `/api/publish` POST/DELETE | 发布草稿（升版本、立即可查）/ 放弃草稿回退到已发布快照 | `CanvasPage.tsx` |
 | `/api/versions` GET/POST | 版本历史列表 / 把指定版覆盖到当前工作副本（不插入新版本） | `CanvasPage.tsx` |
 
@@ -135,14 +144,14 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/mcp` POST | MCP 端点：JSON-RPC 2.0，外部 Agent 调 Ontos 工具（initialize / tools/list / tools/call）；九个工具：query / run_action / propose_objects / propose_action / list_classes / read_class / search / list_tables / apply_draft。发现类工具可选 `space: "draft"` 读工作副本（缺省已发布）；`apply_draft` 写工作副本（必带 `base_rev`）。用法见 `skills/` 四个目录 | 无——外部 Agent 用 |
+| `/api/mcp` POST | MCP 端点：JSON-RPC 2.0，外部 Agent 调 Ontos 工具（initialize / tools/list / tools/call）；九个工具：query / run_action / propose_objects / propose_action / list_classes / read_class / search / list_tables / edit_draft。发现类工具可选 `space: "draft"` 读工作副本（缺省已发布）；`edit_draft` 写工作副本（必带 `base_rev`）。用法见 `skills/` 四个目录 | 无——外部 Agent 用 |
 | `/api/query` POST | 查询服务：直接执行结构化查询 JSON，返回答案行 + 取数路径 + 留痕 | 无——REST 形态的只读入口 |
 
 ### 验收
 
 | 接口 | 描述 | 前端调用处 |
 |---|---|---|
-| `/api/questions` GET/POST/DELETE | 验收问题集：增删查，GET 带当前已发布版本；POST `?run=1` 全量跑一遍（body `{ id }` 只跑一条）。期望结果两种写法：纯数字（比对行数）或 `字段=值`；失败分阶段记（编译失败/执行出错/答案不符），原因落 `detail` | `QuestionsCard.tsx` |
+| `/api/questions` GET/POST/DELETE | 验收问题集：增删查，GET 带当前已发布版本；POST `?run=1` 全量跑一遍（body `{ id }` 只跑一条）；`&target=draft` 对当前草稿试跑，结果不落验收记录。期望结果两种写法：纯数字（比对行数）或 `字段=值`；失败分阶段记（编译失败/执行出错/答案不符），原因落 `detail` | `QuestionsCard.tsx` |
 
 ### 空间管理
 
@@ -157,10 +166,10 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 按下面的顺序读，半小时能建立全貌。每个文件头部注释先写职责，先看注释再读实现。
 
 1. `src/server/config/ontology.yaml` 配 `src/server/schema/config.ts`：先读本体的真实形状和它的校验，知道引擎在执行什么。
-2. `src/server/engine/infra/driver.ts`：引擎与源库之间的唯一接口。再看 `fixture.ts`（内存实现，演示与测试都靠它）和 `sqlDriver.ts`（MySQL/PG 实现），同在 `infra/`。
+2. `src/server/engine/infra/driver.ts`：引擎与源库之间的唯一接口。再看 `sqlDriver.ts`（MySQL/PG）、`sqliteDriver.ts`（SQLite 文件）和 `fixture.ts`（演示内存库，继承 sqliteDriver），同在 `infra/`。
 3. `src/server/engine/query/individual.ts` 配 `query/query.ts`：读个体（下推、对齐、派生）在 individual；问数树投影在 query。
 4. `src/server/engine/action/action.ts`：写的路径——前置、效应、投影、留痕；读个体走 individual，不经过 query。
-5. `src/server/engine/config/configStore.ts` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存。引用扫描在 `config/refs.ts`（纯函数），资格谓词在 `adjudication/eligibility.ts`，进程级单例收口在 `runtime.ts`。
+5. `src/server/engine/draft/` 配 `src/server/meta/store.ts`：工作副本、已发布、版本链怎么存——受理在 `editDraft.ts`、落定在 `commit.ts`、当前两份在 `current.ts`、版本链在 `versions.ts`、op 语义在 `ops/`。引用扫描在 `draft/refs.ts`（纯函数），资格谓词在 `adjudication/eligibility.ts`，进程级单例收口在 `runtime.ts`。
 6. `src/app/api/mcp/route.ts` 配 `tools.ts` 与 `skills/`（四个目录）：外部 Agent 的完整入口——route 只剩信封与调度，九个工具登记在 tools.ts 一张表（说明/inputSchema/space/令牌/handler），skill 正文是调用方法论。
 7. `src/tests/engine.test.ts`：引擎的行为约定。改引擎先跑 `npm test`，全绿再谈别的。
 
@@ -173,9 +182,9 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 | 画布 | @xyflow/react（ReactFlow 12）+ @dagrejs/dagre | 本体画布；dagre 负责自动分层布局 |
 | 校验 | Zod 4 | 本体配置、问数/动作请求、编辑操作三套 schema；模型产出也过同一套 |
 | 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llmSlot` 的三个槽位出现；不设 key 走离线确定性回退 |
-| 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；演示 fixture 与平台元库走 node:sqlite |
+| 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；用户接入的 SQLite 文件走 `sqliteDriver`；演示 fixture 与平台元库走 node:sqlite |
 | 状态 | React 自带 useState / useRef | 无状态库 |
-| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，254 个用例 |
+| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，291 个用例 |
 | 图标 | @phosphor-icons/react | |
 
 ## 运行
@@ -193,5 +202,6 @@ npm test       # 引擎 golden 测试（vitest）
 | 变量 | 作用 | 缺省 |
 |---|---|---|
 | `OPENAI_API_KEY` | 接真模型（OpenAI 兼容协议，通用键，同 Claude Code / Codex 惯例）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（演示四问可用） |
-| `OPENAI_BASE_URL` / `OPENAI_MODEL` | 换接入点/模型（任何 OpenAI 兼容端点均可，含内部网关）；`OPENAI_MODEL` 必填，不设报错 | `https://api.x.ai/v1`（BASE_URL） |
+| `OPENAI_BASE_URL` / `OPENAI_MODEL` | 换接入点/模型（任何 OpenAI 兼容端点均可，含内部网关）；设了 `OPENAI_API_KEY` 则 `OPENAI_MODEL` 必填，不设报错 | BASE_URL 不设 = `@ai-sdk/xai` 默认端点（`https://api.x.ai/v1`） |
 | `ONTOS_TOKEN` | 写端点令牌闸（连接/发布/裁决/动作等要写库的 API 需 `Authorization: Bearer <token>`） | 不设 = 演示模式全放开 |
+| `ONTOS_META_DSN` | 平台元库连接串。`mysql://…` 走 MySQL | 不设 = 单文件 SQLite `src/server/config/ontos-meta.db` |

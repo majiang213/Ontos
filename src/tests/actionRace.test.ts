@@ -25,7 +25,7 @@ describe("动作并发原子性", () => {
 
   it("并发重发同一 create（登记新设备）：先到的插入，后到的被前置拦（各源已有此序列号）", async () => {
     const { runAction } = await import("../server/engine/action/action");
-    const { getPublished } = await import("../server/engine/config/configStore");
+    const { getPublished } = await import("../server/engine/draft");
     const { getDriverRegistry } = await import("../server/engine/infra/load");
     const m = await meta();
     const config = (await getPublished(WS)).config;

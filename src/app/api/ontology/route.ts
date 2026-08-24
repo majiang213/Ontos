@@ -1,12 +1,12 @@
 // 本体视图：GET /api/ontology
-// 画布读工作副本（已发布 + 未发布改动）；引擎读已发布快照（见 src/server/engine/configStore.ts 的 getPublished）。
+// 画布读工作副本（已发布 + 未发布改动）；引擎读已发布快照（见 src/server/engine/draft/current.ts 的 getPublished）。
 // states 标出每个对象的草稿态：new=未发布的新对象，modified=与已发布不同，same=一致。
 // rev + ETag 供画布轮询当监视器：内容没变回 304。200 与 304 都带 Cache-Control: no-store——
 // 缺了它浏览器可能把 200 缓存起来，轮询就看不见外部（MCP）写入。
 
 import { NextResponse } from "next/server";
-import { getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
-import { draftDiff } from "@/server/engine/config/views";
+import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
+import { draftDiff } from "@/server/engine/draft/views";
 import { etagOf } from "@/server/etag";
 import { respond, wsOf } from "@/app/api/_shared";
 

@@ -1,5 +1,5 @@
 // 运行态 —— 平台进程级状态的唯一构造点。
-// 三份内存态（元库、驱动注册表、配置存储）挂同一个对象，globalThis 只挂这一个键：
+// 三份内存态（元库、驱动注册表、工作副本存储）挂同一个对象，globalThis 只挂这一个键：
 // Next dev 下各路由包各有模块实例，挂全局才共享同一份；测试 installRuntime(makeRuntime({ cwd: tmp }))
 // 整套换掉——不再 chdir，也不再逐个 reset。cwd 与 ONTOS_META_DSN 只在 makeRuntime 读一次。
 // 单进程假设写在这里：已发布快照与工作副本的热缓存挂在进程里；编辑写入
@@ -8,7 +8,7 @@
 
 import type { MetaStore } from "./meta/store";
 import type { DriverRegistry } from "./engine/infra/registry";
-import type { Store as ConfigStore } from "./engine/config/configStore";
+import type { Store as DraftStore } from "./engine/draft/current";
 import type { LlmSlot } from "./engine/llmSlot";
 
 export interface OntosRuntime {
@@ -16,9 +16,9 @@ export interface OntosRuntime {
   metaDsn?: string;
   meta?: MetaStore;
   registries?: Map<string, DriverRegistry>;
-  stores?: Map<string, ConfigStore>;
+  stores?: Map<string, DraftStore>;
   llmSlot?: LlmSlot;
-  /** 每工作空间一条写队列（configStore.enqueue）：与它保护的 stores 挂同一层——
+  /** 每工作空间一条写队列（draft/current.enqueue）：与它保护的 stores 挂同一层——
    *  挂模块级会在 Next dev 多路由包下各持一条，串行化承诺恰好失效；installRuntime 整套换掉才真隔离。 */
   tails?: Map<string, Promise<void>>;
   /** 每空间一条动作串行队列（runAction）：发号（generate sequence）与 create 幂等都是 check-then-act，
@@ -26,7 +26,7 @@ export interface OntosRuntime {
   actionTails?: Map<string, Promise<void>>;
 }
 
-/** 键控串行队列（configStore 的 tails 与 runAction 的 actionTails 同款，一处维护）：
+/** 键控串行队列（draft 写入的 tails 与 runAction 的 actionTails 同款，一处维护）：
  *  prev 失败也续链（前一次拒绝不拖死后续）；拒绝仍传给调用方。 */
 export function enqueueKeyed<T>(map: Map<string, Promise<void>>, key: string, task: () => Promise<T>): Promise<T> {
   const prev = map.get(key) ?? Promise.resolve();

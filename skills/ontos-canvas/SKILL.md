@@ -1,11 +1,11 @@
 ---
 name: ontos-canvas
-description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：把表建成对象、增删字段、建关系、整份替换未锁定的类。当任务涉及 Ontos、本体/Ontology、逆向建模、改画布、加对象/字段/关系时使用。触发词：ontos、本体、ontology、改画布、建模、生成对象、apply_draft。
+description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：把表建成对象、增删字段、建关系、整份替换未锁定的类。当任务涉及 Ontos、本体/Ontology、逆向建模、改画布、加对象/字段/关系时使用。触发词：ontos、本体、ontology、改画布、建模、生成对象、edit_draft。
 ---
 
 # Ontos 改画布（草稿世界 · 读写）
 
-画布上的内容 = 工作副本（草稿）：已发布 + 没发布的改动。你经 `apply_draft` 写的就是这份草稿——**写完不生效**：问数（`query`）与已发布动作（`run_action`）只读已发布快照，人在画布上点「发布」才生效。发布、放弃、裁决、回滚都是人的关卡，**没有这些工具，也不要去找**。
+画布上的内容 = 工作副本（草稿）：已发布 + 没发布的改动。你经 `edit_draft` 写的就是这份草稿——**写完不生效**：问数（`query`）与已发布动作（`run_action`）只读已发布快照，人在画布上点「发布」才生效。发布、放弃、裁决、回滚都是人的关卡，**没有这些工具，也不要去找**。
 
 这个 skill 管对象/字段/关系/导入/整份替换。写动作定义（`set_action` / `remove_action`）归 `ontos-action`；查数归 `ontos-query`；执行动作归 `ontos-action-run`。
 
@@ -17,7 +17,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 <!-- END SHARED: mcp-access -->
 
 **工具入参不带空间名**；空间只由 URL 决定。人开着哪个空间的画布，你就用哪个 `ws`，不然人看不见你的改动。
-- 鉴权：`apply_draft` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回 `-32001`。发现类工具只读放开。
+- 鉴权：`edit_draft` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回 `-32001`。发现类工具只读放开。
 - 错误都在信封里（HTTP 总是 200）：
   - `-32602` 入参形状不合法——缺 `base_rev`、`base_rev` 是字符串、`space` 传错工具，都在这档；
   - `-32000` 领域拒绝——`message` 是中文且**指明错在哪**（重名、不存在、被引用、锁定、rev 冲突），照着改；
@@ -27,7 +27,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-  "params": { "name": "apply_draft", "arguments": { "op": "add_property", "object": "department", "name": "dept_name", "type": "string", "base_rev": 12 } } }
+  "params": { "name": "edit_draft", "arguments": { "op": "add_property", "object": "department", "name": "dept_name", "type": "string", "base_rev": 12 } } }
 ```
 
 成功时读 `result.structuredContent`：`{ ok, dirty, rev, base_version, op, names }`。
@@ -41,18 +41,18 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 | `list_classes` | 列草稿里的类（带 `state` / `dirty` / `rev` / `outlets`） | `{ space: "draft" }` |
 | `read_class` | 读草稿里一个类的字段、关系、来源对照、能不能整份替换（`replaceable` / `replace_blockers`） | `{ name, space: "draft" }` |
 | `search` | 在草稿的类名、说明、关系名里检索 | `{ text, space: "draft" }` |
-| `apply_draft` | 改草稿，一次只改一步 | `{ op, ...，必带 base_rev }` |
+| `edit_draft` | 改草稿，一次只改一步 | `{ op, ...，必带 base_rev }` |
 
-**发现类工具必须传 `space: "draft"`**——缺省读已发布，你会看不见人还没发布的改动，也会盖掉它们。`list_tables` / `propose_objects` / `apply_draft` **不接受** `space`（传了 `-32602`）。
+**发现类工具必须传 `space: "draft"`**——缺省读已发布，你会看不见人还没发布的改动，也会盖掉它们。`list_tables` / `propose_objects` / `edit_draft` **不接受** `space`（传了 `-32602`）。
 
 ## 方法论（四步）：发现草稿 → 组装 op → 应用 → 停下请人发布
 
 1. **发现（草稿）**：`list_classes { space: "draft" }` 拿类清单和 **`rev`**；`read_class { name, space: "draft" }` 看字段与来源对照。需要表名时用 `list_tables`，不要编连接名。`query` 读的是已发布快照，**不能当画布真相**。
 2. **组装**：严格按下表拼**一条** op。从某张表建新对象：先 `propose_objects`（不落地），检查类名是否已在草稿里。
-3. **应用**：`apply_draft`，带上刚读到的 `rev` 作为 `base_rev`。`-32000` 说「草稿已变」就是 rev 过期——重新 `list_classes { space: "draft" }` 拿新 `rev` 再发；别的 `-32000` 读 message 修 op 再发。**同一个错误不要原样重发。**
+3. **应用**：`edit_draft`，带上刚读到的 `rev` 作为 `base_rev`。`-32000` 说「草稿已变」就是 rev 过期——重新 `list_classes { space: "draft" }` 拿新 `rev` 再发；别的 `-32000` 读 message 修 op 再发。**同一个错误不要原样重发。**
 4. **停下**：告诉人「草稿已改，请到画布上看；要问数/动作生效，请在画布上点发布」。新建了跨源对象时，请人点「疑似重复」做裁决。**不要**寻找发布、放弃、裁决、回滚工具——没有这些工具。
 
-## apply_draft 的 op 一览（一次调用一条，不收数组）
+## edit_draft 的 op 一览（一次调用一条，不收数组）
 
 | op | 关键入参 | 说明 |
 |---|---|---|
@@ -74,20 +74,20 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 
 ```
 propose_objects 得到 object_types
-  ├─ 草稿里没有这个类名 → apply_draft import_objects
+  ├─ 草稿里没有这个类名 → edit_draft import_objects
   └─ 草稿里已有这个类名 → read_class 看 replaceable
-       ├─ true  → apply_draft replace_object（def = object_types 里那个类体）
+       ├─ true  → edit_draft replace_object（def = object_types 里那个类体）
        └─ false → 逐步 add_property / update_object / set_identity，或告诉人去画布改
                   不要另起一个同义类名，不要 delete_object 再 import_objects
 ```
 
 ## 红线
 
-1. 不 `query` / `run_action`；不把它们的返回当作画布内容。写动作归 `ontos-action`：`apply_draft` 只用上表的对象/字段/关系/导入/替换 op，不用 `set_action` / `remove_action`。
+1. 不 `query` / `run_action`；不把它们的返回当作画布内容。写动作归 `ontos-action`：`edit_draft` 只用上表的对象/字段/关系/导入/替换 op，不用 `set_action` / `remove_action`。
 2. 不把 `read_class` 的返回塞进 `replace_object.def`。
 3. 没挂来源的类可以整份替换（残缺生成靠这个补来源）；一换会盖掉人在这个类上加的字段——人已经在画布上改过就改用逐步操作。
 4. 不对已锁定类（含已经发布过的类）`delete_object` 再 `import_objects` 来绕过锁定（会拆关系）。引擎不拦这条路，靠这条红线和人点发布/放弃。
 5. 不调用、不臆造 `publish` / `discard` / `decide` / `rollback` / `generate` / `save_layout` 工具。摆位（节点位置）不归你写。
 6. 不编造类名、字段名、连接名、表名——拿不准就 `list_classes space=draft` / `list_tables`。
-7. `query` / `run_action` / `propose_objects` / `apply_draft` / `list_tables` 不要传 `space`。
+7. `query` / `run_action` / `propose_objects` / `edit_draft` / `list_tables` 不要传 `space`。
 8. 同一次会话里 `initialize` 只做一次；`notifications/*` 等不到响应是正常的。

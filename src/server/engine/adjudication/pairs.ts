@@ -3,7 +3,7 @@
 
 import type { ObjectType } from "../../schema/config";
 import { metaStore } from "../../meta/store";
-import { getDraft } from "../config/configStore";
+import { getDraft } from "../draft/current";
 import { adjudicate, type Verdict } from "./adjudicate";
 import { connectionsOf, hasSources, isCrossSource, pairEligible, pairKey, SAME_SOURCE_OK_VERDICTS } from "./eligibility";
 import { EngineReject } from "../../errors";

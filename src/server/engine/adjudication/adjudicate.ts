@@ -6,9 +6,9 @@ import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../.
 import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
 import { EngineReject } from "../../errors";
-import { dropClass } from "../config/applyOp";
-import { mutateDraft } from "../config/configStore";
-import { FIELDS_UPDATE_ACTION, fieldsUpdateAction, removeFieldsUpdateKeys } from "../config/skeletons";
+import { dropClass } from "../draft/ops/editObject";
+import { mutateDraft } from "../draft/editDraft";
+import { FIELDS_UPDATE_ACTION, fieldsUpdateAction, removeFieldsUpdateKeys } from "../draft/skeletons";
 import { Verdict } from "./verdict";
 
 export type { Verdict } from "./verdict";
@@ -241,7 +241,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
   }
 }
 
-/** 事务入口：走 configStore 的草稿变更通道（dirty 重算 + 立即校验，不合法则回退）。 */
+/** 事务入口：走 draft 包的草稿变更通道（dirty 重算 + 立即校验，不合法则回退）。 */
 export function adjudicate(pair: { class_a: string; class_b: string }, verdict: Verdict, stageNames?: { from: string; to: string }, ws?: string): Promise<void> {
   return mutateDraft((d) => applyVerdict(d, pair, verdict, stageNames), ws).then(() => undefined);
 }

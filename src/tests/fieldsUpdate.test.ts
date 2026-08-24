@@ -1,5 +1,5 @@
 // set_fields：导入自动生成与级联测试
-// 从 configStore.test.ts 拆出：同一运行态纪律（每用例一份干净内存态，test 空间跑演示模板数据）。
+// 从 editDraft.test.ts 拆出：同一运行态纪律（每用例一份干净内存态，test 空间跑演示模板数据）。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, freshStore, setupRuntime } from "./helpers";
@@ -30,7 +30,7 @@ describe("set_fields：导入自动生成与级联", () => {
 
   it("导入即带 set_fields：唯一键与派生属性不可写；发布过闸", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft(
+    await s.editDraft(
       { op: "import_objects", objects: { dev_auto: mkCls("sn", ["name", "weight"], "cauto", { extraProps: { status: { type: "string", derived: [{ when: { cauto: true }, value: "active" }] } } }) } },
       WS
     );
@@ -42,14 +42,14 @@ describe("set_fields：导入自动生成与级联", () => {
 
   it("无可写字段（只有唯一键）不生成", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "import_objects", objects: { tag_only: mkCls("code", [], "ctag") } }, WS);
+    await s.editDraft({ op: "import_objects", objects: { tag_only: mkCls("code", [], "ctag") } }, WS);
     expect((await s.getDraft(WS)).draft.object_types.tag_only.actions).toBeUndefined();
   });
 
   it("字段改名：set_fields 的键跟着走，发布不炸", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "import_objects", objects: { dev_ren: mkCls("sn", ["note"], "cren", { unmapped: ["note"] }) } }, WS);
-    await s.applyDraft({ op: "update_property", object: "dev_ren", name: "note", new_name: "remark" }, WS);
+    await s.editDraft({ op: "import_objects", objects: { dev_ren: mkCls("sn", ["note"], "cren", { unmapped: ["note"] }) } }, WS);
+    await s.editDraft({ op: "update_property", object: "dev_ren", name: "note", new_name: "remark" }, WS);
     const dev = (await s.getDraft(WS)).draft.object_types.dev_ren;
     expect(updatePropsOf(dev)).toEqual({ remark: { from: "request" } });
     await expect(s.publish(WS)).resolves.toBeDefined();
@@ -57,27 +57,27 @@ describe("set_fields：导入自动生成与级联", () => {
 
   it("字段删除：set_fields 摘键；摘空了整条动作撤掉", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft(
+    await s.editDraft(
       { op: "import_objects", objects: { dev_del: mkCls("sn", ["note", "color"], "cdel", { unmapped: ["note"] }), dev_empty: mkCls("sn", ["note"], "cemp", { unmapped: ["note"] }) } },
       WS
     );
-    await s.applyDraft({ op: "remove_property", object: "dev_del", name: "note" }, WS);
+    await s.editDraft({ op: "remove_property", object: "dev_del", name: "note" }, WS);
     expect(updatePropsOf((await s.getDraft(WS)).draft.object_types.dev_del)).toEqual({ color: { from: "request" } });
-    await s.applyDraft({ op: "remove_property", object: "dev_empty", name: "note" }, WS);
+    await s.editDraft({ op: "remove_property", object: "dev_empty", name: "note" }, WS);
     expect((await s.getDraft(WS)).draft.object_types.dev_empty.actions).toBeUndefined(); // 摘空 → 整条撤
     await expect(s.publish(WS)).resolves.toBeDefined();
   });
 
   it("源映射的引用仍然拦改名与删除（豁免的只有 set_fields）", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "import_objects", objects: { dev_map: mkCls("sn", ["note"], "cmap") } }, WS); // note 进了 fields
-    await expect(s.applyDraft({ op: "update_property", object: "dev_map", name: "note", new_name: "remark" }, WS)).rejects.toThrow(/仍被引用/);
-    await expect(s.applyDraft({ op: "remove_property", object: "dev_map", name: "note" }, WS)).rejects.toThrow(/仍被引用/);
+    await s.editDraft({ op: "import_objects", objects: { dev_map: mkCls("sn", ["note"], "cmap") } }, WS); // note 进了 fields
+    await expect(s.editDraft({ op: "update_property", object: "dev_map", name: "note", new_name: "remark" }, WS)).rejects.toThrow(/仍被引用/);
+    await expect(s.editDraft({ op: "remove_property", object: "dev_map", name: "note" }, WS)).rejects.toThrow(/仍被引用/);
   });
 
   it("部分重叠：公共属性挪到上位对象，两类的 set_fields 摘键", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "import_objects", objects: { pa: mkCls("a_no", ["name", "a_only"], "ca"), pb: mkCls("b_no", ["name", "b_only"], "cb") } }, WS);
+    await s.editDraft({ op: "import_objects", objects: { pa: mkCls("a_no", ["name", "a_only"], "ca"), pb: mkCls("b_no", ["name", "b_only"], "cb") } }, WS);
     const { decide } = await import("../server/engine/adjudication/pairs");
     const { Verdict } = await import("../server/engine/adjudication/verdict");
     await decide({ class_a: "pa", class_b: "pb", verdict: Verdict.Overlap }, WS);
@@ -90,7 +90,7 @@ describe("set_fields：导入自动生成与级联", () => {
 
   it("同一：留下类的 set_fields 不吸收并入属性，被并类的动作随之消失", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "import_objects", objects: { sa: mkCls("x", ["p1"], "csa"), sb: mkCls("x", ["p2"], "csb") } }, WS);
+    await s.editDraft({ op: "import_objects", objects: { sa: mkCls("x", ["p1"], "csa"), sb: mkCls("x", ["p2"], "csb") } }, WS);
     const { decide } = await import("../server/engine/adjudication/pairs");
     const { Verdict } = await import("../server/engine/adjudication/verdict");
     await decide({ class_a: "sa", class_b: "sb", verdict: Verdict.Same }, WS);

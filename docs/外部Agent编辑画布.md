@@ -4,9 +4,11 @@
 |---|---|
 | 作者 | TBD |
 | 日期 | 2026-08-22 |
-| 状态 | Draft |
+| 状态 | 已落地（2026-08-22～24） |
 | 仓库 | `/Users/majiang/Documents/freespace/js/ontos` |
 | 产品约束 | 画布仍是工作台；ReAct / 工具循环留在 Claude Code / Codex / 任意 MCP 客户端；Ontos 一次调用一次结果；不在页内加对话列、Copilot 侧栏、「再说一句」再生卡 |
+
+下文是当时的设计。现行入口、工具清单与轮询纪律以 README、`skills/`、AGENTS.md 为准；op 以 `src/server/schema/ops.ts` 为准（16 个：14 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`）。
 
 ---
 
@@ -26,10 +28,10 @@
 
 | 路径 | 读什么 | 写什么 | 是否上画布 |
 |---|---|---|---|
-| 画布 UI | `GET /api/ontology` → `getDraft` | `POST /api/apply_draft` → `applyDraft`；`POST /api/generate_objects` → 槽位 + `import_objects` | 是 |
+| 画布 UI | `GET /api/ontology` → `getDraft` | `POST /api/apply_draft` → `applyDraft`；`POST /api/propose_objects` 再 `apply_draft` `{ op: import_objects }` | 是 |
 | MCP | `getPublished`（`list_classes` / `read_class` / `search` / `query` / `run_action` / `propose_action`） | 只有 `run_action`（改源库个体，不改本体） | `propose_*` 明确不落地 |
 
-`src/app/api/mcp/route.ts` 在 `tools/call` 入口无条件 `getPublished`。`propose_objects` 用 `resolveTableInfos` + `getSlot().proposeObjects` 产对象，返回 `{ object_types }` 即停——与 `src/app/api/generate_objects/route.ts` 同槽位，但 generate 会再 `applyDraft({ op: "import_objects", objects })`。
+`src/app/api/mcp/route.ts` 在 `tools/call` 入口无条件 `getPublished`。`propose_objects` 用 `resolveTableInfos` + `getSlot().proposeObjects` 产对象，返回 `{ object_types }` 即停——与 `src/app/api/propose_objects/route.ts` 同名同义。落地走 `apply_draft` `{ op: import_objects }`。
 
 `src/server/schema/ops.ts` 的 `draftOpSchema` 已是画布编辑语言：`create_object` / `delete_object` / `update_object` / `add_property` / `remove_property` / `set_identity` / `create_link` / `delete_link` / `import_objects` / `save_layout`。MCP 一条都没暴露。
 
@@ -448,7 +450,7 @@ draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），�
 | `replace_object`（新判别值） | `POST /api/apply_draft` 可用，UI 无按钮 | `apply_draft` | 允许，受锁定规则约束；类体同样剥掉 `actions` / `axioms` |
 | `set_action` / `remove_action`（新判别值） | 对象卡「新建动作」/「编辑」/「删除」→ `POST /api/apply_draft` | `apply_draft` | 允许。人与 Agent 同权。删掉转化关系的唯一引用动作会被语义校验拦下（§2.2 规则 4） |
 | `save_layout` | 画布拖动 / 「整理布局」 | **禁止** | 摆位是界面状态；新节点走 dagre |
-| 勾表并「生成对象」 | `POST /api/generate_objects` | **禁止** | 画布关卡。拆成 propose + import，循环在外 |
+| 勾表并「生成对象」 | 画布连发 `propose_objects` + `apply_draft` `{ op: import_objects }` | **禁止**做成第三条 MCP 写工具 | 画布关卡。Agent 自己拆成 propose + import |
 | `propose_objects` / `propose_action` | 无 | 保持，只建议 | 建议；落地分别走 `import_objects` / `set_action` |
 | `query` / `run_action` | `POST /api/query`；动作无 REST 主路径 | 保持，只读已发布 | 引擎不加载草稿 |
 | `list_classes` / `read_class` / `search` | 无（画布走 `/api/ontology`） | `space` 缺省 published | 改画布必须显式 draft |
@@ -714,7 +716,7 @@ Agent 不写 `save_layout`。MCP 的 `mcpDraftOpSchema` 不含该判别值；万
 
 Agent 自己把自然语言编成 `draftOpSchema`。Ontos 不提供「改 equipment 的说明」这种第四槽。`propose_objects` 继续当表→对象建议的一次性槽位，由 Agent 决定是否落地。`propose_action` 不是槽位，是确定性模板（`conversionAction` 或 `set_fields` 骨架，两个构造点），返回形状即 `set_action.def`；生成动作的是外部 Agent 自己，Ontos 不开 NL→动作的第四槽。
 
-画布「生成对象」继续：选表 → `POST /api/generate_objects` → 同一 `proposeObjects` 槽 → `import_objects`。人点按钮，不是 Agent 点。
+画布「生成对象」继续：选表 → `POST /api/propose_objects` → `apply_draft` `{ op: import_objects }`。人点按钮，不是 Agent 点。两步与 MCP 同名。
 
 ---
 
@@ -1147,7 +1149,7 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 - `src/server/schema/ops.ts` — `draftOpSchema`
 - `src/server/engine/configStore.ts` — `applyDraft` / `import_objects` 拒已存在名 / `dropClass` / dirty / 每步 `validateSemantics`
 - `src/app/api/apply_draft/route.ts` — REST 薄适配
-- `src/app/api/generate_objects/route.ts` — 槽位 + `import_objects`
+- `src/app/api/propose_objects/route.ts` — 槽位产建议，不落地
 - `src/app/api/ontology/route.ts` — 画布读草稿、`states` / `deleted`
 - `src/components/CanvasPage.tsx` — `refresh` 仅在本页写路径之后
 - `src/server/engine/views.ts` — 问数三视图

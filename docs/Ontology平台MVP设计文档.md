@@ -9,7 +9,8 @@
 > V2.3 变更：前缀 ont_ 改 onto_；补字段——conn_source 加 options 与 updated_at，onto_version 加 note 与 revert_of，adj_decision 加 source_a / source_b，log_query 加 session_id 与 model，log_action 加 error 与 duration_ms。
 > V2.3.1 变更：DDL 定为 MySQL 8 方言（AUTO_INCREMENT、MEDIUMTEXT、ENGINE/CHARSET 后缀、ON UPDATE CURRENT_TIMESTAMP），PG/SQLite 适配见方言注记。
 > V2.4 变更：裁决分级——合并类永远人定案，仅名称相似类可升级为机器定案、人抽检，升级节奏由裁决接受率决定（§2、§3 M3）。
-> V2.5 变更：工作空间 B 方案落地，元库表清单定稿为 9 张（onto_workspace、onto_version、conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）——onto_ontology 与 onto_draft 取消（草稿是进程内存态、不落库；本体锚点不再需要，版本链直接挂 workspace_id）。演示数据填充改到 `test` 空间（default 与新建空间一样空白起步，与是否配置 LLM Key 无关）。界面术语：「识别字段」改叫「唯一键」。
+> V2.5 变更：工作空间 B 方案落地，元库表清单定稿为 9 张（onto_workspace、onto_version、conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）——onto_ontology 与 onto_draft 取消（当时草稿仍是进程内存态；本体锚点不再需要，版本链直接挂 workspace_id）。演示数据填充改到 `test` 空间（default 与新建空间一样空白起步，与是否配置 LLM Key 无关）。界面术语：「识别字段」改叫「唯一键」。
+> V2.6 变更（2026-08-24）：跟代码对账。工作副本落在 `onto_version` 的工作行（`version IS NULL` 的可变头，`canvas_json` 装本体+摆位+弯折+钉点），不再是进程内存态。源库方言增加 SQLite 文件。元库 DDL 按方言分文件（`src/server/meta/ddl/sqlite.ts` 与 `mysql.ts`），不做字符串替换。对外主入口是 MCP 九个工具（含 `apply_draft` 写工作副本）。告知：变更事件随动作结果返回，外发仍预留。验收问题集可对草稿试跑（不落记录）。
 
 ## 1. 产品定位
 
@@ -17,7 +18,7 @@
 
 **MVP 演示链路（30 分钟）**：连采购、设备、资产三个老库 → AI 生成对象草稿 → 人裁决两对候选对：在途设备 × 在役设备（序列号交集率约三分之一）裁为**阶段**，设备 × 资产台账裁为**同一** → 发布本体 → **问数**「在役设备及其所属部门」（附取数路径）→ **验收一台在途设备**：设备源、资产源各插入一行，并立一张保修卡 → 再问，这台设备的阶段已是在役。
 
-**需求结论**：①场景 = 存量逆向建模与整合；②第一用途 = 在原系统上盖语义读写层，不是重建一套应用；③数据源 = 只接 MySQL 和 PG，其它数据库本期不接；④产出 = 已发布本体 + 问数/动作两条 API；⑤整合为主，客户业务代码不改，最多给一个可写账号。
+**需求结论**：①场景 = 存量逆向建模与整合；②第一用途 = 在原系统上盖语义读写层，不是重建一套应用；③数据源 = 接 MySQL、PG、SQLite 文件，其它数据库本期不接；④产出 = 已发布本体 + 问数/动作两条能力（MCP 主入口，另有 REST `POST /api/query`）；⑤整合为主，客户业务代码不改，最多给一个可写账号。
 
 **与本体论完整定义的关系**：本体论的要素清单比本期交付的多。本期交付：类、属性、关系、同一性标准、派生属性（两种形状）、公理（写入时校验）、动作（前置 / 效应 / 写回）、转化关系。本期不交付：子类型定案、部分与整体、规则与推理、OWL。函数不单设立构造，逐个体的计算统一写成派生属性。变更事件与告知已设计，本期不交付。逐条对照见附录 A；概念展开见《ontos-article.md》第 2 节。
 
@@ -56,19 +57,19 @@
 ```
 源库A(MySQL) ─┐              ┌─ M4 本体管理（配置 + 画布 + 版本）
 源库B(PG)   ──┼→ M1 连接器 → M2 AI逆向建模 → M3 整合工作台
-              │  (读表结构+采样)  (草稿，人改/再生成)  (结论裁决+交集)
-              │                          ↓ 发布
-              │              已发布本体（单一事实源）
-              │                    ├─ M7 查询服务（只读账号）
-              │                    ├─ M8 动作执行器（可写账号）
-              │                    └─ M6 取数路径 / 字段血缘
-              └──── 业务行始终在原库；平台不存个体 ────┘
+SQLite 文件 ──┘  (读表结构+采样)  (草稿，人改字段或再勾表)  (结论裁决+交集)
+                                         ↓ 发布
+                             已发布本体（单一事实源）
+                                   ├─ M7 查询服务（只读账号）
+                                   ├─ M8 动作执行器（可写账号）
+                                   └─ M6 取数路径 / 字段血缘
+              业务行始终在原库；平台不存个体
 ```
 
 | 模块 | 职责 | 关键点 |
 |---|---|---|
-| M1 连接器 | 连 MySQL/PG，读取表结构 + 脱敏采样 | 问数用只读账号；动作另备可写账号（或同一连接升权） |
-| M2 AI 逆向建模 | 表结构 → 本体草稿 | `generateObject` 一次产草稿；人改，或再说一句再生成。无 ReAct |
+| M1 连接器 | 连 MySQL / PG / SQLite 文件，读取表结构 + 脱敏采样 | 问数用只读账号；动作另备可写账号（或同一连接升权） |
+| M2 AI 逆向建模 | 表结构 → 本体草稿 | `propose_objects` 只建议；`import_objects` 才上画布。人改字段，或再勾表生成。无 ReAct，没有「再说一句」槽位 |
 | M3 整合工作台 | 候选对、交集验证、结论裁决（子类型本期不定案；仅名称相似类可由机器定案、人抽检）、留痕 | **差异化核心** |
 | M4 本体管理 | 配置版本化 + 画布 | 画布是工作副本；已发布后的改动攒成「待发布」，点发布才升版本；引擎只读已发布快照 |
 | M5 正向生成器 | ~~本体 → 新库 + CRUD~~ | **本期不做** |
@@ -86,7 +87,7 @@
 - **属性**：`type` / `description` / `values` / `generate`，以及可选的 `derived`。有 `derived` 就是派生属性：不对应源列，读时现算，不得出现在任何源的 `fields` 里。派生只有两种形状，没有第三种专用键。`when` 规则列表谈源：按个体出现在哪些源、已映射属性取什么值定值，从上到下取第一条命中。一条过滤取布尔：当前个体满足这条过滤则为真，过滤可含 `$link`。
 - **源映射**：`connection` / `table` / `pk` / `fields` / `key`。`fields` 把源列属性对到列名。`pk` 只定位行，不是同一性标准。
 - **关系**：`from` / `to` / `inverse` / `card`，外加 `match` 或 `transition` 二选一。`match`：两端各出一个属性配成一对，值相等则关系成立；可多对并列。`transition`：同一个体的阶段转化，块内 `property` 是派生属性名，`from` / `to` 是两个阶段值；判定规则见《ontos-article.md》§6.4。
-- **动作**：`pre` / `effect` / `inform`。前置与查询过滤是同一套写法，多两个键：`$request` 把请求参数拉进比较；`$exists` 声明请求点名的个体在各源现在有没有行。效应是列表，每项四种操作之一：`update` / `create` / `delete` / `link`。其中 `link` 只用于转化关系；`match` 关系靠 `create` / `update` 写上的配对字段自然成立，效应里不另写。`inform` 是告知：写回之后引擎把这次变更收成一条变更事件，发给出站；本期预留，引擎不执行，机制见《ontos-article.md》§6.5。
+- **动作**：`pre` / `effect` / `inform`。前置与查询过滤是同一套写法，多两个键：`$request` 把请求参数拉进比较；`$exists` 声明请求点名的个体在各源现在有没有行。效应是列表，每项四种操作之一：`update` / `create` / `delete` / `link`。其中 `link` 只用于转化关系；`match` 关系靠 `create` / `update` 写上的配对字段自然成立，效应里不另写。`inform` 是告知：写回之后引擎把这次变更收成一条变更事件随结果返回；外发本期预留，引擎不执行外发，机制见《ontos-article.md》§6.5。
 - **公理**：挂在类上，键是 `type` / `property`。引擎在效应定完之后、投影之前校验：若这次变化发生，存在上是否仍合法。本期 `type` 只有 `mutex` 一种：挡住会让同一属性在同一时刻取两个值的写入。
 - **写回**：动作定义里不出现表名。插还是改，看读出个体时该源有没有行。写哪张表由两部分推出：效应改了哪些属性，`sources` 里哪些源映射了这些属性。属性名按该源条目的 `fields` 对照成源列名。
 
@@ -203,7 +204,7 @@ link_types:
 
 请求的完整写法与求值规则见《ontos-article.md》第 5、6 节，这里各给一份演示案例上的实例。
 
-**查询：`POST /api/query`。** 一次查询是一棵以类为根的树：
+**查询：MCP 的 `query` 工具**（同一份 JSON 也可 `POST /api/query`）。一次查询是一棵以类为根的树：
 
 ```json
 {
@@ -226,7 +227,7 @@ link_types:
 
 `action` 必须是该类 `actions` 里已发布的一条，不是引擎写死的枚举。带参数时第四个键是 `request`，例如调拨的目标部门。引擎按定义执行：读出个体，核对前置，按效应确定存在上的变化，校验公理，再按效应和 `sources` 逐条投影回源表，并记下留痕。投影语句即用即弃。跨库部分失败不回滚已成功的投影；补偿是重发同一动作：执行器重读个体，各源此刻有行就改、没行就插，已成功的源再投影一遍，结果不变；或者人工修库。
 
-**Agent 编请求。** 类名、属性名、关系名、动作名全部读自已发布配置，不写死在 Agent 里。Agent 按需读三个视图，而不是整份配置：列出类；读取一个类（返回属性、关系、动作，不返回 `sources`、`pk`、`axioms`）；检索（类很多时按相关度返回类名、关系名）。问数答错时，由人回 M2/M3 修正本体或映射，不给 Agent 开自由 SQL。
+**Agent 编请求。** 类名、属性名、关系名、动作名全部读自已发布配置，不写死在 Agent 里。Agent 按需读三个视图，而不是整份配置：`list_classes`；`read_class`（已发布视图返回属性、关系、动作，不返回 `sources`、`pk`、`axioms`；改画布请传 `space: "draft"`）；`search`。问数与动作永远读已发布。问数答错时，由人回 M2/M3 修正本体或映射，不给 Agent 开自由 SQL。
 
 ## 6. 技术选型
 
@@ -236,28 +237,30 @@ link_types:
 |---|---|---|
 | 前端 | 现有 Next.js + React Flow + 画布面板 | 已够。不上 Refine（那是给生成出来的管理界面的） |
 | 平台后端 | Next.js Route Handlers（已有 `/api/query` 等） | 问数与动作同一进程；本期无出码，不上 NestJS |
-| 连原库 | Drizzle 或 mysql2/pg | 问数只读连接；动作可写连接。只接 MySQL 和 PG，其它数据库以后再说 |
-| LLM | Vercel AI SDK：`generateObject` + Zod | 三个槽：建模草稿、合并建议、自然语言 → 查询/动作 JSON。不要 tool 循环，不要 Mastra |
+| 连原库 | mysql2 / pg / node:sqlite | 问数只读连接；动作可写连接。源库接 MySQL、PG、SQLite 文件 |
+| LLM | Vercel AI SDK：`generateText` + `Output.object` + Zod | 三个槽：建模草稿、合并建议、自然语言 → 查询 JSON。不要 tool 循环，不要 Mastra；没有自然语言 → 动作的槽 |
 | 出码模板 | **本期不做** | Nunjucks / drizzle-kit migrations / @dataui/crud 从本期拿掉 |
-| 对外调用 | HTTP；可选 MCP（`query` / `run_action` / `propose_*`） | Claude Code 等是调用方，循环不做进 Ontos |
+| 对外调用 | MCP（`POST /api/mcp`，九个工具）为主入口；另有 REST `POST /api/query` | Claude Code 等是调用方，循环不做进 Ontos |
 | 存储 | 只存平台元数据 | 表结构见下文「平台元数据库」。**不存业务行** |
 
 **留门**：信创要求后端换 Java 时，配置文本与前端不受影响；真要出码再另议，不倒逼本期架构。
 
 ### 平台元数据库
 
-平台只存元数据。表结构按数据边界定：任何表没有业务数据列；交集只存计数与比率，标识值集合不落盘；日志存请求与成败，不存结果集；连接账号加密存，不进 ontology.yaml。验收问题集同样存平台库，不进 ontology.yaml。
+平台只存元数据。表结构按数据边界定：任何表没有业务数据列；交集只存计数与比率，标识值集合不落盘；日志存请求与成败，不存结果集；连接账号演示期明文存（加密为后续项），不进 ontology.yaml。验收问题集同样存平台库，不进 ontology.yaml。
 
-表名按类别加前缀，新表先归类、再起名：
+表名按类别加前缀，新表先归类、再起名（现行 9 张）：
 
 | 前缀 | 类别 | 表 |
 |---|---|---|
-| `conn_` | 接入 | conn_source |
-| `onto_` | 本体 | onto_ontology、onto_version、onto_draft、onto_question |
+| `conn_` | 接入 | conn_source（`type` 为 mysql / pg / sqlite） |
+| `onto_` | 本体 / 空间 | onto_workspace、onto_version（编号行是已发布快照；`version IS NULL` 的工作行是画布活体） |
+| `ont_` | 验收 | ont_question |
 | `adj_` | 裁决 | adj_decision、adj_overlap |
 | `log_` | 留痕 | log_query、log_action |
+| `meta_` | 序号 | meta_seq |
 
-> 本节 DDL 是工作空间 B 方案前的形态，仅作历史记录。B 方案落地后：ontology_id 外键全部换成 workspace_id；onto_ontology 与 onto_draft 取消；onto_question 改名 ont_question；adj_overlap 的 computed_at 即 created_at；二级索引本期未建（代码里只有唯一约束）。最终实现以 §6「工作空间」节与 `src/server/meta/store.ts` 为准（SQLite 单文件 DDL，MySQL 由同一份文本换方言生成）。
+> 下面这份 DDL 是工作空间 B 方案前的形态，仅作历史记录。B 方案落地后：ontology_id 外键全部换成 workspace_id；onto_ontology 与 onto_draft 取消；onto_question 改名 ont_question；adj_overlap 的 computed_at 即 created_at；二级索引本期未建（代码里只有唯一约束）。**现行表结构以 §6「工作空间」节与 `src/server/meta/ddl/` 为准**（SQLite / MySQL 各一份，不做字符串替换派生）。
 
 ```sql
 -- 接入
@@ -421,7 +424,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 - **本体配置、版本链与画布状态同表入库**：`onto_version` 按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`。**工作副本是版本链上 `version IS NULL` 的工作行**：编辑画布、拖摆位、弯折、钉点都写它的 `canvas_json`；发布把工作行复制成编号行；点某个历史版本 = 用那一行覆盖工作行，不插入新行；要让问数也变成这版，再点发布。画布状态不再另有家——旧的 `onto_workspace.layout` / `draft_json` 两列已废。
 - **其余 7 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）全部增加 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列；`meta_seq` 主键改 `(workspace_id, name)`。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。
-- **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 即本章 MySQL 8 方言。PG 同理（方言注记见上节）。
+- **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 见 `src/server/meta/ddl/mysql.ts`。PG 作元库后端本期未接。
 - **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `test` 的 `onto_version` v1 行，此后不再被读；`default` 与新建空间一样空白起步（v1 是空本体），演示 fixture 连接也只注入 `test`——切换空间要看得出是另一套。
 
 **语义。** 默认空间 `default`（空白起步），测试空间 `test`（首次访问时若注册表里没有，自动建行并把演示模板插成 v1，常驻空间列表；演示数据按空间名填充，与是否配置 LLM Key 无关）。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。
@@ -441,7 +444,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 ## 8. 红线与风险
 
-**本期不做**：规则与推理、OWL、子类型定案、部分与整体、golden record 与存量迁移、CDC、出码与新应用骨架、模板市场与多租户、图数据库、MySQL 和 PG 以外的数据库。函数不单设立构造。变更事件与告知已设计，本期不交付。动作只执行已发布定义，不封装任意存储过程与审批流。
+**本期不做**：规则与推理、OWL、子类型定案、部分与整体、golden record 与存量迁移、CDC、出码与新应用骨架、模板市场与多租户、图数据库、MySQL / PG / SQLite 以外的源库。函数不单设立构造。告知的外发本期不交付（变更事件已拼装随动作结果返回）。动作只执行已发布定义，不封装任意存储过程与审批流。
 
 **数据边界（不可协商）**：不迁移、不复制业务数据，个体不进平台。问数只读实时查源库；写只按已发布动作的效应与源映射投影原库，平台留 `log_action` 摘要，不留业务行。交集在内存里算，识别字段的取值集合不落地；`log_query` 与 `log_action` 不存结果集。
 
@@ -455,11 +458,11 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 **进新系统只加数据**：连接、映射、动作定义。先回答「那个系统里的对象和已有的类是什么关系」。答案有三种，各对应一步配置。是同一个体的又一源——在本类 `sources` 加一行；是挂在个体上的新对象——立一个新类、加一条关系到本类，效应用 `create`；是另一件事——本类不动，另立一条动作，另发一次请求。禁止按行业在执行器里写分支。
 
-**生成要模型，执行不要。** 模型只产草稿（对象、关系、动作定义），人裁决、发布。执行器解释已发布配置，禁自由 SQL。画布上的再生成是人驱动的：拿上一版草稿加人的一句话，让模型再生成一次——`generateObject` 一次，草稿上画布，停。模型不自己选工具、不自己写库。
+**生成要模型，执行不要。** 模型只产草稿（对象、关系、动作定义），人裁决、发布。执行器解释已发布配置，禁自由 SQL。画布上的再生成是人驱动的：再勾表点「生成对象」——`propose_objects` 一次、`import_objects` 落地，停。没有「再说一句」槽位。模型不自己选工具、不自己写库。
 
-**循环分三种，只禁一种。** 禁止的是模型自转的 ReAct 循环：建模没有即时反馈信号，数据库不会告诉模型建错了，模型自己判自己对错只会漂移；每次循环走的路径不同，标注库回归就没法跑；循环的中间产物没人读，裁决权也就丢了。要保留的是人驱动的再生成，以及确定性流水线里嵌多个模型槽位：表多了逐批产类，由代码做确定性合并，再产关系建议与动作草稿——下一步走什么由代码决定，停不停由人决定，模型只在槽位里填空。槽位再多也落在「写出配置」这一个用途里；模型的另一个用途是把自然语言编成查询或写入请求，两个用途之外没有模型。真想要 agent 式探索，循环放在 Ontos 之外，由外部 Agent 驱动，Ontos 内部永远保持确定性。
+**循环分三种，只禁一种。** 禁止的是模型自转的 ReAct 循环：建模没有即时反馈信号，数据库不会告诉模型建错了，模型自己判自己对错只会漂移；每次循环走的路径不同，标注库回归就没法跑；循环的中间产物没人读，裁决权也就丢了。要保留的是人驱动的再生成，以及确定性流水线里嵌多个模型槽位：表多了逐批产类，由代码做确定性合并，再产关系建议与动作草稿——下一步走什么由代码决定，停不停由人决定，模型只在槽位里填空。槽位再多也落在「写出配置」这一个用途里；模型的另一个用途是把自然语言编成查询请求（验收问题集跑批；没有自然语言 → 动作的槽），两个用途之外没有模型。真想要 agent 式探索，循环放在 Ontos 之外，由外部 Agent 驱动，Ontos 内部永远保持确定性。
 
-**入口两个，内核同一套**：画布点「生成对象」走后端 `generateObject`；Claude Code 等外部 Agent 经 MCP 调 `propose_objects` / `propose_action` / `query` / `run_action`。
+**入口两个，内核同一套**：画布点「生成对象」与 MCP 同一套名字——`propose_objects` 只建议，再 `apply_draft` `{ op: import_objects }` 落地。Claude Code 等外部 Agent 经 MCP 调九个工具（`query` / `run_action` / `propose_objects` / `propose_action` / `list_classes` / `read_class` / `search` / `list_tables` / `apply_draft`）。发布、裁决、连接、回滚仍是人的关卡，不做成 MCP 写工具。
 
 **持久化与即用即弃**：本体、映射、动作定义、`log_query`、`log_action` 持久化；每次执行编出的 SQL 即用即弃；业务行留在原库。
 
@@ -479,14 +482,14 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 | 生命周期 / 阶段 | 同一实体的时间阶段 | 已落地。派生属性 + `transition` 关系 + 转化动作 |
 | 子类型（is-a） | 一类完全含于另一类 | 本期不做，不定案 |
 | 同形异义 | 名字相同而所指不同 | 已落地。各自独立，互不映射 |
-| 事物 / 事件 | 持续存在 / 发生过即确定 | 已落地。`kind`：thing 可经历阶段，event 不可 |
+| 事物 / 事件 | 持续存在 / 发生过即确定 | 字段已落地（`kind`：thing / event）；引擎未按 kind 分支 |
 | 派生属性 | 不对应源列、读时现算 | 已落地。两种形状：`when` 列表谈源；一条过滤取布尔 |
 | 可计算谓词 | 一个是非判断，如「是否在保」 | 已落地。即布尔派生属性 |
 | 函数 | 给定对象唯一确定结果 | 不单设构造。逐个体的计算统一写成派生属性 |
 | 部分与整体 | A 是 B 的部分 | 未做 |
 | 公理 | 必须成立的约束 | 已落地。效应定完后、投影前校验；本期一种类型 `mutex` |
 | 动作 | 一个对象允许发生什么变化 | 已落地。`pre` / `effect`，写回按 `sources` 推出 |
-| 变更事件与告知 | 把变更发给没有映射的系统 | 已设计，本期不交付。`inform` + `outlets`，泛化的 `change` / `change_line` |
+| 变更事件与告知 | 把变更发给没有映射的系统 | 拼装已落地（随 `run_action` 结果返回，`delivered: false`）；外发本期不交付。`inform` + `outlets` |
 | 规则与推理 | 从已写下的事实推出没写下的事实 | 未做。只到派生属性的取值规则 |
 | 形式语言 | OWL / RDF / 描述逻辑 | 未做。用 YAML |
 

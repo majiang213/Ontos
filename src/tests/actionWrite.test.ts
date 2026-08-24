@@ -1,5 +1,5 @@
 // 动作写入（set_action / remove_action）与动作形状四查测试
-// 从 configStore.test.ts 拆出：同一运行态纪律（每用例一份干净内存态，test 空间跑演示模板数据）。
+// 从 editDraft.test.ts 拆出：同一运行态纪律（每用例一份干净内存态，test 空间跑演示模板数据）。
 
 import { dump } from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -23,51 +23,51 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
 
   it("set_action 新增/同名覆盖；remove_action 删除；删最后一个动作后 actions 键消失", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" }, WS);
-    await s.applyDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.editDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
     // 新增
-    await s.applyDraft({ op: "set_action", object: "vendor", name: "rename", def: renameDef }, WS);
+    await s.editDraft({ op: "set_action", object: "vendor", name: "rename", def: renameDef }, WS);
     expect((await s.getDraft(WS)).draft.object_types.vendor.actions!.rename.description).toBe("改名");
     // 同名覆盖（与画布编辑同权）
-    await s.applyDraft({ op: "set_action", object: "vendor", name: "rename", def: { ...renameDef, description: "改名单" } }, WS);
+    await s.editDraft({ op: "set_action", object: "vendor", name: "rename", def: { ...renameDef, description: "改名单" } }, WS);
     expect((await s.getDraft(WS)).draft.object_types.vendor.actions!.rename.description).toBe("改名单");
     // 删除
-    await s.applyDraft({ op: "remove_action", object: "vendor", name: "rename" }, WS);
+    await s.editDraft({ op: "remove_action", object: "vendor", name: "rename" }, WS);
     const t = (await s.getDraft(WS)).draft.object_types.vendor;
     expect("actions" in t).toBe(false); // 空 map 不留：sameConfig 才能收回 dirty
     // 再删一次 → 动作不存在
-    await expect(s.applyDraft({ op: "remove_action", object: "vendor", name: "rename" }, WS)).rejects.toThrow("动作不存在");
+    await expect(s.editDraft({ op: "remove_action", object: "vendor", name: "rename" }, WS)).rejects.toThrow("动作不存在");
     // set_action 到不存在的类 → 类不存在
-    await expect(s.applyDraft({ op: "set_action", object: "ghost", name: "a", def: renameDef }, WS)).rejects.toThrow("类不存在");
+    await expect(s.editDraft({ op: "set_action", object: "ghost", name: "a", def: renameDef }, WS)).rejects.toThrow("类不存在");
   });
 
   it("对已发布类 set_action 再 remove_action 还原后 dirty 收回", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "set_action", object: "equipment", name: "temp_act", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "request" } } } }] } }, WS);
+    await s.editDraft({ op: "set_action", object: "equipment", name: "temp_act", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "request" } } } }] } }, WS);
     expect((await s.getDraft(WS)).dirty).toBe(true);
-    await s.applyDraft({ op: "remove_action", object: "equipment", name: "temp_act" }, WS);
+    await s.editDraft({ op: "remove_action", object: "equipment", name: "temp_act" }, WS);
     expect((await s.getDraft(WS)).dirty).toBe(false); // 改出去又改回来，dirty 收得回
   });
 
   it("效应 link 指向不存在或非转化关系：整步回退", async () => {
     const s = await freshStore(tmp);
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ link: "ghost_link" }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ link: "ghost_link" }] } }, WS)
     ).rejects.toThrow(/不存在的转化关系/);
     // match 关系不是转化关系，同样拦
-    await s.applyDraft({ op: "create_link", name: "eq_self", from: "equipment", to: "equipment", match: { from: "serial_no", to: "serial_no" } }, WS);
+    await s.editDraft({ op: "create_link", name: "eq_self", from: "equipment", to: "equipment", match: { from: "serial_no", to: "serial_no" } }, WS);
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ link: "eq_self" }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ link: "eq_self" }] } }, WS)
     ).rejects.toThrow(/不存在的转化关系/);
     expect((await s.getDraft(WS)).draft.object_types.equipment.actions!.bad).toBeUndefined();
   });
 
   it("删掉转化关系的唯一引用动作被拦，message 带逃生指引；先写替代动作就能删", async () => {
     const s = await freshStore(tmp);
-    await expect(s.applyDraft({ op: "remove_action", object: "equipment", name: "convert" }, WS)).rejects.toThrow(/先写一条同样 link 该转化关系的替代动作，再删旧的/);
+    await expect(s.editDraft({ op: "remove_action", object: "equipment", name: "convert" }, WS)).rejects.toThrow(/先写一条同样 link 该转化关系的替代动作，再删旧的/);
     // 逃生路径：先 set_action 一条同样 link converted 的替代动作，再删 convert
-    await s.applyDraft({ op: "set_action", object: "equipment", name: "convert_v2", def: { description: "替代", pre: { status: "in_transit" }, effect: [{ link: "converted" }] } }, WS);
-    await s.applyDraft({ op: "remove_action", object: "equipment", name: "convert" }, WS);
+    await s.editDraft({ op: "set_action", object: "equipment", name: "convert_v2", def: { description: "替代", pre: { status: "in_transit" }, effect: [{ link: "converted" }] } }, WS);
+    await s.editDraft({ op: "remove_action", object: "equipment", name: "convert" }, WS);
     expect((await s.getDraft(WS)).draft.object_types.equipment.actions!.convert).toBeUndefined();
     expect((await s.getDraft(WS)).draft.object_types.equipment.actions!.convert_v2).toBeDefined();
   });
@@ -75,37 +75,37 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
   it("认人必须写明：update/delete 缺 identity 与 filter 被拒；非法取值来源被拒", async () => {
     const s = await freshStore(tmp);
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", properties: { dept: "x" } } }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", properties: { dept: "x" } } }] } }, WS)
     ).rejects.toThrow(/缺 identity 或 filter/);
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ delete: { object: "equipment" } }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ delete: { object: "equipment" } }] } }, WS)
     ).rejects.toThrow(/缺 identity 或 filter/);
     // from: generated 不许用在 update（只许 create 且目标属性带 generate）
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "generated" } } } }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "generated" } } } }] } }, WS)
     ).rejects.toThrow(/from: generated/);
     // create 没有 current 上下文
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ create: { object: "warranty_card", properties: { serial_no: { from: "current" } } } }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ create: { object: "warranty_card", properties: { serial_no: { from: "current" } } } }] } }, WS)
     ).rejects.toThrow(/current/);
     // 不认识的取值来源
     await expect(
-      s.applyDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "yesterday" } } } }] } }, WS)
+      s.editDraft({ op: "set_action", object: "equipment", name: "bad", def: { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "yesterday" } } } }] } }, WS)
     ).rejects.toThrow(/取值来源不认识/);
   });
 
   it("set_action 之后再 replace_object 被「含动作」锁拒", async () => {
     const s = await freshStore(tmp);
-    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" }, WS);
-    await s.applyDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
-    await s.applyDraft({ op: "set_action", object: "vendor", name: "rename", def: renameDef }, WS);
-    await expect(s.applyDraft({ op: "replace_object", name: "vendor", def: { kind: "thing", properties: {} } }, WS)).rejects.toThrow(/含动作/);
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WS);
+    await s.editDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WS);
+    await s.editDraft({ op: "set_action", object: "vendor", name: "rename", def: renameDef }, WS);
+    await expect(s.editDraft({ op: "replace_object", name: "vendor", def: { kind: "thing", properties: {} } }, WS)).rejects.toThrow(/含动作/);
   });
 
   it("先阶段后合并的多跳裁决不炸：转化动作随被吸收类的转化关系一起消亡（不复制）", async () => {
     const s = await freshStore(tmp);
     const { adjudicate } = await import("../server/engine/adjudication/adjudicate");
-    await s.applyDraft({
+    await s.editDraft({
       op: "import_objects",
       objects: {
         eq_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", fields: { sn: "sn" } } } },
@@ -129,7 +129,7 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
     const s = await freshStore(tmp);
     const { adjudicate } = await import("../server/engine/adjudication/adjudicate");
     // main2 只有唯一键（无 set_fields）；aux 有可写字段（带 set_fields）且 identity 与 main2 不同名（remapId = serial_no）
-    await s.applyDraft(
+    await s.editDraft(
       {
         op: "import_objects",
         objects: {
@@ -146,11 +146,11 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
     );
     // aux 再带两条自定义动作：recolor 效应 object: aux（指向 dying 类）且 pre 过滤 serial_no（remapId 键）；
     // notify_x 的 inform 对象是 aux（告知对象指向 dying 类）
-    await s.applyDraft(
+    await s.editDraft(
       { op: "set_action", object: "aux", name: "recolor", def: { pre: { serial_no: "SN-1" }, effect: [{ update: { object: "aux", identity: { from: "identity" }, properties: { color: { from: "request" } } } }] } },
       WS
     );
-    await s.applyDraft(
+    await s.editDraft(
       { op: "set_action", object: "aux", name: "notify_x", def: { effect: [{ update: { object: "main2", identity: { from: "identity" }, properties: { note: { from: "request" } } } }], inform: [{ object: "aux", to: ["payroll"], properties: { c: { from: "request" } } }] } },
       WS
     );
@@ -177,6 +177,6 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
     expect(p.version).toBe(2);
     expect(p.config.link_types.orphan_tr).toBeDefined();
     // 但草稿路径被拦：任何一步写入都会因孤儿转化关系整步回退（再回滚到合法版本才恢复）
-    await expect(s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" }, WS)).rejects.toThrow(/orphan_tr/);
+    await expect(s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WS)).rejects.toThrow(/orphan_tr/);
   });
 });

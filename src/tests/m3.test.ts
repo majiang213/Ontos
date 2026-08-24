@@ -14,7 +14,7 @@ import { EngineReject } from "../server/errors";
 import { freshDriver } from "../server/engine/infra/load";
 import { freshMetaStore } from "../server/meta/store";
 import { configSchema, type OntologyConfig } from "../server/schema/config";
-import { validateSemantics } from "../server/engine/config/validate";
+import { validateSemantics } from "../server/engine/draft/validate";
 import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 
@@ -213,8 +213,8 @@ describe("裁决流水线", () => {
   });
 
   it("decide「同一」：合并两个跨源类，留痕带证据", async () => {
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({
+    const s = await import("../server/engine/draft");
+    await s.editDraft({
       op: "import_objects",
       objects: {
         po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
@@ -241,8 +241,8 @@ describe("裁决流水线", () => {
   });
 
   it("decide：校验闸回退时不留幻影记录", async () => {
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({
+    const s = await import("../server/engine/draft");
+    await s.editDraft({
       op: "import_objects",
       objects: {
         po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, status: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", status: "sn" } } } },
@@ -256,8 +256,8 @@ describe("裁决流水线", () => {
   });
 
   it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({
+    const s = await import("../server/engine/draft");
+    await s.editDraft({
       op: "import_objects",
       objects: {
         po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
@@ -275,8 +275,8 @@ describe("裁决流水线", () => {
   });
 
   it("computeOverlap：无源类、同源对拒绝", async () => {
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({ op: "create_object", name: "vendor", kind: "thing" });
+    const s = await import("../server/engine/draft");
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
     await expect(computeOverlap("default", "equipment", "vendor")).rejects.toThrow(EngineReject);
     await expect(computeOverlap("default", "repair", "assignment")).rejects.toThrow(EngineReject);
   });

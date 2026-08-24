@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import type { ConnectionRec } from "../../meta/types";
 import { metaStore } from "../../meta/store";
 import { runtime } from "../../runtime";
-import { getPublished } from "../config/configStore";
+import { getPublished } from "../draft/current";
 import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteFixtureDriver } from "./fixture";
 import { SqliteDriver } from "./sqliteDriver";

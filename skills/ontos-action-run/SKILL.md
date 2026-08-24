@@ -39,7 +39,7 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 | `read_class` | 读一个已发布类的视图：属性、关系、动作及前置（`pre` 里的 `$request` 块列出参数名和约束） | `{ name }` |
 | `query` | 执行结构化查询（只读；前置核对与复查用） | `{ query: 查询JSON }` |
 
-一律不传 `space`（这三个工具读的就是已发布世界；传了会被 `-32602` 拒绝）。不调用 `apply_draft` / `set_action` / `remove_action`，不碰草稿。
+一律不传 `space`（这三个工具读的就是已发布世界；传了会被 `-32602` 拒绝）。不调用 `edit_draft` / `set_action` / `remove_action`，不碰草稿。
 
 ## 方法论（三步）：先查前置 → 执行 → 复查
 
@@ -125,7 +125,7 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 
 ## 红线
 
-1. 只执行**已发布**动作；不调用 `apply_draft` / `set_action` / `remove_action`，不碰草稿。
+1. 只执行**已发布**动作；不调用 `edit_draft` / `set_action` / `remove_action`，不碰草稿。
 2. 动作前置不满足就停下报给用户，不原样重试；动作部分失败时如实报告 projections 明细。
 3. 发动作前先认个体存在与当前状态；`$request` 参数从 `read_class` 的 `pre` 里读，不编造。
 4. 不编造类名、动作名、参数名、枚举值——拿不准就 `read_class` / `query`。

@@ -1,8 +1,11 @@
-// 工作副本编辑操作的请求形状 —— /api/draft（REST 画布）与 MCP apply_draft 共用同一组判别联合。
+// 工作副本编辑操作的请求形状 —— /api/edit_draft（REST 画布）与 MCP edit_draft 共用同一组判别联合。
 // MCP 侧抽掉 save_layout / save_edge_bend（摆位/弯折是界面状态，Agent 不写）。
 
 import { z } from "zod";
 import { actionSchema, objectTypeSchema } from "./config";
+
+/** 类/属性/关系名的合法形状：小写字母开头，小写字母/数字/下划线。名字校验的唯一出处——engine/draft/ops 各处不再各写正则。 */
+export const NAME_RE = /^[a-z][a-z0-9_]*$/;
 
 /** 草稿路径的类体剥掉 actions / axioms：动作只走 set_action，公理本期没有写入 op。
  *  Zod 默认丢弃多余键——带进来不报错，但也不落地。派生字段（derived）保留（允许经导入进入新类）。 */
@@ -34,7 +37,7 @@ const setIdentityOp = z.object({ op: z.literal("set_identity"), object: z.string
 const saveLayoutOp = z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) });
 // 线的弯折点：相对两端节点中心连线中点的偏移；bend=null 拉直。与摆位一样是界面状态
 const saveEdgeBendOp = z.object({ op: z.literal("save_edge_bend"), name: z.string(), bend: z.object({ dx: z.number(), dy: z.number() }).nullable() });
-/** 端点钉点形状：钉在某条边的 t 比例处（0..1）。建线/改接 op 的 pins 键与画布包读回校验（configStore unpackCanvas）共用。 */
+/** 端点钉点形状：钉在某条边的 t 比例处（0..1）。建线/改接 op 的 pins 键与画布包读回校验（draft/canvasPack unpackCanvas）共用。 */
 export const borderPinSchema = z.object({ side: z.enum(["top", "bottom", "left", "right"]), t: z.number() });
 /** 钉点类型单源（校验与类型同一出处）：画布几何、元库记录、轮询帧全引这一型。 */
 export type BorderPin = z.infer<typeof borderPinSchema>;
@@ -67,14 +70,14 @@ const updateLinkOp = z.object({
 });
 // 逆向建模产物导入：整批对象进草稿（表结构抽屉多选 → 生成对象；MCP 侧是 propose_objects 的落地点）
 const importObjectsOp = z.object({ op: z.literal("import_objects"), objects: z.record(z.string(), z.unknown()) });
-// 整份替换一个未锁定的类（def 是单个类体，不是整张 map）：锁定规则见 configStore.replaceBlockers
+// 整份替换一个未锁定的类（def 是单个类体，不是整张 map）：锁定规则见 draft/ops/replaceObject.replaceBlockers
 const replaceObjectOp = z.object({ op: z.literal("replace_object"), name: z.string(), def: draftObjectSchema });
 // 动作写入（人和 Agent 同权）：def 过 actionSchema（附录 B 那份），与种子配置、conversionAction 同形；单条 upsert
 const setActionOp = z.object({ op: z.literal("set_action"), object: z.string(), name: z.string(), def: actionSchema });
 const removeActionOp = z.object({ op: z.literal("remove_action"), object: z.string(), name: z.string() });
 
 /** 界面状态 op（摆位/弯折）：唯一名单。不写本体——mcpDraftOpSchema 不含（Agent 不写界面状态）、
- *  affectedNames 返回空、applyDraft 只落库不校验不加 rev。钉点不是独立 op：随建线/改接的 pins 键同车。 */
+ *  affectedNames 返回空、editDraft 只落库不校验不加 rev。钉点不是独立 op：随建线/改接的 pins 键同车。 */
 export const UI_STATE_OPS = ["save_layout", "save_edge_bend"] as const;
 export const isUiStateOp = (op: string): op is (typeof UI_STATE_OPS)[number] => (UI_STATE_OPS as readonly string[]).includes(op);
 
@@ -99,10 +102,10 @@ const UI_STATE_OP_SCHEMAS = [saveLayoutOp, saveEdgeBendOp] as const;
 export const draftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS, ...UI_STATE_OP_SCHEMAS]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
 
-/** MCP apply_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_* 三个界面状态 op（名单见 UI_STATE_OPS，Agent 不写摆位/弯折/钉点）。 */
+/** MCP edit_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_* 三个界面状态 op（名单见 UI_STATE_OPS，Agent 不写摆位/弯折/钉点）。 */
 export const mcpDraftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS]);
 
-/** apply_draft 返回的 names：类名、关系名或「类名.动作名」（不收字段名）。画布 toast/发布条不读它，读 GET 的 action_changes。 */
+/** edit_draft 返回的 names：类名、关系名或「类名.动作名」（不收字段名）。画布 toast/发布条不读它，读 GET 的 action_changes。 */
 export function affectedNames(op: DraftOpInput): string[] {
   if (isUiStateOp(op.op)) return []; // 界面状态 op 不算内容改动（名单见 UI_STATE_OPS）
   switch (op.op) {

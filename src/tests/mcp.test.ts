@@ -40,7 +40,7 @@ describe("MCP 工具端点", () => {
       "read_class",
       "search",
       "list_tables",
-      "apply_draft",
+      "edit_draft",
     ]);
   });
 
@@ -103,8 +103,8 @@ describe("MCP 工具端点", () => {
   });
 
   it("space=draft 看见未发布类（带状态与 rev）；缺省看不见；query/propose_action 不受草稿影响", async () => {
-    const s = await import("../server/engine/config/configStore");
-    await s.applyDraft({ op: "create_object", name: "vendor", description: "供应商", kind: "thing" }, "test");
+    const s = await import("../server/engine/draft");
+    await s.editDraft({ op: "create_object", name: "vendor", description: "供应商", kind: "thing" }, "test");
     // 缺省已发布：看不见 vendor
     const pub = await call("list_classes", {});
     expect(pub.result.structuredContent.classes.map((c: { name: string }) => c.name)).not.toContain("vendor");
@@ -133,28 +133,28 @@ describe("MCP 工具端点", () => {
     expect((await call("propose_action", { object: "vendor", space: "draft" })).result.structuredContent.action).toBeDefined();
   });
 
-  it("apply_draft 的 inputSchema：存在、不含 save_layout、base_rev 必填；list_tables/apply_draft 不接受 space", async () => {
+  it("edit_draft 的 inputSchema：存在、不含 save_layout、base_rev 必填；list_tables/edit_draft 不接受 space", async () => {
     const list = await rpc("tools/list");
-    const ad = list.result.tools.find((t: { name: string }) => t.name === "apply_draft");
+    const ad = list.result.tools.find((t: { name: string }) => t.name === "edit_draft");
     expect(ad.inputSchema).toBeDefined();
     expect(JSON.stringify(ad.inputSchema)).not.toContain("save_layout");
     expect(ad.inputSchema.required).toContain("base_rev");
-    expect((await call("apply_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0, space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("edit_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0, space: "draft" })).error?.code).toBe(-32602);
     expect((await call("list_tables", { space: "draft" })).error?.code).toBe(-32602);
   });
 
-  it("apply_draft：信封校验（缺 base_rev / 字符串 base_rev）-32602；save_layout -32602", async () => {
-    expect((await call("apply_draft", { op: "create_object", name: "vendor", kind: "thing" })).error?.code).toBe(-32602); // 缺 base_rev
-    expect((await call("apply_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: "12" })).error?.code).toBe(-32602); // 字符串不行
-    expect((await call("apply_draft", { op: "save_layout", positions: {}, base_rev: 0 })).error?.code).toBe(-32602); // 摆位不在 MCP 联合里
-    expect((await call("apply_draft", { op: "fly", base_rev: 0 })).error?.code).toBe(-32602); // 未知 op
+  it("edit_draft：信封校验（缺 base_rev / 字符串 base_rev）-32602；save_layout -32602", async () => {
+    expect((await call("edit_draft", { op: "create_object", name: "vendor", kind: "thing" })).error?.code).toBe(-32602); // 缺 base_rev
+    expect((await call("edit_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: "12" })).error?.code).toBe(-32602); // 字符串不行
+    expect((await call("edit_draft", { op: "save_layout", positions: {}, base_rev: 0 })).error?.code).toBe(-32602); // 摆位不在 MCP 联合里
+    expect((await call("edit_draft", { op: "fly", base_rev: 0 })).error?.code).toBe(-32602); // 未知 op
   });
 
-  it("apply_draft：ONTOS_TOKEN 设了之后无令牌 -32001，有令牌放行", async () => {
+  it("edit_draft：ONTOS_TOKEN 设了之后无令牌 -32001，有令牌放行", async () => {
     process.env.ONTOS_TOKEN = "t0ken";
     try {
-      expect((await call("apply_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0 })).error?.code).toBe(-32001);
-      const ok = await call("apply_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0 }, { authorization: "Bearer t0ken" });
+      expect((await call("edit_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0 })).error?.code).toBe(-32001);
+      const ok = await call("edit_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0 }, { authorization: "Bearer t0ken" });
       expect(ok.error).toBeUndefined();
       expect(ok.result.structuredContent.ok).toBe(true);
     } finally {
@@ -162,13 +162,13 @@ describe("MCP 工具端点", () => {
     }
   });
 
-  it("apply_draft 完整往返：读 rev → 写入 ok 且 rev+1 → 重放 stale base_rev 得 -32000 → query 仍读旧已发布", async () => {
-    const s = await import("../server/engine/config/configStore");
+  it("edit_draft 完整往返：读 rev → 写入 ok 且 rev+1 → 重放 stale base_rev 得 -32000 → query 仍读旧已发布", async () => {
+    const s = await import("../server/engine/draft");
     const list = await call("list_classes", { space: "draft" });
     const rev = list.result.structuredContent.rev as number;
     expect(rev).toBe(s.getRev("test"));
     // 落地 import_objects（propose_objects 的落地点）
-    const imp = await call("apply_draft", {
+    const imp = await call("edit_draft", {
       op: "import_objects",
       objects: { vendor: { kind: "thing", description: "供应商", identity: "vendor_no", properties: { vendor_no: { type: "string" } } } },
       base_rev: rev,
@@ -176,18 +176,18 @@ describe("MCP 工具端点", () => {
     expect(imp.error).toBeUndefined();
     expect(imp.result.structuredContent).toMatchObject({ ok: true, dirty: true, rev: rev + 1, base_version: 1, op: "import_objects", names: ["vendor"] });
     // 逐步 op：base_rev 跟上后成功，rev 再 +1，names 收类名
-    const add = await call("apply_draft", { op: "add_property", object: "vendor", name: "vendor_name", type: "string", base_rev: rev + 1 });
+    const add = await call("edit_draft", { op: "add_property", object: "vendor", name: "vendor_name", type: "string", base_rev: rev + 1 });
     expect(add.result.structuredContent).toMatchObject({ ok: true, rev: rev + 2, names: ["vendor"] });
     // 重放同一个 stale base_rev → DraftReject → -32000，且不落地
-    const replay = await call("apply_draft", { op: "add_property", object: "vendor", name: "ghost_prop", type: "string", base_rev: rev + 1 });
+    const replay = await call("edit_draft", { op: "add_property", object: "vendor", name: "ghost_prop", type: "string", base_rev: rev + 1 });
     expect(replay.error?.code).toBe(-32000);
     expect(replay.error?.message).toMatch(/草稿已变/);
     expect((await s.getDraft("test")).draft.object_types.vendor.properties.ghost_prop).toBeUndefined();
     // query 仍只读已发布：未发布的 vendor 查不到
     expect((await call("query", { query: { object: "vendor" } })).error?.code).toBe(-32000);
     // 撞名 → -32000；锁定的整份替换（已发布类）→ -32000 带白话原因
-    expect((await call("apply_draft", { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } }, base_rev: s.getRev("test") })).error?.code).toBe(-32000);
-    const lock = await call("apply_draft", { op: "replace_object", name: "equipment", def: { kind: "thing", properties: {} }, base_rev: s.getRev("test") });
+    expect((await call("edit_draft", { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } }, base_rev: s.getRev("test") })).error?.code).toBe(-32000);
+    const lock = await call("edit_draft", { op: "replace_object", name: "equipment", def: { kind: "thing", properties: {} }, base_rev: s.getRev("test") });
     expect(lock.error?.code).toBe(-32000);
     expect(lock.error?.message).toMatch(/不能整对象替换：已经发布过/);
     // 已发布类的草稿视图：replaceable=false 且带原因
@@ -220,10 +220,10 @@ describe("MCP 工具端点", () => {
     expect(ghost.result.structuredContent.sources).toEqual([{ connection: "ghost_db", tables: [], error: "没有这个连接" }]);
   });
 
-  it("set_action 经 apply_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {
-    const s = await import("../server/engine/config/configStore");
+  it("set_action 经 edit_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {
+    const s = await import("../server/engine/draft");
     const def = { description: "改名", effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
-    const r = await call("apply_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: s.getRev("test") });
+    const r = await call("edit_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: s.getRev("test") });
     expect(r.error).toBeUndefined();
     expect(r.result.structuredContent.names).toEqual(["equipment.rename"]);
     // 草稿视图：完整动作定义（读回-改-写回闭环）
@@ -239,7 +239,7 @@ describe("MCP 工具端点", () => {
     expect(run.error).toBeUndefined();
     expect(run.result.isError).toBe(true);
     // remove_action：names 同样是 类名.动作名
-    const rm = await call("apply_draft", { op: "remove_action", object: "equipment", name: "rename", base_rev: s.getRev("test") });
+    const rm = await call("edit_draft", { op: "remove_action", object: "equipment", name: "rename", base_rev: s.getRev("test") });
     expect(rm.error).toBeUndefined();
     expect(rm.result.structuredContent.names).toEqual(["equipment.rename"]);
     expect((await s.getDraft("test")).draft.object_types.equipment.actions!.rename).toBeUndefined();

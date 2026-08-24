@@ -206,7 +206,7 @@ object_types:
       purchase:
         connection: purchase_sys
         table: po_item
-        pk: po_id                  # 该表定位行、插入时用。不是同一性标准
+        pk: po_id                  # 表主键，仅供台账与展示。不是同一性标准
         fields:                    # 源列属性 → 列。派生属性不得出现
           name: item_name
           serial_no: sn
@@ -1328,7 +1328,7 @@ actions:
 |---|---|
 | `connection` | 连接名 |
 | `table` | 表名 |
-| `pk` | 该表主键，定位行、更新删除时用；不是同一性标准。未出现在 `fields` 里的 `pk`，插入时由源库自生，引擎不发明值 |
+| `pk` | 该表主键，仅供台账与展示（表结构抽屉标出）。引擎认行走 `identity` / `key`，不读这一键。未出现在 `fields` 里的主键列，插入时由源库自生，引擎不发明值 |
 | `fields` | 源列属性 → 列名。派生属性不得出现 |
 | `key` | 可选。该源用于对齐、认行的属性名；省略则用类的 `identity` |
 

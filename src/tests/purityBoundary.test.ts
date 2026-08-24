@@ -94,7 +94,7 @@ describe("组件 → server 导入方向（只许纯叶子）", () => {
       ["etag.ts", true],
       ["engine/adjudication/verdict.ts", true],
       ["schema/spec/actionSpec.ts", true],
-      ["engine/config/lineage.ts", true],
+      ["engine/draft/lineage.ts", true],
     ] as const) {
       expect(isPure(join(SERVER, file)), file).toBe(expectPure);
     }

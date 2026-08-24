@@ -1,9 +1,9 @@
 // 留痕编排 —— 问数与动作的留痕形状（字段、duration、版本号）唯一出处。路由与 MCP 共用。
-// 住 engine 不住 infra：它反向依赖 configStore（取版本号盖戳），留痕是编排不是源库驱动——infra/config 的包环随之断开。
+// 住 engine 不住 infra：它反向依赖 draft/current（取版本号盖戳），留痕是编排不是源库驱动——infra/draft 的包环随之断开。
 // 版本号在成功/失败一刻取一次；留痕尽力而为，不挡响应（safeLog）。
 
 import type { ActionRequest } from "../schema/request";
-import { getPublished } from "./config/configStore";
+import { getPublished } from "./draft/current";
 import { metaStore } from "../meta/store";
 
 /** 留痕尽力而为（可同步可异步）：响应失败的根因若正是元库故障，catch 里再抛就成非 JSON 响应。 */

@@ -43,7 +43,7 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 | `read_class` | 读一个已发布类的完整视图：属性（**枚举附 values**）、关系、动作及前置 | `{ name }` |
 | `query` | 执行结构化查询（只读） | `{ query: 查询JSON }` |
 
-这四个工具都有可选 `space` 参数，但**查数一律不传**（缺省 `published` 就是你要的世界；`query` 传了会被 `-32602` 拒绝）。`tools/list` 里你还会看到 `run_action` / `apply_draft` 等写工具——本 skill 不碰。
+这四个工具都有可选 `space` 参数，但**查数一律不传**（缺省 `published` 就是你要的世界；`query` 传了会被 `-32602` 拒绝）。`tools/list` 里你还会看到 `run_action` / `edit_draft` 等写工具——本 skill 不碰。
 
 ## 总方法论：发现 → 组装 → 执行 → 纠错
 
@@ -123,6 +123,6 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 
 1. 不编造类名、属性名、关系名、枚举值——拿不准就 `search` / `read_class`。
 2. 不传 `space`；不把草稿当成已发布世界。
-3. 只读：不调用 `run_action` / `apply_draft`。
+3. 只读：不调用 `run_action` / `edit_draft`。
 4. 查询 filter 里不写 `$request` / `$exists`；聚合与 `expand` 不同给；`expand` 不超过三层；`limit` 不超过 1000。
 5. 同一次会话里 `initialize` 只做一次；`notifications/*` 等不到响应是正常的。

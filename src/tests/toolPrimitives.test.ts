@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { actionSkeletonFor } from "../server/engine/adjudication/adjudicate";
-import { draftClassesPayload } from "../server/engine/config/views";
+import { draftClassesPayload } from "../server/engine/draft/views";
 import type { OntologyConfig } from "../server/schema/config";
 
 const cfg = (over: Partial<OntologyConfig>): OntologyConfig => ({ object_types: {}, link_types: {}, ...over } as OntologyConfig);

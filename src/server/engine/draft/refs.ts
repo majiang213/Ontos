@@ -1,5 +1,5 @@
 // 引用扫描 —— 「这个名字还被谁引用」的唯一出处：删除属性/关系前的拦截面。
-// 纯函数（config in → 引用清单 out），filterSpec 的最大消费方；configStore 只调两个入口。
+// 纯函数（config in → 引用清单 out），filterSpec 的最大消费方；ops/ 各编辑文件只调两个入口。
 // 扫面：源映射、公理、关系配对与转化、同类与他类派生规则、动作（pre/effect/inform，含 $link 跨类落点、值侧 { property }）。
 
 import type { OntologyConfig } from "../../schema/config";

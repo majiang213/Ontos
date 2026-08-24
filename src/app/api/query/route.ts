@@ -5,7 +5,7 @@
 import { queryRequestSchema } from "@/server/schema/request";
 import { query } from "@/server/engine/query/query";
 import { getDriverRegistry } from "@/server/engine/infra/load";
-import { getPublished } from "@/server/engine/config/configStore";
+import { getPublished } from "@/server/engine/draft/current";
 import { withQueryLog } from "@/server/engine/logging";
 import { bodyJson, respond, wsOf } from "@/app/api/_shared";
 

@@ -1,7 +1,7 @@
 // 画布包读回降级直测：坏键当没有，不拖死整包；config 键不在这层校验（调用方过 configSchema 硬炸）。
 
 import { describe, expect, it } from "vitest";
-import { applyPack, canvasSnapshot, unpackCanvas, type DraftState } from "../server/engine/config/pack";
+import { applyPack, canvasSnapshot, unpackCanvas, type DraftState } from "../server/engine/draft/canvasPack";
 
 describe("unpackCanvas（画布包读回降级）", () => {
   it("全形包：config 与界面状态三键原样返回", () => {

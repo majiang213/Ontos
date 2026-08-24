@@ -3,8 +3,8 @@
 // 已发布视图不返回 sources/pk（问数 Agent 不绑表）；草稿视图（space=draft）带状态与来源对照，供改画布。
 
 import type { ActionDef, OntologyConfig } from "../../schema/config";
-import { replaceBlockers } from "./applyOp";
-import { sameConfig } from "./configStore";
+import { replaceBlockers } from "./ops/replaceObject";
+import { sameConfig } from "./sameConfig";
 import { EngineReject } from "../../errors";
 
 /** 类相对已发布快照的状态（与 GET /api/ontology 的 states 同一算法）。 */
@@ -149,7 +149,7 @@ export interface DraftClassView extends Omit<ClassView, "actions"> {
   state: ClassState;
   /** 来源对照（连接名/表名/主键/字段映射）：逐步改画布必须看见；不含连接密码。 */
   sources: { name: string; connection: string; table: string; pk?: string; fields: Record<string, string> }[];
-  /** 能不能整份替换（replace_object）；replace_blockers 为空数组 = 可替换。与 applyDraft 共用 replaceBlockers。 */
+  /** 能不能整份替换（replace_object）；replace_blockers 为空数组 = 可替换。与 replace_object 共用 replaceBlockers（同文件 ops/replaceObject）。 */
   replaceable: boolean;
   replace_blockers: string[];
   /** 草稿视图给完整动作定义（effect/inform 原样，不压扁）——动作的读回-改-写回闭环靠它。 */
