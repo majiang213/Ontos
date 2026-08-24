@@ -1,17 +1,15 @@
 // 正交绕障路由 —— 线不从任何节点身上穿过：端点先沿所在边的法线探出一小段（桩），
 // 再在网格上 A* 绕开所有节点（含端点自己的节点）。失败兜底为直连（总比对穿强）。
+// Pt / Side 的几何词表在 ./geometry（单源），本文件只留路由域类型。
 
-export interface Pt {
-  x: number;
-  y: number;
-}
+import type { Pt, Side } from "./geometry";
+
 export interface RouteRect {
   x: number;
   y: number;
   w: number;
   h: number;
 }
-export type Side = "top" | "bottom" | "left" | "right";
 export interface RouteEnd {
   point: Pt;
   side: Side;

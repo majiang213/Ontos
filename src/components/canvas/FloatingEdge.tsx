@@ -1,87 +1,15 @@
 // 浮动边 —— 连接点不定死在节点中心点：按两端节点的相对方位，
 // 在节点边框上各自算附着点，多根边自然散开。自环（转化关系）画成节点上方的小环。
 // 线身编辑：中点捏点拖弯（存摆位表，拖回中点拉直）；两端捏点钉在真实的边框附着点上，拖到别的对象即改接。
+// 几何（边框附着点/钉点/最近边框候选）在 ./geometry；路由在 ./router。本文件只剩组件。
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { BaseEdge, EdgeLabelRenderer, useInternalNode, useReactFlow, useStoreApi, type EdgeProps } from "@xyflow/react";
 import { XYHandle } from "@xyflow/system";
-import { NODE_H, NODE_W } from "./layout";
-import { connectTrack, xyDragArgs } from "./connectTrack";
-import { edgePath, type RouteRect, type Side } from "./router";
-
-interface Pt {
-  x: number;
-  y: number;
-}
-
-/** 中心连线与节点矩形边框的交点。连线预览（FloatingConnectionLine）共用这套算法：拖的时候什么样，松手就什么样。 */
-export function borderPoint(from: { x: number; y: number; w: number; h: number }, to: Pt): Pt {
-  const cx = from.x + from.w / 2;
-  const cy = from.y + from.h / 2;
-  const dx = to.x - cx;
-  const dy = to.y - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-  const scale = Math.min(Math.abs(from.w / 2 / (dx || 1e-6)), Math.abs(from.h / 2 / (dy || 1e-6)));
-  return { x: cx + dx * scale, y: cy + dy * scale };
-}
-
-export function rectOf(node: { internals: { positionAbsolute: { x: number; y: number } }; measured: { width?: number; height?: number } }) {
-  return {
-    x: node.internals.positionAbsolute.x,
-    y: node.internals.positionAbsolute.y,
-    w: node.measured.width ?? NODE_W, // 未测量回退与布局计算同一常量（layout.ts）
-    h: node.measured.height ?? NODE_H,
-  };
-}
-
-/** 弯折量：相对两端节点中心连线中点的偏移（flow 坐标系单位）。 */
-export interface Bend {
-  dx: number;
-  dy: number;
-}
-
-/** 端点钉点：钉在某条边的 t 比例处（0..1）。拖节点时端点跟着自己的节点走。 */
-export interface BorderPin {
-  side: "top" | "bottom" | "left" | "right";
-  t: number;
-}
-
-/** 钉点 → 边框上的实际点。 */
-export function pinPoint(r: { x: number; y: number; w: number; h: number }, pin: BorderPin): Pt {
-  switch (pin.side) {
-    case "top":
-      return { x: r.x + pin.t * r.w, y: r.y };
-    case "bottom":
-      return { x: r.x + pin.t * r.w, y: r.y + r.h };
-    case "left":
-      return { x: r.x, y: r.y + pin.t * r.h };
-    case "right":
-      return { x: r.x + r.w, y: r.y + pin.t * r.h };
-  }
-}
-
-/** 离 p 最近的边框点 → 钉点 + 实际点。连线落点/抓取点钉在哪，由它定。 */
-export function closestBorderPin(r: { x: number; y: number; w: number; h: number }, p: Pt): { pin: BorderPin; point: Pt } {
-  const cx = Math.min(Math.max(p.x, r.x), r.x + r.w);
-  const cy = Math.min(Math.max(p.y, r.y), r.y + r.h);
-  const cands: { pin: BorderPin; point: Pt }[] = [
-    { pin: { side: "top", t: (cx - r.x) / r.w }, point: { x: cx, y: r.y } },
-    { pin: { side: "bottom", t: (cx - r.x) / r.w }, point: { x: cx, y: r.y + r.h } },
-    { pin: { side: "left", t: (cy - r.y) / r.h }, point: { x: r.x, y: cy } },
-    { pin: { side: "right", t: (cy - r.y) / r.h }, point: { x: r.x + r.w, y: cy } },
-  ];
-  let best = cands[0];
-  let bestD = Infinity;
-  for (const c of cands) {
-    const dist = Math.hypot(c.point.x - p.x, c.point.y - p.y);
-    if (dist < bestD) {
-      bestD = dist;
-      best = c;
-    }
-  }
-  return best;
-}
+import { beginSession, fireSession, xyDragArgs } from "./connectSession";
+import { edgePath, type RouteRect } from "./router";
+import { borderPoint, closestBorderPin, pinPoint, rectOf, type Bend, type BorderPin, type Pt } from "./geometry";
 
 interface BendData {
   bend?: Bend;
@@ -90,18 +18,6 @@ interface BendData {
   showKnob?: boolean; // 悬停/详情卡打开时露出捏点（弯折点 + 两端改接点）
   commitBend?: (name: string, bend: Bend | null) => void;
   commitReconnect?: (name: string, from: string, to: string, movedEnd: "source" | "target") => void;
-  setReconnecting?: (v: boolean) => void; // 预览箭头方向跟着改接状态走
-}
-
-/** 点在矩形的哪条边上（浮动端点反推法线方向；钉点直接带 side，不走这里）。 */
-function sideOf(r: RouteRect, p: Pt): Side {
-  const d = [
-    { s: "top" as Side, d: Math.abs(p.y - r.y) },
-    { s: "bottom" as Side, d: Math.abs(p.y - (r.y + r.h)) },
-    { s: "left" as Side, d: Math.abs(p.x - r.x) },
-    { s: "right" as Side, d: Math.abs(p.x - (r.x + r.w)) },
-  ];
-  return d.sort((a, b) => a.d - b.d)[0].s;
 }
 
 export default function FloatingEdge({ id, source, target, label, style, markerEnd, interactionWidth, data }: EdgeProps) {
@@ -150,8 +66,9 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
   const mid = { x: (sCenter.x + tCenter.x) / 2, y: (sCenter.y + tCenter.y) / 2 };
   const waypoint = bent ? { x: mid.x + bend.dx, y: mid.y + bend.dy } : null;
   const routed = edgePath(
-    { point: s, side: d.pins?.source?.side ?? sideOf(sRect, s) },
-    { point: t, side: d.pins?.target?.side ?? sideOf(tRect, t) },
+    // 浮动端点的法线方向：点已在边框上，最近边框候选就是它自己，pin.side 即方位（geometry 单源，原 sideOf 已收编）
+    { point: s, side: d.pins?.source?.side ?? closestBorderPin(sRect, s).pin.side },
+    { point: t, side: d.pins?.target?.side ?? closestBorderPin(tRect, t).pin.side },
     d.obstacles ?? [],
     waypoint
   );
@@ -179,8 +96,22 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
     if (e.button !== 0) return;
     e.stopPropagation(); // 不 preventDefault：吞 pointerdown 默认行为会连带吞掉 click；nopan 类已拦平移
     const fixed = end === "source" ? { nodeId: target, type: "target" as const } : { nodeId: source, type: "source" as const };
-    let connected = false; // XYHandle 松手不吃释放位置（只吃最后一次采样），落空要自己补命中
-    d.setReconnecting?.(true);
+    // 会话在 pointerdown 就开（抢在 XYHandle 的 onConnectStart 前面）：kind=reconnect 让预览箭头指回固定端，
+    // onDrop 带改接的 commit——画布的 onConnectStart 见到 reconnect 会话会跳过不顶
+    const grab = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    beginSession({
+      kind: "reconnect",
+      fromNode: fixed.nodeId, // 补命中的自连 veto：不动那端
+      start: grab,
+      last: grab,
+      fromHandleType: null,
+      onDrop: (hit) => {
+        const ns = end === "source" ? hit : source;
+        const nt = end === "target" ? hit : target;
+        if (ns === nt || (ns === source && nt === target)) return; // 自连 / 拖回原位不改接
+        d.commitReconnect?.(id, ns, nt, end);
+      },
+    });
     XYHandle.onPointerDown(
       e.nativeEvent,
       xyDragArgs(store, {
@@ -189,30 +120,15 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
         nodeId: fixed.nodeId,
         edgeUpdaterType: fixed.type, // 语义是「不动那端的连接点类型」：决定预览 fromHandle.type，进而决定预览箭头朝向
         onConnect: (connection) => {
-          connected = true;
-          d.setReconnecting?.(false);
+          console.log("[dbg] edge onConnect", JSON.stringify(connection));
+          fireSession(); // 已落成：松手补命中的闸
           const { source: ns, target: nt } = connection;
           if (!ns || !nt || ns === nt) return; // 自连不改接
           if (ns === source && nt === target) return; // 拖回原位
           d.commitReconnect?.(id, ns, nt, end);
         },
-        onConnectEnd: (evt, connectionState) => {
-          store.getState().onConnectEnd?.(evt, connectionState); // 走一遍画布的清尾（connectTrack 复位）
-          d.setReconnecting?.(false);
-          // 补命中：松手点在别的节点身上即改接（与新建连线的松手补命中同规则）
-          if (!connected && evt && "clientX" in evt) {
-            const hit = document.elementFromPoint(evt.clientX, evt.clientY)?.closest(".react-flow__node")?.getAttribute("data-id");
-            if (hit) {
-              const ns = end === "source" ? hit : source;
-              const nt = end === "target" ? hit : target;
-              if (ns !== nt && !(ns === source && nt === target)) {
-                connectTrack.last = rf.screenToFlowPosition({ x: evt.clientX, y: evt.clientY }); // 钉点按松手处算
-                d.commitReconnect?.(id, ns, nt, end);
-              }
-            }
-          }
-        },
-        onReconnectEnd: () => d.setReconnecting?.(false),
+        // 清尾统一走画布那道（dropSession 补命中 + endSession）：补命中的 commit 在会话的 onDrop 上
+        onConnectEnd: (...args) => store.getState().onConnectEnd?.(...args),
       })
     );
   };

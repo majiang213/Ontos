@@ -9,10 +9,9 @@ import type { OntologyConfig } from "@/server/schema/config";
 import { query } from "@/server/engine/query/query";
 import { runAction } from "@/server/engine/action/action";
 import { EngineReject } from "@/server/errors";
-import { conversionAction } from "@/server/engine/adjudication/adjudicate";
-import { FIELDS_UPDATE_ACTION, fieldsUpdateAction } from "@/server/engine/config/skeletons";
+import { actionSkeletonFor } from "@/server/engine/adjudication/adjudicate";
 import { proposeObjectsFor } from "@/server/engine/llmSlot";
-import { listClasses, listClassesDraft, readClass, readClassDraft, search } from "@/server/engine/config/views";
+import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/engine/config/views";
 import { listTables } from "@/server/engine/infra/load";
 import type { DriverRegistry } from "@/server/engine/infra/registry";
 import { applyDraft, getDraft, getPublished, getRev } from "@/server/engine/config/configStore";
@@ -106,14 +105,8 @@ export const TOOLS: ToolDef[] = [
     space: true,
     handler: async (ctx, args) => {
       const config = await ctx.config(); // 只改变查找哪份配置，仍是一次出模板、不落地
-      const clsName = String(args.object ?? "");
-      const cls = config.object_types[clsName];
-      if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
-      // 有转化关系就给转化模板，否则给 set_fields 骨架（与导入自动生成的同形同名）；都是草稿，不发布
-      const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
-      if (transition) return { payload: { name: `convert_to_${transition[1].transition!.to}`, action: conversionAction(transition[0], transition[1]) } }; // 转化骨架唯一构造点（adjudicate.ts）
-      const skel = fieldsUpdateAction(clsName, cls); // set_fields 骨架唯一构造点（skeletons.ts）
-      return { payload: skel ? { name: FIELDS_UPDATE_ACTION, action: skel } : { name: FIELDS_UPDATE_ACTION, action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" } };
+      // 骨架选择规则在 engine（adjudicate.actionSkeletonFor）：转化模板 / set_fields 骨架的构造点也都归 engine
+      return { payload: actionSkeletonFor(config, String(args.object ?? "")) };
     },
   },
   {
@@ -124,17 +117,8 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx) => {
       if (ctx.space === "draft") {
         const state = await getDraft(ctx.ws);
-        const published = await ctx.published();
-        return {
-          payload: {
-            space: "draft",
-            dirty: state.dirty,
-            rev: getRev(ctx.ws),
-            base_version: state.baseVersion,
-            classes: listClassesDraft(state.draft, published),
-            outlets: Object.keys(state.draft.outlets ?? {}), // 全局出站名（inform 的合法去向），只读——没有写入 op
-          },
-        };
+        // payload 形状在 engine（views.draftClassesPayload 纯函数）；这里只剩取数
+        return { payload: draftClassesPayload(state, await ctx.published(), getRev(ctx.ws)) };
       }
       return { payload: { classes: listClasses(await ctx.published()) } };
     },

@@ -4,8 +4,8 @@
 "use client";
 
 import { useReactFlow, useStoreApi, type ConnectionLineComponentProps } from "@xyflow/react";
-import { borderPoint, closestBorderPin, rectOf } from "./FloatingEdge";
-import { connectTrack } from "./connectTrack";
+import { borderPoint, closestBorderPin, rectOf } from "./geometry";
+import { currentSession } from "./connectSession";
 import { edgePath, type RouteRect } from "./router";
 
 // 与最终边同一款箭头（MarkerType.ArrowClosed 同参数同色 #b1b1b7，SVG marker 不吃 CSS var，故写死）
@@ -20,7 +20,8 @@ export default function FloatingConnectionLine({ fromNode, toNode, toX, toY, poi
   const vp = rf.getViewport();
   const pointer = { x: (raw.x - vp.x) / vp.zoom, y: (raw.y - vp.y) / vp.zoom };
   // 起点：抓取处最近的边框点（钉点候选）；拿不到跟踪点时退化为对着终点的边框交点
-  const startPin = connectTrack.start ? closestBorderPin(from, connectTrack.start) : null;
+  const grab = currentSession()?.start;
+  const startPin = grab ? closestBorderPin(from, grab) : null;
   // 终点：落在别的节点身上（含吸附半径内）= 指针处最近的边框点
   const endPin = toNode && toNode.id !== fromNode.id ? closestBorderPin(rectOf(toNode), pointer) : null;
   const start = startPin?.point ?? borderPoint(from, endPin?.point ?? pointer); // 退化：对着终点方向的边框交点

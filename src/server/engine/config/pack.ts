@@ -3,9 +3,8 @@
 
 import { z } from "zod";
 import type { OntologyConfig } from "../../schema/config";
-import { borderPinSchema } from "../../schema/ops";
+import { borderPinSchema, type BorderPin } from "../../schema/ops";
 import { metaStore } from "../../meta/store";
-import type { BorderPinRec } from "../../meta/types";
 
 export interface DraftState {
   draft: OntologyConfig;
@@ -13,7 +12,7 @@ export interface DraftState {
   dirty: boolean; // 与已发布是否有差异（按结构比较，每次操作后重算）
   layout: Record<string, { x: number; y: number }>; // 画布摆位（存 onto_workspace.layout 的 nodes）
   edgeBends: Record<string, { dx: number; dy: number }>; // 线的弯折（存同一列的 edges）；界面状态，不算本体改动
-  edgePins: Record<string, { source?: BorderPinRec; target?: BorderPinRec }>; // 线端点钉点（存同一列的 pins）；界面状态
+  edgePins: Record<string, { source?: BorderPin; target?: BorderPin }>; // 线端点钉点（存同一列的 pins）；界面状态
 }
 
 /** 落库用的整包：config + 界面状态三键。edgeBends/edgePins 缺省补空（老内存态可能没这两个字段）。 */

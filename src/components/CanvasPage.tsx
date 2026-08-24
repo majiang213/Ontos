@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OntologyCanvas from "./canvas/OntologyCanvas";
 import type { CanvasLink, CanvasObject } from "./canvas/layout";
-import type { BorderPin } from "./canvas/FloatingEdge";
+import type { BorderPin } from "./canvas/geometry";
 import PairCard from "./cards/PairCard";
 import Bezel from "./cards/Bezel";
 import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";

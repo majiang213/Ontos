@@ -36,6 +36,8 @@ const saveLayoutOp = z.object({ op: z.literal("save_layout"), positions: z.recor
 const saveEdgeBendOp = z.object({ op: z.literal("save_edge_bend"), name: z.string(), bend: z.object({ dx: z.number(), dy: z.number() }).nullable() });
 /** 端点钉点形状：钉在某条边的 t 比例处（0..1）。save_edge_pin 入参与画布包读回校验（configStore unpackCanvas）共用。 */
 export const borderPinSchema = z.object({ side: z.enum(["top", "bottom", "left", "right"]), t: z.number() });
+/** 钉点类型单源（校验与类型同一出处）：画布几何、元库记录、轮询帧全引这一型。 */
+export type BorderPin = z.infer<typeof borderPinSchema>;
 // pin=null 回到浮动附着。界面状态
 const saveEdgePinOp = z.object({
   op: z.literal("save_edge_pin"),

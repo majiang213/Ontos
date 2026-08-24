@@ -48,11 +48,7 @@ export interface QueryLogRec {
   ok: boolean;
 }
 
-/** 线端点的钉点：钉在某条边的 t 比例处（0..1）。 */
-export interface BorderPinRec {
-  side: "top" | "bottom" | "left" | "right";
-  t: number;
-}
+/** 线端点的钉点：类型单源在 schema/ops（z.infer<borderPinSchema>），此处不再另定义。 */
 
 export interface ActionLogRec {
   version?: number;

@@ -1,6 +1,8 @@
 // 帧 → 视图模型：GET /api/ontology 的响应形状（轮询帧）、外部改动 toast、收卡策略。
 // revWatcher 管「什么时候有新帧」，这里管「帧来了视图模型怎么变」。第二个消费方（非画布页）出现时不再各写一份。
 
+import type { BorderPin } from "../server/schema/ops";
+
 /** 本体视图响应：画布读工作副本（已发布 + 未发布改动）。rev 是 Store.rev，轮询监视器按它判变没变（ETag 同值）。 */
 export interface OntologyResp {
   rev: number;
@@ -8,7 +10,7 @@ export interface OntologyResp {
   dirty: boolean;
   layout: Record<string, { x: number; y: number }>;
   edgeBends: Record<string, { dx: number; dy: number }>; // 线的弯折点（界面状态，随摆位存）
-  edgePins: Record<string, { source?: { side: "top" | "bottom" | "left" | "right"; t: number }; target?: { side: "top" | "bottom" | "left" | "right"; t: number } }>; // 端点钉点
+  edgePins: Record<string, { source?: BorderPin; target?: BorderPin }>; // 端点钉点
   states: Record<string, "new" | "modified" | "same">;
   deleted: string[];
   action_changes: { added: string[]; overwritten: string[]; removed: string[] }; // 类名.动作名

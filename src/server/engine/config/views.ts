@@ -122,6 +122,29 @@ export function listClassesDraft(draft: OntologyConfig, published: OntologyConfi
   return Object.entries(draft.object_types).map(([name, t]) => ({ name, description: t.description, state: classState(draft, published, name) }));
 }
 
+/** 草稿版「列出类」的整包（MCP list_classes space=draft 的 payload 形状单源）：
+ *  classes 带状态；outlets 是全局出站名（inform 的合法去向），只读——没有写入 op。
+ *  纯函数：取数（getDraft/published/getRev）在调用方。 */
+export interface DraftClassesPayload {
+  space: "draft";
+  dirty: boolean;
+  rev: number;
+  base_version: number;
+  classes: DraftClassListItem[];
+  outlets: string[];
+}
+
+export function draftClassesPayload(state: { draft: OntologyConfig; dirty: boolean; baseVersion: number }, published: OntologyConfig, rev: number): DraftClassesPayload {
+  return {
+    space: "draft",
+    dirty: state.dirty,
+    rev,
+    base_version: state.baseVersion,
+    classes: listClassesDraft(state.draft, published),
+    outlets: Object.keys(state.draft.outlets ?? {}),
+  };
+}
+
 export interface DraftClassView extends Omit<ClassView, "actions"> {
   state: ClassState;
   /** 来源对照（连接名/表名/主键/字段映射）：逐步改画布必须看见；不含连接密码。 */

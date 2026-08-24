@@ -5,9 +5,10 @@
 import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../../schema/config";
 import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
+import { EngineReject } from "../../errors";
 import { dropClass } from "../config/applyOp";
 import { mutateDraft } from "../config/configStore";
-import { removeFieldsUpdateKeys } from "../config/skeletons";
+import { FIELDS_UPDATE_ACTION, fieldsUpdateAction, removeFieldsUpdateKeys } from "../config/skeletons";
 import { Verdict } from "./verdict";
 
 export type { Verdict } from "./verdict";
@@ -21,6 +22,20 @@ export function conversionAction(linkName: string, link: LinkType): ActionDef {
     pre: { [t.property]: t.from, $link: { [linkName]: false } },
     effect: [{ link: linkName }],
   };
+}
+
+/** 按类挑动作骨架（MCP propose_action 的规则单源）：本类上有转化关系给转化模板（conversionAction），
+ *  否则给 set_fields 骨架（与导入自动生成的同形同名，fieldsUpdateAction）；都是草稿，不发布。
+ *  选择器放这而不放 skeletons：要同时见两个构造点，skeletons 反向引本会成环（本文件已引它）。 */
+export function actionSkeletonFor(config: OntologyConfig, clsName: string): { name: string; action: ActionDef } | { name: string; action: null; reason: string } {
+  const cls = config.object_types[clsName];
+  if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
+  const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
+  if (transition) return { name: `convert_to_${transition[1].transition!.to}`, action: conversionAction(transition[0], transition[1]) };
+  const skel = fieldsUpdateAction(clsName, cls);
+  return skel
+    ? { name: FIELDS_UPDATE_ACTION, action: skel }
+    : { name: FIELDS_UPDATE_ACTION, action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" };
 }
 
 /** B 的属性并入 A（同名跳过、特有带过来），B 的源映射照搬，B 挂着的关系撤掉。

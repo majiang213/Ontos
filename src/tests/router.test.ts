@@ -1,8 +1,10 @@
 // 正交绕障路由测试：核心不变量——路径不穿任何节点（外扩后），端点精确保真。
 // 几何原语全在 components/canvas/router.ts，interface 就是测试面（纯函数零夹具）。
+// 点/方位词表在 components/canvas/geometry.ts（单源）。
 
 import { describe, expect, it } from "vitest";
-import { edgePath, routeOrthogonal, type Pt, type RouteEnd, type RouteRect } from "../components/canvas/router";
+import { edgePath, routeOrthogonal, type RouteEnd, type RouteRect } from "../components/canvas/router";
+import type { Pt } from "../components/canvas/geometry";
 
 const CELL_CLEAR_STUB = 26; // 与 router 内 STUB+8 的端点免检区同口径
 const INFLATE = 8;
