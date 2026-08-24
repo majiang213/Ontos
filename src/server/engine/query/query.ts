@@ -6,21 +6,10 @@ import type { ExpandNode, QueryRequest } from "../../schema/request";
 import type { SourceDriver } from "../infra/driver";
 import type { EvalContext } from "./expr";
 import { EngineReject } from "../../errors";
-import {
-  assertFilterShapes,
-  createEnv,
-  currentOf,
-  evalDerived,
-  matchConds,
-  mustCls,
-  mustLink,
-  propValue,
-  selectIndividuals,
-  transitionHolds,
-  type Cls,
-  type Env,
-  type Individual,
-} from "./individual";
+import { assertFilterShapes } from "./compare";
+import { createEnv, matchConds, selectIndividuals } from "./assemble";
+import { currentOf, evalDerived, transitionHolds } from "./evaluate";
+import { mustCls, mustLink, propValue, type Cls, type Env, type Individual } from "./individual";
 
 const DEFAULT_LIMIT = 200; // 查询治理：请求不写 limit 时的兜底上限
 

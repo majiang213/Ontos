@@ -4,19 +4,19 @@
 
 import type { ActionDef, OntologyConfig } from "../../server/schema/config";
 import { isFromOnly } from "../../server/schema/spec/valueSpec";
-import { formLinkOk, formPreOk, formValueKind, inFormSubset, walkEffectValues } from "../../server/schema/spec/actionSpec";
+import { formLinkOk, formPreOk, formValueKind, inFormSubset, walkEffectItems, walkEffectValues } from "../../server/schema/spec/actionSpec";
 import { walkFilter } from "../../server/schema/spec/filterSpec";
 
 /** 效应摘要：一条效应一行白话，inform 另列。类名/属性名/关系名用配置里的机器名。
  *  不展示 from / 字面量 / filter / identity——同一属性换取值来源或字面量，摘要一行不变（摘要是给人看的告警，不是审计）。 */
 export function effectSummary(def: ActionDef): string[] {
   const lines: string[] = [];
-  for (const item of def.effect ?? []) {
-    if ("update" in item) lines.push(`把 ${item.update.object} 的 ${Object.keys(item.update.properties).join("、")} 写成新值`);
-    else if ("delete" in item) lines.push(`撤走 ${item.delete.object}`); // 毒性关卡底线：「撤走」一行不能省
-    else if ("create" in item) lines.push(`新建 ${item.create.object}`);
-    else if ("link" in item) lines.push(`转化 ${item.link}`);
-  }
+  walkEffectItems(def, {
+    update: (item) => lines.push(`把 ${item.object} 的 ${Object.keys(item.properties).join("、")} 写成新值`),
+    delete: (item) => lines.push(`撤走 ${item.object}`), // 毒性关卡底线：「撤走」一行不能省
+    create: (item) => lines.push(`新建 ${item.object}`),
+    link: (name) => lines.push(`转化 ${name}`),
+  });
   for (const inf of def.inform ?? []) lines.push(`告知 ${inf.to.join("、")}（${inf.object}）`);
   return lines;
 }
@@ -112,17 +112,12 @@ function prefillVal(v: unknown): Pick<PropVal, "source" | "value"> {
 export function prefillEff(def: Pick<ActionDef, "effect"> | undefined): EffRow[] | undefined {
   if (!def) return undefined;
   const rows: EffRow[] = [];
-  for (const item of def.effect ?? []) {
-    if ("update" in item) {
-      rows.push({ kind: "update", rows: Object.entries(item.update.properties).map(([p, v]) => ({ prop: p, ...prefillVal(v) })) });
-    } else if ("link" in item) {
-      rows.push({ kind: "link", link: item.link });
-    } else if ("create" in item) {
-      rows.push({ kind: "create", object: item.create.object, rows: Object.entries(item.create.properties).map(([p, v]) => ({ prop: p, ...prefillVal(v) })) });
-    } else if ("delete" in item) {
-      rows.push({ kind: "delete" });
-    }
-  }
+  walkEffectItems(def, {
+    update: (item) => rows.push({ kind: "update", rows: Object.entries(item.properties).map(([p, v]) => ({ prop: p, ...prefillVal(v) })) }),
+    link: (name) => rows.push({ kind: "link", link: name }),
+    create: (item) => rows.push({ kind: "create", object: item.object, rows: Object.entries(item.properties).map(([p, v]) => ({ prop: p, ...prefillVal(v) })) }),
+    delete: () => rows.push({ kind: "delete" }),
+  });
   return rows;
 }
 

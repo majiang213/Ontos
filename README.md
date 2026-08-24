@@ -55,34 +55,41 @@ src/
 │   ├── page.tsx            入口：空间切换 + 画布页
 │   ├── globals.css         全部样式（设计 token + 组件类）
 │   └── api/                14 个路由：query（执行结构化查询）、
-│                           draft（写工作副本）、publish（发布）、
-│                           generate（AI 生成草稿）、introspect（读表结构）、
-│                           candidates / overlap / decisions（整合三步）、
+│                           apply_draft（写工作副本）、publish（发布）、
+│                           generate_objects（AI 生成对象）、list_tables（读表结构）、
+│                           list_candidates / compute_overlap / decide（整合三步）、
 │                           connections / workspaces、ontology / versions、
 │                           questions、mcp（外部 Agent 入口）
-├── components/             CanvasPage（构建页）、
-│                           OntologyCanvas（画布）、FloatingEdge / FloatingConnectionLine（浮动边与拖线）、
-│                           PairCard（裁决面板）、QuestionsCard（验收问题集卡）、
-│                           forms（连接/新建对象/字段/动作表单）、actionView（动作区纯函数）、
-│                           Bezel（卡面壳）、layout.ts（dagre 自动分层布局）、wsClient（API 适配器）
+├── components/             CanvasPage.tsx（构建页壳：状态机与工具条）、
+│                           canvas/（OntologyCanvas、FloatingEdge / FloatingConnectionLine、layout 分层布局、router 走线）、
+│                           cards/（Bezel 卡面壳、ObjectCard 对象编辑卡、LinkDetailCard 关系详情、
+│                           VersionsCard 版本历史、PairCard 裁决面板、QuestionsCard 验收问题集卡、SchemaDrawer 表结构抽屉）、
+│                           forms/（forms 连接/新建对象/字段表单、ActionForm 动作表单、actionView 动作区纯函数）、
+│                           ontFrame.ts（帧→视图模型：轮询 toast、收卡策略、版本/发布钮文案）、
+│                           revWatcher.ts（轮询纪律）、wsClient.ts（API 适配器）
 ├── server/                 后端：引擎、校验、元库、运行态、种子配置
-│   ├── engine/             引擎：
-│   │                       driver（源驱动接口 + 方言）、fixture / sqlDriver（两种实现）、
-│   │                       registry / load（驱动注册表 + 连接保存/删除生命周期）、query（问数树：展开/聚合/排序）、
-│   │                       action（动作执行）、individual（个体组装、下推对齐、派生、过滤）、
-│   │                       filterOp（过滤运算符表：内存比较与下推 Condition）、
-│   │                       adjudicate（裁决落地 + 转化骨架）、pairs（裁决流水线：候选/交集率/定案）、
-│   │                       verdict（五关系类型枚举与倾向文案）、overlap / normalize（交集率与归一化）、
-│   │                       configStore（工作副本与已发布的唯一出入口）、
-│   │                       refs（删除前的引用扫描）、eligibility（候选对资格谓词）、
-│   │                       workspace（工作空间）、llmSlot（模型槽位 + 离线回退）、
-│   │                       questions（验收跑批：失败分阶段 + 期望比对）、
-│   │                       logging（问数/动作留痕编排）、expr（表达式）、
-│   │                       validate（语义校验）、views（配置三视图）
+│   ├── engine/             引擎，按关切分子包：
+│   │   ├── query/          问数：query（投影结果树）、individual（个体核心类型与源列取值）、
+│   │   │                   assemble（下推对齐组装 + createEnv）、evaluate（when/派生/过滤求值）、
+│   │   │                   compare（行级比较与过滤形状校验）、expr（表达式）、
+│   │   │                   filterOp（过滤运算符表）、questions（验收跑批：失败分阶段 + 期望比对）
+│   │   ├── action/         动作执行（核前置、定效应、写回、留痕）
+│   │   ├── config/         configStore（工作副本与已发布的唯一出入口）、applyOp（编辑操作落草稿）、
+│   │   │                   pack（画布快照打包）、refs（删除前的引用扫描）、validate（语义校验 + 动作形状四查）、
+│   │   │                   skeletons（set_fields 骨架与级联）、views（配置三视图）、lineage（列→属性反查）
+│   │   ├── adjudication/   adjudicate（裁决落地 + 转化骨架）、pairs（裁决流水线：候选/交集率/定案）、
+│   │   │                   eligibility（候选对资格谓词）、overlap / normalize（交集率与归一化）、
+│   │   │                   verdict（五关系类型枚举与倾向文案）
+│   │   ├── infra/          driver（源驱动接口 + 方言）、fixture / sqlDriver（两种实现）、
+│   │   │                   registry / load（驱动注册表 + 连接保存/删除生命周期）、
+│   │   │                   logging（问数/动作留痕编排）、workspace（工作空间）
+│   │   └── llmSlot.ts      模型槽位 + 离线回退
 │   ├── schema/             Zod 形状：config（本体配置）、request（问数/动作请求）、ops（编辑操作）
-│   │                       filterWalk（$link 过滤树的唯一遍历入口与关系解析）、
-│   │                       valueShape（取值来源原语：{ from: X } 词表的唯一事实源）
-│   ├── meta/store.ts       平台元数据库（默认单文件 SQLite，ONTOS_META_DSN 可换 MySQL）
+│   │   └── spec/           形状规约：filterSpec（$link 过滤树的唯一遍历入口与关系解析）、
+│   │                       valueSpec（取值来源原语：{ from: X } 词表的唯一事实源）、
+│   │                       actionSpec（动作形状规约：位置规则、表单子集、效应种类/取值位置走查）
+│   ├── meta/               平台元数据库：store.ts（门面）+ backends.ts（SQLite / MySQL 两种后端，ONTOS_META_DSN 切换）
+│   │                       + types.ts + stores/（工作空间/版本链/连接/裁决/问题集/留痕/序号 七个关切存储）
 │   ├── runtime.ts          运行态（元库/注册表/配置存储的进程级单例，测试可整套换掉）
 │   └── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
 └── tests/                  vitest；引擎行为约定钉在测试里
@@ -91,7 +98,7 @@ src/
 四条主线：
 
 - **建模流**：画布操作 → `POST /api/apply_draft` 写工作副本 → `publish` 走 `validate` 校验 → `configStore` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 也能经 MCP 的 `apply_draft` 写工作副本（带 `base_rev` 防盖写），开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
-- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/questions`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
+- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/query/questions`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
 - **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具（用法见 `skills/ontos-action-run/SKILL.md`）→ `engine/action` 核前置、定效应、按 `project` 写回源库并留痕。
 - **边界**：业务数据永不进平台，引擎只在内存拼装；`src/server/config` 里只有本体模板和平台自己的元库。
 
@@ -168,7 +175,7 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 | 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llmSlot` 的三个槽位出现；不设 key 走离线确定性回退 |
 | 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；演示 fixture 与平台元库走 node:sqlite |
 | 状态 | React 自带 useState / useRef | 无状态库 |
-| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，218 个用例 |
+| 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，254 个用例 |
 | 图标 | @phosphor-icons/react | |
 
 ## 运行

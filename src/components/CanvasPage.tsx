@@ -10,13 +10,16 @@ import Bezel from "./cards/Bezel";
 import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";
 import QuestionsCard from "./cards/QuestionsCard";
 import { ConnectForm, CreateForm, LinkForm } from "./forms/forms";
-import ObjectCard, { type ActionFormState } from "./cards/ObjectCard";
+import ObjectCard, { type ObjectFormState } from "./cards/ObjectCard";
+import LinkDetailCard from "./cards/LinkDetailCard";
+import VersionsCard from "./cards/VersionsCard";
 import SchemaDrawer from "./cards/SchemaDrawer";
 import { effectSummary, formCompatible } from "./forms/actionView";
-import { externalToast, shouldCloseObjectCard, type OntologyResp } from "./ontFrame";
+import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/engine/config/lineage";
 import type { PairAdvice } from "../server/engine/llmSlot";
+import type { ObjectType } from "../server/schema/config";
 
 interface IntrospectResp {
   sources: {
@@ -46,19 +49,17 @@ export default function CanvasPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairs, setPairs] = useState<PairAdvice[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [versionsData, setVersionsData] = useState<{ version: number; createdAt: string }[] | null>(null); // null = 读着呢
   const [publishing, setPublishing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // 对象编辑卡与表结构抽屉已各自成 module（cards/ObjectCard、cards/SchemaDrawer）。
-  // 页面只留：开哪张卡、监视器豁免要看的两个 ref（表单状态在卡内，经 ref 镜像上来）。
+  // 页面只留：开哪张卡、卡内表单状态（ObjectCard 经 onFormState 报上来，写进 formStateRef 供守卫读）。
   const ontRef = useRef<OntologyResp | null>(null);
   const cardRef = useRef<Card>(null);
-  const actionFormRef = useRef<ActionFormState>(null); // 卡内动作表单的镜像：切对象前先看脏不脏
+  const formStateRef = useRef<ObjectFormState>({ busy: false, actionForm: null, actionDirty: false });
+  const onFormState = useCallback((s: ObjectFormState) => { formStateRef.current = s; }, []);
   const localBusy = useRef(false);
-  const formBusy = useRef(false);
-  const actionFormDirty = useRef(false);
   useEffect(() => { cardRef.current = card; }, [card]);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []); // 卸载清定时器
@@ -77,7 +78,7 @@ export default function CanvasPage() {
   // 这里只留「变化来了干什么」：本页写豁免在 busy()，表单开着走 onFormBlocked，失败一次走 onFailOnce。
   const watcher = useRevWatcher({
     busy: () => localBusy.current,
-    formBusy: () => formBusy.current,
+    formBusy: () => formStateRef.current.busy,
     onFrame: (data) => {
       const prev = ontRef.current;
       applyOnt(data);
@@ -179,13 +180,29 @@ export default function CanvasPage() {
     }
   };
 
+  /** 回到某版：内容覆盖到当前画布（未发布），版本列表在 VersionsCard 自取。 */
+  const rollback = async (version: number) => {
+    if (rollbacking) return;
+    setRollbacking(true);
+    try {
+      await withLocalWrite(async () => {
+        await apiPost("/api/versions", { version });
+        showToast(`已用 v${version} 覆盖当前画布（还没发布）`);
+        setCard(null);
+        await refresh();
+      });
+    } finally {
+      setRollbacking(false);
+    }
+  };
+
   // Esc 关一切浮卡。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉。
   // Esc：动作表单开着时不关整卡（表单的取消在 ObjectCard 内自闭环，含脏改动确认）；否则关浮卡 / 面板 / 抽屉
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
-      if (actionFormRef.current) return; // 表单开着：ObjectCard 的 Esc 自理（取消表单，不关卡）
+      if (formStateRef.current.actionForm) return; // 表单开着：ObjectCard 的 Esc 自理（取消表单，不关卡）
       setCard(null);
       setPanelOpen(false);
       setDrawerOpen(false);
@@ -251,7 +268,7 @@ export default function CanvasPage() {
   const columnTarget = (connection: string, table: string, column: string): string =>
     ont ? columnTargetOf(ont, connection, table, column) : "未映射";
 
-  const sel = card?.kind === "object" ? (ont?.object_types?.[card.name] as any) : null;
+  const sel: ObjectType | null = card?.kind === "object" ? ((ont?.object_types?.[card.name] as ObjectType | undefined) ?? null) : null;
 
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
@@ -264,7 +281,8 @@ export default function CanvasPage() {
         selectedLink={card?.kind === "linkDetail" ? card.name : null}
         onSelect={(name) => {
           // 动作表单有未保存改动时，切去别的对象先问一句（切换会收掉表单）
-          if (actionFormRef.current && actionFormDirty.current && cardRef.current?.kind === "object" && cardRef.current.name !== name) {
+          const fs = formStateRef.current;
+          if (fs.actionForm && fs.actionDirty && cardRef.current?.kind === "object" && cardRef.current.name !== name) {
             if (!window.confirm("动作表单里有没保存的改动，切换会丢掉。继续？")) return;
           }
           setCard({ kind: "object", name });
@@ -288,42 +306,18 @@ export default function CanvasPage() {
             className="eyebrow"
             style={{ cursor: "pointer", border: "none" }}
             title="版本历史"
-            onClick={async () => {
-              if (card?.kind === "versions") {
-                setCard(null); // toggle：再点收起
-                return;
-              }
-              setCard({ kind: "versions" });
-              setVersionsData(null); // 先给「读着呢」态再填数据
-              try {
-                const data = await apiGet<{ versions?: { version: number; createdAt: string }[] }>("/api/versions");
-                setVersionsData(data.versions ?? []);
-              } catch (e) {
-                netErr(e);
-              }
-            }}
+            onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })} // toggle：再点收起；列表 VersionsCard 自取
           >
-            {/* 空白种子版本（v1 且没有任何对象）不算「发布过」——空白空间注册时自动有一个空本体的 v1 */}
-            {ont && ont.version === 1 && Object.keys(ont.object_types).length === 0 ? "未发布" : `已发布 v${ont?.version ?? "…"}`} ▾
+            {ont ? versionLabel(ont) : "已发布 v…"} ▾
           </button>
           {/* 发布常驻工具条、永可点：有改动时是「发布 vN+1 / 放弃」，没改动点一下给提示（不置灰） */}
           {ont?.dirty ? (
             <>
+              {/* title 点名将发生的变化：将删除的类 + 动作差集（规则在 ontFrame.publishTitle） */}
               <button
                 className="btn-cta"
                 style={{ fontSize: 12, padding: "6px 10px 6px 14px" }}
-                title={
-                  // title 点名将发生的变化：将删除的类 + 动作差集里实际发生的子集（三个动词不永远并排）
-                  (() => {
-                    const parts: string[] = [];
-                    if (ont.deleted?.length) parts.push(`将删除：${ont.deleted.join("、")}`);
-                    const ac = ont.action_changes;
-                    if (ac?.added.length) parts.push(`将新增的动作：${ac.added.join("、")}`);
-                    if (ac?.overwritten.length) parts.push(`将更新的动作：${ac.overwritten.join("、")}`);
-                    if (ac?.removed.length) parts.push(`将删除的动作：${ac.removed.join("、")}`);
-                    return parts.length ? parts.join("；") : undefined;
-                  })()
-                }
+                title={publishTitle(ont)}
                 onClick={publish}
                 disabled={publishing}
               >
@@ -363,47 +357,9 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 版本历史卡：点某版把内容覆盖到当前画布（未发布） */}
+      {/* 版本历史卡：点某版把内容覆盖到当前画布（未发布）；列表自取数（cards/VersionsCard） */}
       {card?.kind === "versions" && (
-        <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
-          <Bezel>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>
-                <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
-              </div>
-              {versionsData === null && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>读着呢…</div>}
-              {versionsData !== null && ont && ont.version === 1 && Object.keys(ont.object_types).length === 0 ? (
-                // 空白种子版本（注册时自动落的空本体 v1）不算发布史
-                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>还没有发布过——发布一次之后这里会列出历史版本</div>
-              ) : (versionsData ?? []).map((v) => (
-                <div key={v.version} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, lineHeight: 2.2 }}>
-                  <span>
-                    <strong>v{v.version}</strong>　<span style={{ color: "var(--ink-3)" }}>{v.createdAt.slice(0, 16).replace("T", " ")}</span>
-                  </span>
-                  <button
-                    className="chip"
-                    disabled={rollbacking}
-                    onClick={async () => {
-                      if (rollbacking) return;
-                      setRollbacking(true);
-                      try {
-                        await withLocalWrite(async () => {
-                          await apiPost("/api/versions", { version: v.version });
-                          showToast(`已用 v${v.version} 覆盖当前画布（还没发布）`);
-                          setCard(null);
-                          await refresh();
-                        });
-                      } finally {
-                        setRollbacking(false);
-                      }
-                    }}
-                  >
-                    回到这版
-                  </button>
-                </div>
-              ))}
-          </Bezel>
-        </div>
+        <VersionsCard ont={ont} rollbacking={rollbacking} onRollback={(v) => void rollback(v)} onError={netErr} onClose={() => setCard(null)} />
       )}
 
       {/* 验收问题集卡 */}
@@ -522,109 +478,32 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* 右侧：关系详情卡（点边弹出）：名称/反向名/描述可改，失焦保存 */}
+      {/* 右侧：关系详情卡（点边弹出，cards/LinkDetailCard） */}
       {card?.kind === "linkDetail" && ont?.link_types?.[card.name] && (
-        <div className="float-card float-tr" style={{ width: 320 }}>
-          <Bezel pad={16}>
-            {(() => {
-              const l = ont.link_types[card.name] as any;
-              return (
-                <>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span style={{ fontFamily: "var(--font-serif)", fontSize: 16 }}>{card.name}</span>
-                    <button className="chip" aria-label="关闭" onClick={() => setCard(null)}>✕</button>
-                  </div>
-                  <div style={{ fontSize: 12, lineHeight: 2, color: "var(--ink-3)", margin: "2px 0 10px" }}>
-                    <div>{l.from} → {l.to}{l.card ? `，基数 ${l.card}` : ""}</div>
-                    {l.transition && <div>状态转化：{l.transition.property} 从「{l.transition.from}」到「{l.transition.to}」</div>}
-                    {l.match && <div>配对字段：{l.match.map((m: any) => `${m.from} → ${m.to}`).join("，")}</div>}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 11, color: "var(--ink-3)" }}>
-                    <label>
-                      名称
-                      <input
-                        key={`name:${card.name}`} /* 换关系强制重挂，旧名不写进新关系 */
-                        className="text-in"
-                        style={{ width: "100%", fontSize: 12, padding: "6px 10px" }}
-                        defaultValue={card.name} /* 关系名是 link_types 的键，不在条目里 */
-                        onBlur={async (e) => {
-                          const v = e.target.value.trim();
-                          if (!v || v === e.target.defaultValue) return;
-                          const ok = await op({ op: "update_link", name: card.name, new_name: v });
-                          if (ok) {
-                            setCard({ kind: "linkDetail", name: v }); // 边以关系名为键：卡跟新名走
-                            showToast(`关系已改名为 ${v}（进草稿，发布后生效）`);
-                          }
-                        }}
-                      />
-                    </label>
-                    <label>
-                      反向名（可选）
-                      <input
-                        key={`inv:${card.name}`}
-                        className="text-in"
-                        style={{ width: "100%", fontSize: 12, padding: "6px 10px" }}
-                        defaultValue={l.inverse ?? ""}
-                        onBlur={async (e) => {
-                          const v = e.target.value.trim();
-                          if (v === e.target.defaultValue) return;
-                          const ok = await op({ op: "update_link", name: card.name, inverse: v });
-                          if (ok) showToast(`反向名已更新（进草稿，发布后生效）`);
-                        }}
-                      />
-                    </label>
-                    <label>
-                      描述（可选）
-                      <textarea
-                        key={`desc:${card.name}`}
-                        className="ctl"
-                        rows={2}
-                        style={{ width: "100%" }}
-                        defaultValue={l.description ?? ""}
-                        onBlur={async (e) => {
-                          if (e.target.value === e.target.defaultValue) return;
-                          const ok = await op({ op: "update_link", name: card.name, description: e.target.value });
-                          if (ok) showToast(`描述已更新（进草稿，发布后生效）`);
-                        }}
-                      />
-                    </label>
-                  </div>
-                  <button
-                    className="chip"
-                    style={{ color: "var(--danger)", marginTop: 10 }}
-                    onClick={async () => {
-                      const ok = await op({ op: "delete_link", name: card.name });
-                      if (ok) {
-                        setCard(null);
-                        showToast(`已删除关系 ${card.name}（进草稿，发布后生效）`);
-                      }
-                    }}
-                  >
-                    删除关系
-                  </button>
-                </>
-              );
-            })()}
-          </Bezel>
-        </div>
+        <LinkDetailCard
+          name={card.name}
+          link={ont.link_types[card.name]}
+          op={op}
+          showToast={showToast}
+          onRenamed={(v) => setCard({ kind: "linkDetail", name: v })} // 边以关系名为键：卡跟新名走
+          onClose={() => setCard(null)}
+        />
       )}
 
       {/* 右侧：对象编辑卡（cards/ObjectCard） */}
-      {sel && card?.kind === "object" && (
+      {ont && sel && card?.kind === "object" && (
         <ObjectCard
           key={card.name} // 换卡即重挂：卡内表单状态自然清
           name={card.name}
           sel={sel}
-          states={ont?.states}
-          actionChanges={ont?.action_changes}
+          states={ont.states}
+          actionChanges={ont.action_changes}
           ont={ont}
           op={op}
           refresh={refresh}
           closeCard={() => setCard(null)}
           showToast={showToast}
-          formBusy={formBusy}
-          actionFormRef={actionFormRef}
-          actionFormDirty={actionFormDirty}
+          onFormState={onFormState}
           currentRev={watcher.currentRev}
         />
       )}

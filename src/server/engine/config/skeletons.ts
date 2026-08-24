@@ -3,6 +3,7 @@
 // 生成要模型、执行不要——这条动作连模型也不用：形状固定，代码构造，过 set_action 同一份校验。
 
 import type { ActionDef, ObjectType } from "../../schema/config";
+import { walkEffectItems } from "../../schema/spec/actionSpec";
 
 /** 固定动作名：调用方（run_action）、文档、测试都引它，不让模型起名。 */
 export const FIELDS_UPDATE_ACTION = "set_fields";
@@ -29,10 +30,13 @@ export function fieldsUpdateAction(clsName: string, cls: ObjectType): ActionDef 
 
 /** 取 set_fields 效应里指向本类的 update.properties；动作不存在或形状不符返回 undefined。 */
 function writablePropsOf(clsName: string, cls: ObjectType): Record<string, unknown> | undefined {
-  for (const item of cls.actions?.[FIELDS_UPDATE_ACTION]?.effect ?? []) {
-    if ("update" in item && item.update.object === clsName && item.update.properties) return item.update.properties;
-  }
-  return undefined;
+  let found: Record<string, unknown> | undefined;
+  walkEffectItems(cls.actions?.[FIELDS_UPDATE_ACTION], {
+    update: (item) => {
+      if (!found && item.object === clsName && item.properties) found = item.properties;
+    },
+  });
+  return found;
 }
 
 /** 字段改名跟随：set_fields 的 properties 键换名（与唯一键指针跟随同一条规矩）。 */

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { queryRequestSchema } from "../server/schema/request";
 import { query } from "../server/engine/query/query";
-import { createEnv, selectIndividuals } from "../server/engine/query/individual";
+import { createEnv, selectIndividuals } from "../server/engine/query/assemble";
 import { EngineReject } from "../server/errors";
 import { runAction } from "../server/engine/action/action";
 import { freshDriver } from "../server/engine/infra/load";

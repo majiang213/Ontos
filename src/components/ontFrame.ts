@@ -48,3 +48,25 @@ export function externalToast(prev: MonitorFrame, next: MonitorFrame): string {
 export function shouldCloseObjectCard(openName: string | null, data: OntologyResp): boolean {
   return openName !== null && !(openName in data.object_types);
 }
+
+/** 空白种子版本：v1 且没有任何对象——空白空间注册时自动落的空本体 v1，不算「发布过」。 */
+export function isBlankSeed(ont: Pick<OntologyResp, "version" | "object_types">): boolean {
+  return ont.version === 1 && Object.keys(ont.object_types).length === 0;
+}
+
+/** 左上版本钮的标签（加载中占位不在此处：调用方对 null 帧自己写「已发布 v…」）。 */
+export function versionLabel(ont: Pick<OntologyResp, "version" | "object_types">): string {
+  return isBlankSeed(ont) ? "未发布" : `已发布 v${ont.version}`;
+}
+
+/** 发布钮的 title 点名将发生的变化：将删除的类 + 动作差集里实际发生的子集（三个动词不永远并排）。
+ *  没有可点名的变化返回 undefined（title 不出现）。 */
+export function publishTitle(ont: Pick<OntologyResp, "deleted" | "action_changes">): string | undefined {
+  const parts: string[] = [];
+  if (ont.deleted?.length) parts.push(`将删除：${ont.deleted.join("、")}`);
+  const ac = ont.action_changes;
+  if (ac?.added.length) parts.push(`将新增的动作：${ac.added.join("、")}`);
+  if (ac?.overwritten.length) parts.push(`将更新的动作：${ac.overwritten.join("、")}`);
+  if (ac?.removed.length) parts.push(`将删除的动作：${ac.removed.join("、")}`);
+  return parts.length ? parts.join("；") : undefined;
+}

@@ -94,15 +94,38 @@ export function formLinkOk(sub: unknown): boolean {
   return sub === true || sub === false;
 }
 
-/* ---------- 效应/告知的取值位置走查 ----------
-   效应种类 → 该种类下的取值位置，唯一出处。validate（查 VALUE_POSITIONS）与 formCompatible（查 FORM_SUBSET）共用；
-   加效应种类只改这里。结构条件（宿主类、无 filter、转化关系、认人写明）不在走查范围，留在消费方。 */
+/* ---------- 效应种类走查 ----------
+   种类分派的唯一出处：全代码库只有这里写 "update" in item 判别链（执行器 action.ts planEffect 除外——
+   它按种类解释执行，是唯一合法的第二处分派）。加第六种效应时联合类型一变，下面的 else 分支编译报错，
+   强制先扩这里；消费方经访问器回调，不自己判种类。 */
 
 type EffectItem = NonNullable<ActionDef["effect"]>[number];
-type UpdateItem = Extract<EffectItem, { update: unknown }>["update"];
-type DeleteItem = Extract<EffectItem, { delete: unknown }>["delete"];
-type CreateItem = Extract<EffectItem, { create: unknown }>["create"];
+export type UpdateItem = Extract<EffectItem, { update: unknown }>["update"];
+export type DeleteItem = Extract<EffectItem, { delete: unknown }>["delete"];
+export type CreateItem = Extract<EffectItem, { create: unknown }>["create"];
 type InformItem = NonNullable<ActionDef["inform"]>[number];
+
+export interface EffectItemVisit {
+  update?: (item: UpdateItem) => void;
+  create?: (item: CreateItem) => void;
+  delete?: (item: DeleteItem) => void;
+  link?: (name: string) => void;
+}
+
+/** 把每条效应按种类交给消费方。只关心某几种就只挂那几个回调（如 delete 无 properties，create 无 filter）。 */
+export function walkEffectItems(def: Pick<ActionDef, "effect"> | undefined, visit: EffectItemVisit): void {
+  for (const item of def?.effect ?? []) {
+    if ("update" in item) visit.update?.(item.update);
+    else if ("create" in item) visit.create?.(item.create);
+    else if ("delete" in item) visit.delete?.(item.delete);
+    else visit.link?.(item.link); // 联合类型加新种类时这里编译报错——先扩本走查
+  }
+}
+
+/* ---------- 效应/告知的取值位置走查 ----------
+   效应种类 → 该种类下的取值位置，唯一出处。validate（查 VALUE_POSITIONS）与 formCompatible（查 FORM_SUBSET）共用；
+   加效应种类只改这里。结构条件（宿主类、无 filter、转化关系、认人写明）不在走查范围，留在消费方。
+   种类分派复用 walkEffectItems，不另写一份。 */
 
 export interface EffectValueVisit {
   identity?: (op: "update" | "delete", item: UpdateItem | DeleteItem, v: unknown) => void;
@@ -114,26 +137,23 @@ export interface EffectValueVisit {
 }
 
 /** 把一条动作定义里每个取值位置逐项交给消费方：认人键 / 效应过滤 / update 与 create 的属性值 / link 名 / inform 的属性值。 */
-export function walkEffectValues(def: Pick<ActionDef, "effect" | "inform">, visit: EffectValueVisit): void {
-  for (const item of def.effect ?? []) {
-    if ("link" in item) {
-      visit.link?.(item.link);
-      continue;
-    }
-    if ("create" in item) {
-      for (const [p, v] of Object.entries(item.create.properties)) visit.createProp?.(item.create, p, v);
-      continue;
-    }
-    if ("update" in item) {
-      visit.identity?.("update", item.update, item.update.identity); // 认人位必发事件：值可能缺，缺不缺由消费方判
-      if (item.update.filter) visit.filter?.("update", item.update, item.update.filter);
-      for (const [p, v] of Object.entries(item.update.properties)) visit.updateProp?.(item.update, p, v);
-      continue;
-    }
-    visit.identity?.("delete", item.delete, item.delete.identity);
-    if (item.delete.filter) visit.filter?.("delete", item.delete, item.delete.filter);
-  }
-  for (const inf of def.inform ?? []) {
+export function walkEffectValues(def: Pick<ActionDef, "effect" | "inform"> | undefined, visit: EffectValueVisit): void {
+  walkEffectItems(def, {
+    update: (item) => {
+      visit.identity?.("update", item, item.identity); // 认人位必发事件：值可能缺，缺不缺由消费方判
+      if (item.filter) visit.filter?.("update", item, item.filter);
+      for (const [p, v] of Object.entries(item.properties)) visit.updateProp?.(item, p, v);
+    },
+    create: (item) => {
+      for (const [p, v] of Object.entries(item.properties)) visit.createProp?.(item, p, v);
+    },
+    delete: (item) => {
+      visit.identity?.("delete", item, item.identity);
+      if (item.filter) visit.filter?.("delete", item, item.filter);
+    },
+    link: (name) => visit.link?.(name),
+  });
+  for (const inf of def?.inform ?? []) {
     for (const [p, v] of Object.entries(inf.properties)) visit.informProp?.(inf, p, v);
   }
 }

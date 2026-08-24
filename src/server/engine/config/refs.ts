@@ -4,6 +4,7 @@
 
 import type { OntologyConfig } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
+import { walkEffectItems, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
 
 /** 删除属性前的引用扫描：源映射、关系配对、转化、公理、同类派生规则、动作（含跨类）。 */
 export function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[] {
@@ -41,17 +42,20 @@ export function referencesOf(d: OntologyConfig, clsName: string, prop: string): 
     for (const [actName, act] of Object.entries(hostCls.actions ?? {})) {
       const trail = `动作 ${hostName}.${actName}`;
       valuePropRefs(act.pre, hostName, trail, d, clsName, prop, valueRefs);
-      for (const item of act.effect ?? []) {
-        if ("link" in item) continue;
-        const op = "update" in item ? item.update : "delete" in item ? item.delete : "create" in item ? item.create : null;
-        if (!op) continue;
-        if ("filter" in op && op.filter) valuePropRefs(op.filter, op.object, trail, d, clsName, prop, valueRefs);
-        if ("properties" in op && op.properties) {
-          // update 的 current 是目标类视图；create 的 current 是动作宿主（主体）视图
-          const attrCls = "update" in item ? op.object : hostName;
-          for (const v of Object.values(op.properties)) valuePropRefs(v, attrCls, trail, d, clsName, prop, valueRefs);
-        }
-      }
+      walkEffectItems(act, {
+        update: (item) => {
+          if (item.filter) valuePropRefs(item.filter, item.object, trail, d, clsName, prop, valueRefs);
+          // update 的 current 是目标类视图
+          for (const v of Object.values(item.properties)) valuePropRefs(v, item.object, trail, d, clsName, prop, valueRefs);
+        },
+        create: (item) => {
+          // create 的 current 是动作宿主（主体）视图
+          for (const v of Object.values(item.properties)) valuePropRefs(v, hostName, trail, d, clsName, prop, valueRefs);
+        },
+        delete: (item) => {
+          if (item.filter) valuePropRefs(item.filter, item.object, trail, d, clsName, prop, valueRefs);
+        },
+      });
       // inform 的属性表在动作宿主（主体）上取值
       for (const inf of act.inform ?? []) {
         for (const v of Object.values(inf.properties)) valuePropRefs(v, hostName, trail, d, clsName, prop, valueRefs);
@@ -78,11 +82,11 @@ export function linkRefs(d: OntologyConfig, linkName: string): string[] {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       const trail = `动作 ${clsName}.${actName}`;
       walk(act.pre, trail);
-      for (const item of act.effect ?? []) {
-        if ("link" in item && item.link === linkName) refs.add(trail);
-        const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
-        if (op && "filter" in op) walk(op.filter, trail);
-      }
+      walkEffectItems(act, {
+        link: (name) => { if (name === linkName) refs.add(trail); },
+        update: (item) => walk(item.filter, trail),
+        delete: (item) => walk(item.filter, trail),
+      });
     }
     for (const [p, def] of Object.entries(cls.properties)) {
       if (!def.derived) continue;
@@ -158,16 +162,16 @@ function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] 
       const trail = `动作 ${hostName}.${actName}`;
       if (hostName === clsName && act.pre && filterTopKeys(act.pre).includes(prop)) refs.add(trail);
       collectNestedLinkRefs(d, act.pre, hostName, clsName, prop, trail, (t) => refs.add(t));
-      for (const item of act.effect ?? []) {
-        const op = "update" in item ? item.update : "delete" in item ? item.delete : "create" in item ? item.create : null;
-        if (!op || op.object !== clsName) continue; // link 没有属性键；他类效应不归这里管
+      const effRef = (item: UpdateItem | CreateItem | DeleteItem) => {
+        if (item.object !== clsName) return; // 他类效应不归这里管（link 没有属性键，不挂回调）
         const keys = [
-          ...("properties" in op && op.properties ? Object.keys(op.properties) : []),
-          ...("filter" in op && op.filter ? filterTopKeys(op.filter) : []),
+          ...("properties" in item && item.properties ? Object.keys(item.properties) : []),
+          ...("filter" in item && item.filter ? filterTopKeys(item.filter) : []),
         ];
         if (keys.includes(prop)) refs.add(trail);
-        if ("filter" in op) collectNestedLinkRefs(d, op.filter, clsName, clsName, prop, trail, (t) => refs.add(t));
-      }
+        if ("filter" in item) collectNestedLinkRefs(d, item.filter, clsName, clsName, prop, trail, (t) => refs.add(t));
+      };
+      walkEffectItems(act, { update: effRef, create: effRef, delete: effRef });
     }
   }
   return [...refs];

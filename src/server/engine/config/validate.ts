@@ -3,7 +3,7 @@
 
 import { type OntologyConfig } from "../../schema/config";
 import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
-import { checkActionValue, walkEffectValues } from "../../schema/spec/actionSpec";
+import { checkActionValue, walkEffectItems, walkEffectValues, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
 
 export function validateSemantics(config: OntologyConfig): void {
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
@@ -76,10 +76,10 @@ export function validateSemantics(config: OntologyConfig): void {
     // 动作的前置与效应过滤同尺
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       if (act.pre) checkFilterKeys(clsName, act.pre as Record<string, unknown>, `${clsName}.${actName} 的前置`);
-      for (const item of act.effect ?? []) {
-        const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
-        if (op && "filter" in op && op.filter) checkFilterKeys(op.object, op.filter as Record<string, unknown>, `${clsName}.${actName} 的效应过滤`);
-      }
+      const effFilter = (item: UpdateItem | DeleteItem) => {
+        if (item.filter) checkFilterKeys(item.object, item.filter as Record<string, unknown>, `${clsName}.${actName} 的效应过滤`);
+      };
+      walkEffectItems(act, { update: effFilter, delete: effFilter });
     }
   }
   for (const [linkName, link] of Object.entries(config.link_types)) {
@@ -116,18 +116,17 @@ export function validateSemantics(config: OntologyConfig): void {
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       // 效应指向的类必须存在；update/create 写的属性必须是该类的源列属性；$request 认人的类必须存在
-      for (const item of act.effect ?? []) {
-        const op = "update" in item ? item.update : "delete" in item ? item.delete : "create" in item ? item.create : null;
-        if (!op) continue; // link：关系名由 link_types 表自身约束
-        const target = config.object_types[op.object];
-        if (!target) throw new Error(`配置不合法：${clsName}.${actName} 的效应指向不存在的类 ${op.object}`);
-        if ("properties" in op && op.properties) {
-          for (const prop of Object.keys(op.properties)) {
-            if (!target.properties[prop]) throw new Error(`配置不合法：${clsName}.${actName} 的效应写了不存在的属性 ${op.object}.${prop}`);
-            if (target.properties[prop].derived) throw new Error(`配置不合法：${clsName}.${actName} 的效应写了派生属性 ${op.object}.${prop}`);
+      const effTarget = (item: UpdateItem | CreateItem | DeleteItem) => {
+        const target = config.object_types[item.object];
+        if (!target) throw new Error(`配置不合法：${clsName}.${actName} 的效应指向不存在的类 ${item.object}`);
+        if ("properties" in item && item.properties) {
+          for (const prop of Object.keys(item.properties)) {
+            if (!target.properties[prop]) throw new Error(`配置不合法：${clsName}.${actName} 的效应写了不存在的属性 ${item.object}.${prop}`);
+            if (target.properties[prop].derived) throw new Error(`配置不合法：${clsName}.${actName} 的效应写了派生属性 ${item.object}.${prop}`);
           }
         }
-      }
+      };
+      walkEffectItems(act, { update: effTarget, create: effTarget, delete: effTarget }); // link：关系名由 link_types 表自身约束
       const reqBlock = act.pre?.$request as Record<string, unknown> | undefined;
       for (const cv of Object.values(reqBlock ?? {})) {
         if (cv !== null && typeof cv === "object" && "object" in (cv as Record<string, unknown>)) {
@@ -157,21 +156,22 @@ export function validateActionShapes(config: OntologyConfig): void {
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       const where = `${clsName}.${actName}`;
-      // ① 效应 link 与 ④ 认人写明是结构条件（要查配置、要见整条 op），逐项直查；
+      // ① 效应 link 与 ④ 认人写明是结构条件（要查配置、要见整条 op），走 walkEffectItems 逐项直查；
       // 取值形状（③）走 actionSpec.walkEffectValues——位置分派不再在这里另写一份
-      for (const item of act.effect ?? []) {
-        if ("link" in item) {
-          const l = config.link_types[item.link];
-          if (!l?.transition) throw new Error(`配置不合法：${where} 的效应 link 指向不存在的转化关系 ${item.link}`);
-          if (l.from !== clsName || l.to !== clsName) throw new Error(`配置不合法：转化关系 ${item.link} 不在 ${clsName} 上`);
-          continue;
+      const identityOrFilter = (item: UpdateItem | DeleteItem) => {
+        if (item.identity === undefined && !item.filter) {
+          throw new Error(`配置不合法：${where} 的效应认人必须写明：${item.object} 缺 identity 或 filter`);
         }
-        if ("create" in item) continue;
-        const op = "update" in item ? item.update : item.delete;
-        if (op.identity === undefined && !op.filter) {
-          throw new Error(`配置不合法：${where} 的效应认人必须写明：${op.object} 缺 identity 或 filter`);
-        }
-      }
+      };
+      walkEffectItems(act, {
+        link: (name) => {
+          const l = config.link_types[name];
+          if (!l?.transition) throw new Error(`配置不合法：${where} 的效应 link 指向不存在的转化关系 ${name}`);
+          if (l.from !== clsName || l.to !== clsName) throw new Error(`配置不合法：转化关系 ${name} 不在 ${clsName} 上`);
+        },
+        update: identityOrFilter,
+        delete: identityOrFilter,
+      });
       walkEffectValues(act, {
         // create 投影没有 current 上下文；from: generated 只许落在带 generate 列表的属性上
         createProp: (item, p, v) =>
@@ -190,7 +190,11 @@ export function validateActionShapes(config: OntologyConfig): void {
   for (const [linkName, link] of Object.entries(config.link_types)) {
     if (!link.transition) continue;
     const referenced = Object.values(config.object_types).some((cls) =>
-      Object.values(cls.actions ?? {}).some((act) => (act.effect ?? []).some((item) => "link" in item && item.link === linkName))
+      Object.values(cls.actions ?? {}).some((act) => {
+        let hit = false;
+        walkEffectItems(act, { link: (name) => { if (name === linkName) hit = true; } });
+        return hit;
+      })
     );
     if (!referenced) {
       throw new Error(`配置不合法：转化关系 ${linkName} 没有任何动作的效应 link 引用它——先写一条同样 link 该转化关系的替代动作，再删旧的`);

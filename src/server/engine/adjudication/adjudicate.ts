@@ -4,6 +4,7 @@
 
 import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../../schema/config";
 import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
+import { walkEffectItems } from "../../schema/spec/actionSpec";
 import { dropClass } from "../config/applyOp";
 import { mutateDraft } from "../config/configStore";
 import { removeFieldsUpdateKeys } from "../config/skeletons";
@@ -90,15 +91,14 @@ function actionRefsDyingLink(d: OntologyConfig, owner: string, act: ActionDef, d
     });
   };
   collect(owner, act.pre as Record<string, unknown> | undefined);
-  for (const item of act.effect ?? []) {
-    if ("link" in item) {
-      const l = d.link_types[item.link];
-      if (!l || l.from === dying || l.to === dying) return true;
-      continue;
-    }
-    const op = "update" in item ? item.update : "delete" in item ? item.delete : null;
-    if (op?.filter) collect(op.object, op.filter as Record<string, unknown>);
-  }
+  walkEffectItems(act, {
+    link: (name) => {
+      const l = d.link_types[name];
+      if (!l || l.from === dying || l.to === dying) hit = true;
+    },
+    update: (item) => collect(item.object, item.filter as Record<string, unknown> | undefined),
+    delete: (item) => collect(item.object, item.filter as Record<string, unknown> | undefined),
+  });
   return hit;
 }
 

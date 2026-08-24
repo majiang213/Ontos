@@ -5,21 +5,10 @@
 import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../../schema/config";
 import type { ActionRequest } from "../../schema/request";
 import { dialectFor, toColumnValue, type SourceDriver } from "../infra/driver";
-import {
-  assertFilterShapes,
-  createEnv,
-  currentView,
-  evalDerived,
-  evalFilterOnIndividual,
-  keyColumn,
-  mustCls,
-  propValue,
-  selectIndividuals,
-  sourcesOf,
-  type Cls,
-  type Env,
-  type Individual,
-} from "../query/individual";
+import { assertFilterShapes } from "../query/compare";
+import { createEnv, selectIndividuals } from "../query/assemble";
+import { evalDerived, evalFilterOnIndividual } from "../query/evaluate";
+import { currentView, keyColumn, mustCls, propValue, sourcesOf, type Cls, type Env, type Individual } from "../query/individual";
 import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "../query/expr";
 
 export interface ProjectionRecord {

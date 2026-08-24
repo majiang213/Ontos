@@ -1,14 +1,25 @@
 // 对象编辑卡：描述 / 唯一键 / 字段 / 动作 / 来源 / 危险区，六个 Section 与它们自己的表单状态机。
 // 换卡即重挂（父级按对象名给 key），表单状态自然清；脏表单取消要确认，开着期间外部改动先问再盖。
+// 表单状态经 onFormState 回调报给页面（监视器豁免、Esc 守卫、切换守卫），页面不再递 ref 下来。
 "use client";
 
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import Bezel from "./Bezel";
 import { ActionForm } from "../forms/ActionForm";
 import { FieldForm, Section } from "../forms/forms";
 import { effectSummary, formCompatible } from "../forms/actionView";
+import type { ObjectType } from "../../server/schema/config";
 
 export type ActionFormState = { mode: "create" } | { mode: "edit"; name: string } | null;
+
+/** 卡内表单状态：页面拿它做监视器豁免（busy）、Esc 守卫（actionForm）、切换对象守卫（actionDirty）。 */
+export interface ObjectFormState {
+  busy: boolean; // 字段表单或动作表单开着：轮询不冲掉未保存内容
+  actionForm: ActionFormState; // 动作表单开没开、开的哪条
+  actionDirty: boolean; // 动作表单里有未保存改动
+}
+
+const FORM_IDLE: ObjectFormState = { busy: false, actionForm: null, actionDirty: false };
 
 export default function ObjectCard({
   name,
@@ -20,52 +31,49 @@ export default function ObjectCard({
   refresh,
   closeCard,
   showToast,
-  formBusy,
-  actionFormRef,
-  actionFormDirty,
+  onFormState,
   currentRev,
 }: {
   name: string;
-  sel: any;
+  sel: ObjectType;
   states?: Record<string, "new" | "modified" | "same">;
   actionChanges?: { added: string[]; overwritten: string[]; removed: string[] };
-  ont: any;
+  ont: { object_types: Record<string, any>; link_types: Record<string, any> };
   op: (body: Record<string, unknown>) => Promise<boolean>;
   refresh: () => Promise<unknown>;
   closeCard: () => void;
   showToast: (s: string) => void;
-  formBusy: MutableRefObject<boolean>; // 表单开着时报给监视器：不冲掉未保存内容
-  actionFormRef: MutableRefObject<ActionFormState>; // 镜像给页面：切换对象前要看表单脏不脏
-  actionFormDirty: MutableRefObject<boolean>;
+  onFormState: (s: ObjectFormState) => void;
   currentRev: () => number | null;
 }) {
   const [fieldForm, setFieldForm] = useState<{ mode: "create" } | { mode: "edit"; name: string } | null>(null);
   const [actionForm, setActionForm] = useState<ActionFormState>(null);
+  const dirtyRef = useRef(false); // 动作表单脏标记（卡内 Esc/取消确认自用；报页面走 onFormState）
   const actionFormRev = useRef<number | null>(null); // 打开动作表单那一刻的 rev：保存时不一样要先问
   useEffect(() => {
-    formBusy.current = Boolean(fieldForm || actionForm);
-  }, [fieldForm, actionForm, formBusy]);
+    onFormState({ busy: Boolean(fieldForm || actionForm), actionForm, actionDirty: actionForm ? dirtyRef.current : false });
+  }, [fieldForm, actionForm, onFormState]);
+  useEffect(() => () => onFormState(FORM_IDLE), [onFormState]); // 收卡即归零：不留陈表单状态卡住监视器
   useEffect(() => {
-    actionFormRef.current = actionForm;
     if (actionForm) actionFormRev.current = currentRev();
     else {
       actionFormRev.current = null;
-      actionFormDirty.current = false;
+      dirtyRef.current = false;
     }
-  }, [actionForm, actionFormRef, actionFormDirty, currentRev]);
+  }, [actionForm, currentRev]);
 
   // 动作表单开着时 Esc = 取消表单回到列表（有未保存改动先问一句），不冒到页面去关整卡
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !actionForm) return;
       if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
-      if (actionFormDirty.current && !window.confirm("动作表单里有没保存的改动，取消就丢了。确定取消？")) return;
+      if (dirtyRef.current && !window.confirm("动作表单里有没保存的改动，取消就丢了。确定取消？")) return;
       setActionForm(null);
       void refresh(); // 表单收口后再拉一次：开着期间轮询只记 rev 不刷视图
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actionForm, actionFormDirty, refresh]);
+  }, [actionForm, refresh]);
 
   return (
     <div className="float-card float-tr" style={{ width: 400, maxHeight: "calc(100% - 110px)" }}>
@@ -161,7 +169,10 @@ export default function ObjectCard({
               clsName={name}
               ont={ont}
               initial={actionForm.mode === "edit" ? { name: actionForm.name, def: sel.actions?.[actionForm.name] } : undefined}
-              onDirtyChange={(d) => { actionFormDirty.current = d; }}
+              onDirtyChange={(d) => {
+                dirtyRef.current = d;
+                onFormState({ busy: true, actionForm, actionDirty: d }); // 脏变化只发生在表单开着时
+              }}
               onSave={async (aName, def) => {
                 // 保存仍不带 base_rev；表单开着期间外面改过了，先问一句再盖
                 if (actionFormRev.current !== null && currentRev() !== null && currentRev() !== actionFormRev.current) {
@@ -175,7 +186,7 @@ export default function ObjectCard({
                 return ok;
               }}
               onCancel={() => {
-                if (actionFormDirty.current && !window.confirm("动作表单里有没保存的改动，取消就丢了。确定取消？")) return;
+                if (dirtyRef.current && !window.confirm("动作表单里有没保存的改动，取消就丢了。确定取消？")) return;
                 setActionForm(null);
                 void refresh(); // 表单收口后再拉一次：开着期间轮询只记 rev 不刷视图
               }}

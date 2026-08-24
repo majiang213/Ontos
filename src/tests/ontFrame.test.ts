@@ -1,7 +1,7 @@
-// 帧 → 视图模型测试：externalToast 判定顺序 + 收卡策略。
+// 帧 → 视图模型测试：externalToast 判定顺序 + 收卡策略 + 版本/发布钮文案。
 
 import { describe, expect, it } from "vitest";
-import { externalToast, shouldCloseObjectCard, type OntologyResp } from "../components/ontFrame";
+import { externalToast, isBlankSeed, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "../components/ontFrame";
 
 const frame = (names: string[], ac?: { added?: string[]; overwritten?: string[]; removed?: string[] }) => ({
   object_types: Object.fromEntries(names.map((n) => [n, {}])),
@@ -35,5 +35,25 @@ describe("shouldCloseObjectCard（收卡策略）", () => {
     expect(shouldCloseObjectCard("vendor", data)).toBe(true);
     expect(shouldCloseObjectCard("equipment", data)).toBe(false);
     expect(shouldCloseObjectCard(null, data)).toBe(false);
+  });
+});
+
+describe("isBlankSeed / versionLabel（空白种子不算发布过）", () => {
+  it("v1 且无对象 = 空白种子（未发布）；有对象或 v2+ = 已发布", () => {
+    expect(isBlankSeed({ version: 1, object_types: {} })).toBe(true);
+    expect(isBlankSeed({ version: 1, object_types: { equipment: {} } })).toBe(false);
+    expect(isBlankSeed({ version: 2, object_types: {} })).toBe(false);
+    expect(versionLabel({ version: 1, object_types: {} })).toBe("未发布");
+    expect(versionLabel({ version: 3, object_types: { equipment: {} } })).toBe("已发布 v3");
+  });
+});
+
+describe("publishTitle（发布钮点名）", () => {
+  it("删类与动作差集按实际发生的子集拼；全空返回 undefined", () => {
+    expect(publishTitle({ deleted: ["vendor"], action_changes: { added: ["equipment.convert"], overwritten: [], removed: ["equipment.scrap"] } })).toBe(
+      "将删除：vendor；将新增的动作：equipment.convert；将删除的动作：equipment.scrap"
+    );
+    expect(publishTitle({ deleted: [], action_changes: { added: [], overwritten: ["equipment.convert"], removed: [] } })).toBe("将更新的动作：equipment.convert");
+    expect(publishTitle({ deleted: [], action_changes: { added: [], overwritten: [], removed: [] } })).toBeUndefined();
   });
 });
