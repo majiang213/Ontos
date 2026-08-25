@@ -202,7 +202,7 @@ npm test       # 引擎 golden 测试（vitest）
 
 | 变量 | 作用 | 缺省 |
 |---|---|---|
-| `OPENAI_API_KEY` | 接真模型（OpenAI 兼容协议，通用键，同 Claude Code / Codex 惯例）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（演示四问可用） |
+| `OPENAI_API_KEY` | 接真模型（OpenAI 兼容协议，通用键，同 Claude Code / Codex 惯例）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（问数剧本只在 `test` 演示空间；生成对象/候选对建议是通用启发式，各空间可用）。注意演示数据的归属不按 Key 判断：`test` 空间有无 Key 都有演示模板与 fixture 连接，其余空间永远空白起步 |
 | `OPENAI_BASE_URL` / `OPENAI_MODEL` | 换接入点/模型（任何 OpenAI 兼容端点均可，含内部网关）；设了 `OPENAI_API_KEY` 则 `OPENAI_MODEL` 必填，不设报错 | BASE_URL 不设 = `@ai-sdk/xai` 默认端点（`https://api.x.ai/v1`） |
-| `ONTOS_TOKEN` | 写端点令牌闸（连接/发布/裁决/动作等要写库的 API 需 `Authorization: Bearer <token>`） | 不设 = 演示模式全放开 |
+| `ONTOS_TOKEN` | 写端点令牌闸（连接/发布/裁决/动作等要写库的 API 需 `Authorization: Bearer <token>`） | 不设 = 写端点不验令牌 |
 | `ONTOS_META_DSN` | 平台元库连接串。`mysql://…` 走 MySQL | 不设 = 单文件 SQLite `src/server/config/ontos-meta.db` |
