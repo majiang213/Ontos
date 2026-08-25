@@ -4,8 +4,8 @@ import type { ActionLogRec, QueryLogRec } from "../types";
 import { ConcernStore } from "./base";
 
 export class LogsStore extends ConcernStore {
-  async logQuery(ws: string, l: QueryLogRec): Promise<void> {
-    const id = await this.wsId(ws);
+  async logQuery(workspace: string, l: QueryLogRec): Promise<void> {
+    const id = await this.wsId(workspace);
     await this.backend.run(
       `INSERT INTO log_query (workspace_id, version, session_id, model, question, query_json, row_count, error, duration_ms, ok)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -13,8 +13,8 @@ export class LogsStore extends ConcernStore {
     );
   }
 
-  async logAction(ws: string, l: ActionLogRec): Promise<void> {
-    const id = await this.wsId(ws);
+  async logAction(workspace: string, l: ActionLogRec): Promise<void> {
+    const id = await this.wsId(workspace);
     await this.backend.run(
       `INSERT INTO log_action (workspace_id, version, action, object_type, subject, request_json, projections, error, duration_ms, ok)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -22,13 +22,13 @@ export class LogsStore extends ConcernStore {
     );
   }
 
-  async listQueryLogs(ws: string, limit = 50): Promise<Record<string, unknown>[]> {
-    const id = await this.wsId(ws);
+  async listQueryLogs(workspace: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const id = await this.wsId(workspace);
     return this.backend.all(`SELECT * FROM log_query WHERE workspace_id = ? ORDER BY id DESC LIMIT ?`, [id, limit]);
   }
 
-  async listActionLogs(ws: string, limit = 50): Promise<Record<string, unknown>[]> {
-    const id = await this.wsId(ws);
+  async listActionLogs(workspace: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const id = await this.wsId(workspace);
     return this.backend.all(`SELECT * FROM log_action WHERE workspace_id = ? ORDER BY id DESC LIMIT ?`, [id, limit]);
   }
 }

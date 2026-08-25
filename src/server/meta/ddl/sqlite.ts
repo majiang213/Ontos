@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS ont_question (     -- 验收问题集
   version INTEGER,                            -- 最后一次跑批时的本体版本
   question TEXT NOT NULL,                     -- 自然语言问题
   expected TEXT,                              -- 纯数字=比对行数；字段=值=至少一行对上；留空=能查出就算过
-  status TEXT NOT NULL DEFAULT '未跑',        -- 词表单源在 engine/query/questionStatus.ts 的 Q_STATUS（meta 不 import engine，按名互指）
+  status TEXT NOT NULL DEFAULT '未跑',        -- 词表单源在 features/acceptance/questionStatus.ts 的 Q_STATUS（meta 不 import engine，按名互指）
   detail TEXT                                 -- 失败原因（白话），通过时清空
 );
 CREATE TABLE IF NOT EXISTS log_query (        -- 问数留痕：存请求与成败，不存结果集

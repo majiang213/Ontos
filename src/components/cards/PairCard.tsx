@@ -2,9 +2,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { PairAdvice } from "../../server/engine/adjudication/verdict";
-import { VERDICTS, VERDICT_LABELS, Verdict } from "../../server/engine/adjudication/verdict";
-import { apiPost } from "../wsClient";
+import type { PairAdvice } from "../../server/schema/verdict";
+import { VERDICTS, VERDICT_LABELS, Verdict } from "../../server/schema/verdict";
+import { apiPost } from "../workspaceClient";
 
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
   const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);

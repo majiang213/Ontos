@@ -1,4 +1,10 @@
-# 外部 Agent 编辑画布（MCP `apply_draft`）
+# 外部 Agent 编辑画布（MCP `edit_draft`）
+
+> **历史评审记录**：本文档是早期迭代的评审结论，代码路径与 API 形态随重构变化。
+> 现行结构见 `README.md`「代码结构」与 `AGENTS.md`。历史名对照：`configStore.ts` → `features/ontology/`（editDraft / commit / ops 的旧称）、
+> `llmSlot.ts` → `infra/llm/slot.ts`、`views.ts` → `features/ontology/views.ts`、`load.ts` → `infra/connections.ts`、
+> `apply_draft` 路由 → `edit_draft`；工作空间从 `?ws=` / `x-ontos-ws` 改为路径段 `/api/<空间名>/…`（`workspaceOf`）。
+
 
 | 字段 | 值 |
 |---|---|
@@ -60,7 +66,7 @@
 2. Agent 能**显式**读工作副本，且默认读已发布——`query` / `run_action` 绝不改口。
 3. `propose_objects` 仍只建议；Agent 自己把建议落成 `import_objects` 或 `replace_object`。`propose_action` 同样只建议，落地走 `set_action`。人在对象卡上也能新建/编辑/删除**简单动作**（同一套 op，范围见 Goal 1）。对象卡列出动作摘要、发布条点名动作变化。
 4. 开着的画布在 Agent 写入后于约 2 秒内显示新草稿，并给一句白话 toast。
-5. 写工具走 `requireWriteAuth`；空间仍由 `?ws=` / `x-ontos-ws` 决定，工具入参不带空间名。
+5. 写工具走 `requireWriteAuth`；空间由 URL 路径段决定，工具入参不带空间名。
 6. Skill 拆成四个，按「世界 × 读写」分工：`ontos-query`（已发布·只读：查数）、`ontos-action-run`（已发布·写：执行已发布动作）、`ontos-canvas`（草稿：表→对象、逐步编辑画布）、`ontos-action`（草稿：写动作定义）。任何 skill 不得教 Agent 发布、放弃、裁决、回滚。
 
 ### Non-Goals
@@ -395,7 +401,7 @@ draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），�
 
 `search` 在草稿的类名、说明、关系名上做与今天相同的子串匹配。
 
-实现落在 `src/server/engine/views.ts`：现有纯函数继续吃一份 `OntologyConfig`；`replaceable` / `replace_blockers` 由 `configStore`（或与 `applyDraft` 共用的 `replaceBlockers(existing, publishedHasClass)`）计算，避免锁定文案在读路径和写路径各写一份。
+实现落在 `src/server/features/ontology/views.ts`：现有纯函数继续吃一份 `OntologyConfig`；`replaceable` / `replace_blockers` 由 `configStore`（或与 `applyDraft` 共用的 `replaceBlockers(existing, publishedHasClass)`）计算，避免锁定文案在读路径和写路径各写一份。
 
 #### `propose_action` 与 `space`
 
@@ -462,7 +468,7 @@ draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），�
 | 交集率 | `POST /api/compute_overlap` | **禁止（本期）** | 证据在裁决卡上；该调用会全列扫描并写计数 |
 | 候选对列表 | `GET /api/list_candidates` | **禁止（本期）** | Skill 让 Agent 请人去点「疑似重复」 |
 | 验收问题集 | `/api/questions` | **禁止** | 画布卡 |
-| 工作空间的新建 | `POST /api/workspaces` | **禁止** | 空间由 URL `?ws=` 绑定 |
+| 工作空间的新建 | `POST /api/workspaces` | **禁止** | 空间由 URL 路径段 `/api/<空间名>/…` 绑定 |
 
 `delete_object` 允许删已发布类：草稿变脏，`GET /api/ontology` 的 `deleted` 列出待删。真正从引擎消失要等人发布。人随时「放弃」。Skill 写明：删已发布类之前要读 `space=draft`，并告诉人「放弃可撤销」。
 
@@ -712,7 +718,7 @@ Agent 不写 `save_layout`。MCP 的 `mcpDraftOpSchema` 不含该判别值；万
 
 ### 9. 槽位：仍是三个，没有 NL→ops
 
-`src/server/engine/llmSlot.ts` 三个槽位不变：`nlToQuery`、`proposeObjects`、`proposePairs`。每个仍是一次 `generateObject` + Zod。
+`src/server/infra/llm/slot.ts` 三个槽位不变：`nlToQuery`、`proposeObjects`、`proposePairs`。每个仍是一次 `generateObject` + Zod。
 
 Agent 自己把自然语言编成 `draftOpSchema`。Ontos 不提供「改 equipment 的说明」这种第四槽。`propose_objects` 继续当表→对象建议的一次性槽位，由 Agent 决定是否落地。`propose_action` 不是槽位，是确定性模板（`conversionAction` 或 `set_fields` 骨架，两个构造点），返回形状即 `set_action.def`；生成动作的是外部 Agent 自己，Ontos 不开 NL→动作的第四槽。
 
@@ -722,11 +728,11 @@ Agent 自己把自然语言编成 `draftOpSchema`。Ontos 不提供「改 equipm
 
 ### 10. 工作空间与进程边界
 
-`wsOf` 已从 `?ws=` 或 `x-ontos-ws` 取值，非法名 `BadRequest`。MCP 工具入参**禁止**出现 `ws` / `workspace`。跨空间只能靠换 URL，换不成静默串写。
+`workspaceOf` 从路径段取值，非法名 `BadRequest`。MCP 工具入参**禁止**出现 `ws` / `workspace`。跨空间只能靠换 URL，换不成静默串写。
 
-Skill 写明：端点 `POST <host>/api/mcp?ws=<空间名>`，省略即 `default`。画布 `wsClient` 的当前空间与 Agent 所用 `ws` 必须是同一个，人才能在开着的画布上看到 Agent 的改动。
+Skill 写明：端点 `POST <host>/api/<空间名>/mcp`。画布 `workspaceClient` 的当前空间与 Agent 所用路径段必须是同一个，人才能在开着的画布上看到 Agent 的改动。
 
-**演示场景一律用 `?ws=test`：演示模板（`src/server/config/ontology.yaml`）与四个 fixture 连接只属于 `test` 空间**（`workspace.ts` 的 `seedYamlFor` / `load.ts` 的 `getDriverRegistry` 按空间名判断，与是否配置 LLM Key 无关）；`default` 与新建空间一样空白起步（空本体、无连接、无出站）。skill 与文档里的示例（`convert` 验收入库、演示四个动作）全在 `test`。
+**演示场景一律用 `/api/test/…` 路径段：演示模板（`src/server/config/ontology.yaml`）与四个 fixture 连接只属于 `test` 空间**（`infra/workspace.ts` 的 `seedYamlFor` / `infra/connections.ts` 的 `getDriverRegistry` 按空间名判断，与是否配置 LLM Key 无关）；`default` 与新建空间一样空白起步（空本体、无连接、无出站）。skill 与文档里的示例（`convert` 验收入库、演示四个动作）全在 `test`。
 
 多实例 / 无粘滞负载均衡：实例 A 的 MCP 写入进不了实例 B 的画布。`runtime.ts` 已声明该假设。本期不引入 Redis/共享草稿。部署约束写进 README：画布与 `/api/mcp` 打到同一进程。
 
@@ -767,7 +773,7 @@ Skill 写明：端点 `POST <host>/api/mcp?ws=<空间名>`，省略即 `default`
 
 ### 13. Skill：四个 skill，按「世界 × 读写」分工，发布权在人
 
-Skill 从一份 `skills/ontos/SKILL.md` 拆成四个目录，各自自包含（端点、信封、错误码、鉴权、语法、红线都写全），不建公共文件——Agent 往往只加载一个 skill，缺上下文就会瞎拼。四个 skill 的端点都写 `POST <host>/api/mcp?ws=<空间名>`；演示场景一律用 `?ws=test`（演示种子与 fixture 只在 `test`，default 空白起步，见 §10）。**`tools/list` 从 PR 2 起是全量九个工具**（PR 1 仍是七个），MCP 单一端点不按 skill 裁剪；分工与克制靠 skill 正文（Non-Goals）。
+Skill 从一份 `skills/ontos/SKILL.md` 拆成四个目录，各自自包含（端点、信封、错误码、鉴权、语法、红线都写全），不建公共文件——Agent 往往只加载一个 skill，缺上下文就会瞎拼。四个 skill 的端点都写 `POST <host>/api/<空间名>/mcp`；演示场景一律用 `/api/test/…` 路径段（演示种子与 fixture 只在 `test`，default 空白起步，见 §10）。**`tools/list` 从 PR 2 起是全量九个工具**（PR 1 仍是七个），MCP 单一端点不按 skill 裁剪；分工与克制靠 skill 正文（Non-Goals）。
 
 | skill | 世界 | 方向 | 工具 | 方法论 | 关键红线 |
 |---|---|---|---|---|---|
@@ -851,7 +857,7 @@ MCP 路由伪代码（现有信封不变：HTTP 200，成败看 JSON-RPC；`tool
 
 ```ts
 // src/app/api/mcp/route.ts 内 tools/call 分支（示意）
-const ws = wsOf(req);
+const workspace = await workspaceOf(params);
 const SPACE_OK = new Set(["list_classes", "read_class", "search", "propose_action"]);
 if ("space" in args && !SPACE_OK.has(name)) {
   return rpcErr(id, -32602, "这个工具不接受 space");
@@ -1152,10 +1158,10 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 - `src/app/api/propose_objects/route.ts` — 槽位产建议，不落地
 - `src/app/api/ontology/route.ts` — 画布读草稿、`states` / `deleted`
 - `src/components/CanvasPage.tsx` — `refresh` 仅在本页写路径之后
-- `src/server/engine/views.ts` — 问数三视图
-- `src/server/engine/llmSlot.ts` — 三槽
-- `src/server/engine/refs.ts` — 删除前引用扫描
-- `src/app/api/_shared.ts` — `requireWriteAuth`、`wsOf`
+- `src/server/features/ontology/views.ts` — 问数三视图
+- `src/server/infra/llm/slot.ts` — 三槽
+- `src/server/features/ontology/refs.ts` — 删除前引用扫描
+- `src/app/api/_shared.ts` — `requireWriteAuth`、`workspaceOf`（路径段校验）
 - `src/server/runtime.ts` — 单进程内存态
 - `src/tests/m4m6.test.ts` — MCP 契约
 - `skills/ontos/` — 调用方方法论（PR 4 拆为 `ontos-query` / `ontos-action-run` / `ontos-canvas` / `ontos-action`）
@@ -1175,7 +1181,7 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 
 - `src/server/engine/configStore.ts` — `Store.rev` + `getRev`；`applyDraft`/`mutateDraft`/发布/放弃/回滚在校验成功（或草稿已替换）之后、**第一个 await 之前** `+= 1`（`save_layout` 除外）；注释钉这点；`getDraft` 克隆时不重置 `rev`
 - `src/app/api/ontology/route.ts` — JSON `rev: getRev(ws)`；`ETag` / `If-None-Match` / 304；200 与 304 均 `Cache-Control: no-store`
-- `src/server/engine/views.ts` — draft 列表带 `state`；`readClass` 可选 `sources` / `pk`（**本 PR 不加 `replaceable`**）
+- `src/server/features/ontology/views.ts` — draft 列表带 `state`；`readClass` 可选 `sources` / `pk`（**本 PR 不加 `replaceable`**）
 - `src/app/api/mcp/route.ts` — 发现工具与 `propose_action` 用 `z.enum(["published", "draft"]).optional()`；按工具取 `getDraft` 或 `getPublished`；**`query`/`run_action`/`propose_objects` 若带 `space` → `-32602`**；发现工具 description 点明缺省已发布；**`read_class` 说明只写到「草稿带来源对照」，不提整份替换 / `replaceable`**
 - `src/tests/m4m6.test.ts` — 缺省仍七个工具（本 PR 不加写工具）；`space=draft` 能看见未发布类；缺省看不见；`query` 不受未发布类影响；`query` 带 `space` → `-32602`；非法 `space` → `-32602`；description 含「已发布」或「草稿」；**不钉「整份替换」**
 - `src/tests/configStore.test.ts` — `rev` 在 create 后增加，在 `save_layout` 后不增加；放弃后 `getRev()` 变了且 ≠ 0；`rev === 0` 的干净草稿上 `rollbackTo` 也 `+1`
@@ -1195,7 +1201,7 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 
 - `src/server/schema/ops.ts` — `replace_object`（`name` + `def: draftObjectSchema`）；`draftObjectSchema = objectTypeSchema.omit({ actions, axioms })`，`import_objects` / `replace_object` 的类体统一用它；抽出 `draftOpVariantsWithoutSaveLayout` 供 MCP（**本 PR 不含** `set_action` / `remove_action`）
 - `src/server/engine/configStore.ts` — `applyDraft(op, ws, opts?: { base_rev })`：task 开头比 `base_rev`；`replaceBlockers`（计数；未对照字段**只在有来源时**）；`replace_object` 分支；`import_objects` 的对象体校验从 `objectTypeSchema.parse` 换成 `draftObjectSchema.parse`（剥掉 `actions` / `axioms`）；**唯一一层** `enqueue`（失败续链）
-- `src/server/engine/views.ts` — draft `read_class` 调用 `replaceBlockers` 填 `replaceable` / `replace_blockers`；draft `list_classes` 返回 `outlets`（**完整动作 def 在 PR 3**）
+- `src/server/features/ontology/views.ts` — draft `read_class` 调用 `replaceBlockers` 填 `replaceable` / `replace_blockers`；draft `list_classes` 返回 `outlets`（**完整动作 def 在 PR 3**）
 - `src/app/api/mcp/route.ts` — 注册 `apply_draft`、`list_tables`；`requireWriteAuth`；信封 Zod（**`base_rev` 必填**，parse op 前剥离）；`mcpDraftOpSchema`（无 `save_layout`、无动作 op）；`applyDraft(op, ws, { base_rev })`（路由里**不**比 rev、**不**再 enqueue）；`DraftReject` → `-32000`；`apply_draft`/`list_tables` 带 `space` → `-32602`；`list_tables` 按连接 catch；`read_class` description **补上**「能不能整份替换」；`apply_draft` description 按 §1 表（本 PR 的 op 清单还不提设置/删除动作——那两个 op 在 PR 3 才进 schema，本 PR 的 description 也不提，避免教一个还不存在的 op）
 - `src/tests/schema.test.ts` — 十三种操作（现十二种 + `replace_object`；`update_link` / `update_property` 已在基础 schema 里）；`replace_object` 收 `def` 拒把 `object` 当类体；`import_objects` / `replace_object` 的类体带 `actions` / `axioms` 会被剥掉（不报错、不落地）
 - `src/tests/configStore.test.ts` — 未锁定可替换；**无源但有字段的残缺生成可 `replace_object`**；已发布/多源/派生/动作/空 `actions: {}` 不误锁；有来源的未对照字段锁定；**锁定六条各拒一次**；替换后 `match` 断了则回退；前一次 `DraftReject` 之后 `create_object` 仍成功；并发：`applyDraft` 与 `{ base_rev: 0 }` 的第二次 `DraftReject` 且不落地
@@ -1215,9 +1221,9 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 
 - `src/server/schema/ops.ts` — 本 PR 才加 `set_action`（`object` + `name` + `def: actionSchema`）、`remove_action`（`object` + `name`）；MCP `mcpDraftOpSchema` 同步纳入；`apply_draft` 的 tools/list 说明补上设置/删除动作
 - `src/server/engine/configStore.ts` — `set_action` / `remove_action` 分支（`remove_action` 删空后清掉 `actions` 键）；`applyDraft` 在 `validateSemantics` 之后调 `validateActionShapes`
-- `src/server/engine/validate.ts` — 动作校验补四处：效应 `link` 指向已有转化关系且 from/to 在宿主类上；每条 `transition` 关系被至少一条动作引用；取值来源形状；`update`/`delete` 必须有 `identity` 或 `filter`（§2.2 规则 3 的 ①②③④）；**独立函数 `validateActionShapes`，只在 `applyDraft` / `mutateDraft` / 发布校验的 `validateSemantics` 之后调用，`loadPublished` / `rollbackTo` 不调**
-- `src/server/engine/adjudicate.ts` — `mergeInto` 复制被吸收类 `actions` 时跳过 `pre` / 效应 `filter` 的 `$link` 引用、或效应 `link` 项指向将被移除关系的动作（先阶段后合并的多跳裁决不炸）
-- `src/server/engine/views.ts` — draft `read_class` 返回完整动作定义（`{ name, def }`）
+- `src/server/features/ontology/validate.ts` — 动作校验补四处：效应 `link` 指向已有转化关系且 from/to 在宿主类上；每条 `transition` 关系被至少一条动作引用；取值来源形状；`update`/`delete` 必须有 `identity` 或 `filter`（§2.2 规则 3 的 ①②③④）；**独立函数 `validateActionShapes`，只在 `applyDraft` / `mutateDraft` / 发布校验的 `validateSemantics` 之后调用，`loadPublished` / `rollbackTo` 不调**
+- `src/server/features/integrate/applyVerdict.ts` — `mergeInto` 复制被吸收类 `actions` 时跳过 `pre` / 效应 `filter` 的 `$link` 引用、或效应 `link` 项指向将被移除关系的动作（先阶段后合并的多跳裁决不炸）
+- `src/server/features/ontology/views.ts` — draft `read_class` 返回完整动作定义（`{ name, def }`）
 - `src/app/api/ontology/route.ts` — 顶层 `action_changes: { added, overwritten, removed }`（对照已发布算；`object_types[].actions` **不改形状**）；PR 1 的 `rev` / ETag 保持
 - `src/app/api/mcp/route.ts` — `apply_draft` 接受动作两个 op；`names` 对它们返回 `类名.动作名`；description 按 §1 表补全
 - `src/components/CanvasPage.tsx` — 2s 轮询、Visibility、`fetch cache: "no-store"` + `If-None-Match`、toast（§6 判定顺序：先动作差集再默认句；人手 `set_action` 不 toast 成外部）、对象被删则收卡、`withLocalWrite` 覆盖 `op`/generate/publish/discard/rollback/**裁决 `onDone`**，成功路径保持 busy 到 `setOnt`，**`finally` 里放下**（失败也放）、描述框无焦点时按描述重挂；**对象卡「动作」区**：列表（摘要 + 新增/已修改 + 编辑/删除）+ 「新建动作」表单（§6 字段表）+ `formCompatible`；**发布条 `title` 只印 `action_changes` 实际发生的子集**；放弃与删动作都先 `window.confirm`

@@ -46,90 +46,90 @@ export class MetaStore {
   }
 
   /* 版本链与工作行 */
-  latestVersion(ws: string, seedYaml: string) {
-    return this.versions.latestVersion(ws, seedYaml);
+  latestVersion(workspace: string, seedYaml: string) {
+    return this.versions.latestVersion(workspace, seedYaml);
   }
-  insertVersion(ws: string, version: number, yaml: string, origin: "publish", canvas?: unknown) {
-    return this.versions.insertVersion(ws, version, yaml, origin, canvas);
+  insertVersion(workspace: string, version: number, yaml: string, origin: "publish", canvas?: unknown) {
+    return this.versions.insertVersion(workspace, version, yaml, origin, canvas);
   }
-  listVersions(ws: string) {
-    return this.versions.listVersions(ws);
+  listVersions(workspace: string) {
+    return this.versions.listVersions(workspace);
   }
-  versionYaml(ws: string, version: number) {
-    return this.versions.versionYaml(ws, version);
+  versionYaml(workspace: string, version: number) {
+    return this.versions.versionYaml(workspace, version);
   }
-  versionCanvas(ws: string, version: number) {
-    return this.versions.versionCanvas(ws, version);
+  versionCanvas(workspace: string, version: number) {
+    return this.versions.versionCanvas(workspace, version);
   }
-  getWorkingPack(ws: string) {
-    return this.versions.getWorkingPack(ws);
+  getWorkingPack(workspace: string) {
+    return this.versions.getWorkingPack(workspace);
   }
-  setWorkingPack(ws: string, pack: unknown) {
-    return this.versions.setWorkingPack(ws, pack);
+  setWorkingPack(workspace: string, pack: unknown) {
+    return this.versions.setWorkingPack(workspace, pack);
   }
 
   /* 连接 */
-  saveConnection(ws: string, c: ConnectionRec) {
-    return this.conns.saveConnection(ws, c);
+  saveConnection(workspace: string, c: ConnectionRec) {
+    return this.conns.saveConnection(workspace, c);
   }
-  listConnections(ws: string) {
-    return this.conns.listConnections(ws);
+  listConnections(workspace: string) {
+    return this.conns.listConnections(workspace);
   }
-  deleteConnection(ws: string, name: string) {
-    return this.conns.deleteConnection(ws, name);
+  deleteConnection(workspace: string, name: string) {
+    return this.conns.deleteConnection(workspace, name);
   }
 
   /* 裁决与交集 */
-  recordDecision(ws: string, d: DecisionRec) {
-    return this.adjudication.recordDecision(ws, d);
+  recordDecision(workspace: string, d: DecisionRec) {
+    return this.adjudication.recordDecision(workspace, d);
   }
-  listDecisions(ws: string) {
-    return this.adjudication.listDecisions(ws);
+  listDecisions(workspace: string) {
+    return this.adjudication.listDecisions(workspace);
   }
-  backfillDecisionVersions(ws: string, version: number) {
-    return this.adjudication.backfillDecisionVersions(ws, version);
+  backfillDecisionVersions(workspace: string, version: number) {
+    return this.adjudication.backfillDecisionVersions(workspace, version);
   }
-  abandonPendingDecisions(ws: string) {
-    return this.adjudication.abandonPendingDecisions(ws);
+  abandonPendingDecisions(workspace: string) {
+    return this.adjudication.abandonPendingDecisions(workspace);
   }
-  recordOverlap(ws: string, o: OverlapRec) {
-    return this.adjudication.recordOverlap(ws, o);
+  recordOverlap(workspace: string, o: OverlapRec) {
+    return this.adjudication.recordOverlap(workspace, o);
   }
-  listOverlaps(ws: string) {
-    return this.adjudication.listOverlaps(ws);
+  listOverlaps(workspace: string) {
+    return this.adjudication.listOverlaps(workspace);
   }
 
   /* 验收问题集 */
-  listQuestions(ws: string) {
-    return this.questions.listQuestions(ws);
+  listQuestions(workspace: string) {
+    return this.questions.listQuestions(workspace);
   }
-  addQuestion(ws: string, question: string, expected?: string) {
-    return this.questions.addQuestion(ws, question, expected);
+  addQuestion(workspace: string, question: string, expected?: string) {
+    return this.questions.addQuestion(workspace, question, expected);
   }
-  removeQuestion(ws: string, qid: number) {
-    return this.questions.removeQuestion(ws, qid);
+  removeQuestion(workspace: string, qid: number) {
+    return this.questions.removeQuestion(workspace, qid);
   }
-  setQuestionStatus(ws: string, qid: number, status: string, version?: number, detail?: string) {
-    return this.questions.setQuestionStatus(ws, qid, status, version, detail);
+  setQuestionStatus(workspace: string, qid: number, status: string, version?: number, detail?: string) {
+    return this.questions.setQuestionStatus(workspace, qid, status, version, detail);
   }
 
   /* 日志（不存结果集） */
-  logQuery(ws: string, l: QueryLogRec) {
-    return this.logs.logQuery(ws, l);
+  logQuery(workspace: string, l: QueryLogRec) {
+    return this.logs.logQuery(workspace, l);
   }
-  logAction(ws: string, l: ActionLogRec) {
-    return this.logs.logAction(ws, l);
+  logAction(workspace: string, l: ActionLogRec) {
+    return this.logs.logAction(workspace, l);
   }
-  listQueryLogs(ws: string, limit?: number) {
-    return this.logs.listQueryLogs(ws, limit);
+  listQueryLogs(workspace: string, limit?: number) {
+    return this.logs.listQueryLogs(workspace, limit);
   }
-  listActionLogs(ws: string, limit?: number) {
-    return this.logs.listActionLogs(ws, limit);
+  listActionLogs(workspace: string, limit?: number) {
+    return this.logs.listActionLogs(workspace, limit);
   }
 
   /* 发号器 */
-  nextSeq(ws: string, name: string, start?: number) {
-    return this.seq.nextSeq(ws, name, start);
+  nextSeq(workspace: string, name: string, start?: number) {
+    return this.seq.nextSeq(workspace, name, start);
   }
 }
 

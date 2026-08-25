@@ -21,7 +21,24 @@ export class ConnectionReject extends Error {
 }
 
 /** 工作空间域拒绝（名字不合法、已存在）：路由按 422 处理，与其它域的 Reject 同层。 */
-export class WsReject extends Error {}
+export class WorkspaceReject extends Error {}
+
+/* ---------- Result：边界入口的统一返回 ----------
+   数字 code 参考 HTTP 状态码（成功 200 / 失败 400、422），与路由返回的 HTTP 状态必须一致（rejectRes 原样用）；
+   message 是完整准确文案（失败 = MSG 原文，成功 = 操作结果描述，也在 MSG）。
+   没有 ok 布尔字段：判别联合按 code 收窄（code === 200 时 value 类型安全）。
+   意外异常不进 Result，原样 throw（respond 兜 500「内部错误」）。 */
+
+export type Result<T> =
+  | { code: 200; message: string; value: T }
+  | { code: 400 | 422; message: string };
+
+/** 域拒绝 → Result code 的唯一映射：连接类 bad_request=400，其余一律 422；不认识的异常返回 null（原样上抛 = 500）。 */
+export function codeOf(e: unknown): 400 | 422 | null {
+  if (e instanceof ConnectionReject) return e.kind === "bad_request" ? 400 : 422;
+  if (e instanceof EngineReject || e instanceof DraftReject || e instanceof WorkspaceReject) return 422;
+  return null;
+}
 
 /* ---------- 用户看得见的错误文案（唯一出处） ----------
    按域分节：草稿编辑 op / 引用 trail / 校验 / 执行 / 查询 / 基础设施 / 路由。
@@ -105,7 +122,7 @@ export const MSG = {
   cfgValueUnknown: (where: string, detail: string) => `配置不合法：${where} 的取值来源不认识：${detail}`,
   cfgOperandArrayLiteral: (where: string) => `配置不合法：${where} 的数组元素只许是字面量`,
 
-  // 动作执行（engine/action，运行期拒绝，被 runAction 收成 stage=effect/pre 的结果）
+  // 动作执行（features/action，运行期拒绝，被 runAction 收成 stage=effect/pre 的结果）
   linkOnlyTransition: (link: string) => `link 只用于转化关系：${link}`,
   transitionNotOnClass: (link: string, cls: string) => `转化关系 ${link} 不在 ${cls} 上`,
   effectIdentify: (object: string) => `认人必须写明：${object} 缺 identity 或 filter`,
@@ -140,7 +157,7 @@ export const MSG = {
   decideClassMissing: "类不存在，先刷新画布",
   decideNoSources: "无源对象不进裁决（先给它挂来源）",
 
-  // 查询（engine/query：表达式求值、过滤形状、个体读取、投影/聚合/展开）
+  // 查询（features/query：表达式求值、过滤形状、个体读取、投影/聚合/展开）
   classNotInConfig: (name: string) => `配置中没有类：${name}`,
   dateExprBad: (expr: string) => `非法日期表达式：${expr}`,
   dateFloorBad: (expr: string) => `日期取整只支持 /w /d /h /m /s：${expr}`,
@@ -155,6 +172,8 @@ export const MSG = {
   valueSourceUnknown: (detail: string) => `无法识别的取值来源：${detail}`,
   noGenerate: (cls: string, prop: string) => `${cls}.${prop} 没有 generate`,
   noSequence: "没有计数器，不能发号",
+  noClock: "运行环境没注入时钟，日期表达式算不了",
+  noUuid: "运行环境没注入随机源，uuid 生成不了",
   generateItemUnknown: (detail: string) => `无法识别的 generate 项：${detail}`,
   operandMissing: (prop: string) => `操作数取不到值：${prop}`,
   operandUnknown: (detail: string) => `无法识别的操作数：${detail}`,
@@ -196,8 +215,8 @@ export const MSG = {
   connectionUnregistered: (connection: string) => `未注册的连接：${connection}`,
   introspectUnsupported: (connection: string) => `连接 ${connection} 不支持内省`,
   sampleUnsupported: (connection: string) => `连接 ${connection} 不支持采样`,
-  wsNameBad: (name: string) => `空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`,
-  wsExists: (name: string) => `空间已存在：${name}`,
+  workspaceNameBad: (name: string) => `空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`,
+  workspaceExists: (name: string) => `空间已存在：${name}`,
   cannedWsOnly: "离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   cannedScriptOnly: "离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   openaiModelMissing: "OPENAI_MODEL 未设置：接真模型必须显式指定模型名",
@@ -241,4 +260,20 @@ export const MSG = {
   rpcNoSpace: "这个工具不接受 space",
   rpcSpaceValues: "space 只认 published 或 draft",
   pairSelfDecide: "class_a 与 class_b 不能是同一个类",
+
+  // Result 成功提示（边界入口的 message：白话、准确；失败文案在上面各节）
+  resultQueryRows: (n: number) => `查到 ${n} 行`,
+  resultDraftSaved: "已保存到工作副本",
+  resultPublished: (v: number) => `已发布 v${v}`,
+  resultDiscarded: "已放弃未发布的改动",
+  resultRolledBack: (v: number) => `已回到 v${v}`,
+  resultDecided: (label: string) => `已记录裁决：${label}`,
+  resultOverlap: (rate: number) => `交集率 ${Math.round(rate * 100)}%`,
+  resultCandidates: (n: number) => `找到 ${n} 个候选对`,
+  resultRunDone: (n: number) => `跑批完成：${n} 条`,
+  resultProposed: (n: number) => `生成 ${n} 个对象建议`,
+  resultConnectionSaved: "连接已保存",
+  resultConnectionDropped: "连接已删除",
+  resultWorkspaceCreated: (name: string) => `已创建空间 ${name}`,
+  resultWorkspaces: (n: number) => `共 ${n} 个工作空间`,
 } as const;

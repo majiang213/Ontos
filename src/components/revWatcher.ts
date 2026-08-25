@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { etagOf } from "../server/etag";
-import { getWs } from "./wsClient";
+import { getWorkspace } from "./workspaceClient";
 import type { OntologyResp } from "./ontFrame";
 
 export type RevFrame = OntologyResp;
@@ -31,13 +31,13 @@ export type PollResult = { kind: "idle" } | { kind: "frame"; data: RevFrame } | 
 /** 一轮轮询：304 不动；rev 没变不动；本页正在写不动（但失败标记清零）；表单开着记 rev 后报 formBlocked；有实质变化报 frame。
  *  失败第一次报 failOnce，连着失败静默，恢复后失败标记清零。 */
 export async function pollOnce(
-  ws: string,
+  workspace: string,
   state: WatcherState,
   deps: { busy: () => boolean; formBusy: () => boolean },
   fetchImpl: typeof fetch
 ): Promise<{ state: WatcherState; result: PollResult }> {
   try {
-    const r = await fetchImpl(`/api/ontology?ws=${encodeURIComponent(ws)}`, {
+    const r = await fetchImpl(`/api/${encodeURIComponent(workspace)}/ontology`, {
       cache: "no-store",
       headers: state.etag ? { "If-None-Match": state.etag } : {},
     });
@@ -78,7 +78,7 @@ export function useRevWatcher(opts: {
       if (document.visibilityState !== "visible") return;
       const { busy, formBusy, onFrame, onFormBlocked, onFailOnce } = optsRef.current;
       const { state, result } = await pollOnce(
-        getWs(),
+        getWorkspace(),
         { lastRev: lastRev.current, etag: etagRef.current, failedOnce: pollFailed.current },
         { busy, formBusy },
         fetch
@@ -98,7 +98,7 @@ export function useRevWatcher(opts: {
     () => ({
       noteApplied: (rev: number) => {
         lastRev.current = rev;
-        etagRef.current = etagOf(getWs(), rev);
+        etagRef.current = etagOf(getWorkspace(), rev);
       },
       currentRev: () => lastRev.current,
     }),

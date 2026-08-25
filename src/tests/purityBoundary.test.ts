@@ -89,12 +89,13 @@ describe("组件 → server 导入方向（只许纯叶子）", () => {
     // 守门规则本身有效的活证：这几个已知不纯的模块必须被判出来，否则上面的全绿是假绿
     for (const [file, expectPure] of [
       ["meta/store.ts", false],
-      ["engine/infra/sqlDriver.ts", false],
-      ["engine/llm/slot.ts", false],
+      ["infra/sqlDriver.ts", false],
+      ["runtime.ts", false], // 组合根：槽位选择（@ai-sdk/xai）与驱动注册都在这里组装，值侧闭包必不纯
       ["etag.ts", true],
-      ["engine/adjudication/verdict.ts", true],
+      ["schema/verdict.ts", true],
       ["schema/spec/actionSpec.ts", true],
-      ["engine/draft/lineage.ts", true],
+      ["features/ontology/lineage.ts", true],
+      ["infra/llm/slot.ts", true], // 槽位接口与组合原语：不摸单例后已是纯叶子
     ] as const) {
       expect(isPure(join(SERVER, file)), file).toBe(expectPure);
     }

@@ -13,15 +13,15 @@ describe("MCP 工具端点", () => {
     await cleanupRuntime(tmp);
   });
 
-  /** JSON-RPC 2.0 调用：HTTP 一律 200，成败看信封（result / error）。测试数据在 test 空间。 */
+  /** JSON-RPC 2.0 调用：HTTP 一律 200，成败看信封（result / error）。测试数据在 test 空间（路径段）。 */
   async function rpc(method: string, params?: Record<string, unknown>, rawBody?: string, headers?: Record<string, string>) {
-    const { POST } = await import("../app/api/mcp/route");
-    const req = new Request("http://localhost/api/mcp?ws=test", {
+    const { POST } = await import("../app/api/[workspace]/mcp/route");
+    const req = new Request("http://localhost/api/test/mcp", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: rawBody ?? JSON.stringify({ jsonrpc: "2.0", id: 7, method, params }),
     });
-    const res = await POST(req as never);
+    const res = await POST(req as never, { params: Promise.resolve({ workspace: "test" }) });
     return (await res.json()) as { id?: unknown; result?: any; error?: { code: number; message: string } };
   }
   const call = (name: string, args: Record<string, unknown>, headers?: Record<string, string>) => rpc("tools/call", { name, arguments: args }, undefined, headers);

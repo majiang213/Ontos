@@ -3,12 +3,12 @@
 // create 只读计划的 createTarget（识别值在 planEffect 定死，执行链覆盖）、link 的 target 是请求识别值、投影失败进 note。
 
 import { describe, expect, it } from "vitest";
-import { buildNotifications } from "../server/engine/action/notify";
-import type { Planned, ProjectionRecord } from "../server/engine/action/action";
+import { buildNotifications } from "../server/features/action/notify";
+import type { Planned, ProjectionRecord } from "../server/features/action/action";
 import type { ActionDef, OntologyConfig } from "../server/schema/config";
 import type { ActionRequest } from "../server/schema/request";
-import type { EvalContext } from "../server/engine/query/expr";
-import type { Cls, Individual } from "../server/engine/query/individual";
+import type { EvalContext } from "../server/features/query/expr";
+import type { Cls, Individual } from "../server/features/query/individual";
 
 const config = {
   object_types: {

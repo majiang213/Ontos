@@ -17,7 +17,7 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 ## 接入
 
 <!-- BEGIN SHARED: mcp-access -->
-- 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。
+- 端点：`POST <host>/api/<空间名>/mcp`（演示场景一律用 `/api/test/mcp`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
 <!-- END SHARED: mcp-access -->
 - 鉴权：查数工具全只读，不要令牌。

@@ -7,7 +7,7 @@ import type { CanvasLink, CanvasObject } from "./canvas/layout";
 import type { BorderPin } from "./canvas/geometry";
 import PairCard from "./cards/PairCard";
 import Bezel from "./cards/Bezel";
-import { ApiError, apiGet, apiPost, apiDel } from "./wsClient";
+import { ApiError, apiGet, apiPost, apiDel } from "./workspaceClient";
 import QuestionsCard from "./cards/QuestionsCard";
 import { ConnectForm, CreateForm, LinkForm } from "./forms/forms";
 import ObjectCard, { type ObjectFormState } from "./cards/ObjectCard";
@@ -17,9 +17,9 @@ import SchemaDrawer from "./cards/SchemaDrawer";
 import { effectSummary, formCompatible } from "./forms/actionView";
 import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
 import { useRevWatcher } from "./revWatcher";
-import { columnTarget as columnTargetOf } from "../server/engine/draft/lineage";
-import { definedPinEnds } from "../server/engine/draft/canvasState";
-import type { PairAdvice } from "../server/engine/adjudication/verdict";
+import { columnTarget as columnTargetOf } from "../server/features/ontology/lineage";
+import { definedPinEnds } from "../server/features/ontology/canvasState";
+import type { PairAdvice } from "../server/schema/verdict";
 import type { ObjectType } from "../server/schema/config";
 
 interface IntrospectResp {

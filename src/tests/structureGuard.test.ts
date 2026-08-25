@@ -1,7 +1,7 @@
 // 结构守门 —— 评审六轴里能机器化的两条，写成测试永不过期：
 // ① 用户可见错误文案唯一出处是 MSG（src/server/errors.ts），throw / reject 阶段消息 / error / note / warning /
 //    zod message 出现内联中文即红——不许拿魔法字串绕过单源。
-//    （reason 通道不机守：裁决建议的 reason 是展示文案不是报错（llm/canned 的 PairAdvice），机守会误伤；
+//    （reason 通道不机守：裁决建议的 reason 是展示文案不是报错（infra/llm/canned 的 PairAdvice），机守会误伤；
 //    报错向的 reason 已有实例收在 MSG.noWritableProps。）
 // ② 调用方向：schema 最底、meta 不碰 engine、infra 不上指 engine 其它包、draft 读路径纯函数层不 import 写路径、
 //    errors.ts 保持纯叶子（前端经 purityBoundary 引它）。值侧 import 才查；type-only 编译期擦除，放行。
@@ -43,9 +43,9 @@ function resolveSpec(spec: string, fromFile: string): string | null {
 /* ---------- ① MSG 单源：内联中文错误文案即红 ---------- */
 
 /** 文案单源的家（豁免）：MSG（错误文案）与 Q_STATUS（验收状态词表）。其余文件的内联中文错误文案即绕行。 */
-const COPY_HOMES = new Set([join(SRC, "server", "errors.ts"), join(SRC, "server", "engine", "query", "questionStatus.ts")]);
+const COPY_HOMES = new Set([join(SRC, "server", "errors.ts"), join(SRC, "server", "features", "acceptance", "questionStatus.ts")]);
 const COPY_PATTERNS: [RegExp, string][] = [
-  [/throw new (?:EngineReject|DraftReject|ConnectionReject|WsReject|BadRequest|Error)\(\s*[`"'][^`"']*?[一-龥]/, "throw 内联中文文案"],
+  [/throw new (?:EngineReject|DraftReject|ConnectionReject|WorkspaceReject|BadRequest|Error)\(\s*[`"'][^`"']*?[一-龥]/, "throw 内联中文文案"],
   [/reject\(\s*"(?:pre|effect|axiom|project)",\s*[`"'][^`"']*?[一-龥]/, "reject 阶段消息内联中文文案"],
   [/\berror:\s*[`"'][^`"']*?[一-龥]/, "error 字段内联中文文案"],
   [/\bnote:\s*[`"'][^`"']*?[一-龥]/, "note 字段内联中文文案"],
@@ -58,38 +58,71 @@ const COPY_PATTERNS: [RegExp, string][] = [
 const DIRECTION_RULES: { area: RegExp; forbidden: string[]; why: string }[] = [
   {
     area: /^server\/schema\//,
-    forbidden: ["server/engine/", "server/meta/", "server/app/"],
-    why: "schema 是最底层，不碰引擎/元库/路由（errors.ts 纯叶子除外）",
+    forbidden: ["server/features/", "server/meta/", "server/app/"],
+    why: "schema 是最底层共享内核，不碰领域/元库/路由（errors.ts 纯叶子除外）",
   },
   {
     area: /^server\/meta\//,
-    forbidden: ["server/engine/", "server/app/"],
-    why: "元库不反向依赖引擎与路由",
+    forbidden: ["server/features/", "server/app/"],
+    why: "元库不反向依赖领域与路由",
   },
   {
-    area: /^server\/engine\/infra\//,
-    forbidden: ["server/engine/draft/", "server/engine/adjudication/", "server/engine/action/", "server/engine/query/", "server/engine/llm/"],
-    why: "infra 是驱动层，不上指 engine 其它包（删连接的引用判定走注入）",
+    area: /^server\/infra\//,
+    forbidden: ["server/features/"],
+    why: "infra 是适配层，不上指领域（删连接的引用判定走注入；留痕版本号由调用方传入）",
   },
   {
-    // draft 读路径纯函数层：refs / sameConfig / canvasState / lineage 不许碰 draft 内部任何写路径与 op 解释
-    area: /^server\/engine\/draft\/(refs|sameConfig|canvasState|lineage)\.ts$/,
-    forbidden: ["server/engine/draft/"],
-    why: "draft 纯函数层不 import 写路径（type-only 的 DraftState 引用放行）",
+    area: /^server\/features\//,
+    forbidden: ["server/runtime", "server/meta/"],
+    why: "领域不摸进程级单例（runtime / metaStore / getSlot）：依赖由边界组装成 features/env 下传",
+  },
+  /* 域间依赖白名单：域 = 一条业务链的完整问题；域间依赖是业务真实耦合，方向必须成 DAG——
+     ontology、query 是底座（不依赖任何域）；action 只许 query；integrate 只许 ontology+query；
+     acceptance 只许 query+ontology。llm/trail 是共享能力住 infra，领域可自由下用（infra 规则管反向）。 */
+  {
+    area: /^server\/features\/query\//,
+    forbidden: ["server/features/ontology/", "server/features/integrate/", "server/features/action/", "server/features/acceptance/"],
+    why: "query 是纯净域：不依赖任何其它领域",
+  },
+  {
+    area: /^server\/features\/ontology\//,
+    forbidden: ["server/features/query/", "server/features/integrate/", "server/features/action/", "server/features/acceptance/"],
+    why: "ontology 是纯净域：不依赖任何其它领域",
+  },
+  {
+    area: /^server\/features\/action\//,
+    forbidden: ["server/features/ontology/", "server/features/integrate/", "server/features/acceptance/"],
+    why: "action 只许依赖 query（读个体）",
+  },
+  {
+    area: /^server\/features\/integrate\//,
+    forbidden: ["server/features/action/", "server/features/acceptance/"],
+    why: "integrate 只许依赖 ontology（写草稿）+ query（个体原语）",
+  },
+  {
+    area: /^server\/features\/acceptance\//,
+    forbidden: ["server/features/action/", "server/features/integrate/"],
+    why: "acceptance 只许依赖 query（跑批编译链）+ ontology（草稿/已发布取数）",
+  },
+  {
+    // ontology 读路径纯函数层：refs / sameConfig / canvasState / lineage 不许碰域内任何写路径与 op 解释
+    area: /^server\/features\/ontology\/(refs|sameConfig|canvasState|lineage)\.ts$/,
+    forbidden: ["server/features/ontology/"],
+    why: "读路径纯函数层不 import 写路径（type-only 的 DraftState 引用放行）",
   },
   {
     // views 是读路径：只许消费纯函数（refs/sameConfig/ops/replaceObject 的纯判定），不碰写路径与分派
-    area: /^server\/engine\/draft\/views\.ts$/,
+    area: /^server\/features\/ontology\/views\.ts$/,
     forbidden: [
-      "server/engine/draft/editDraft",
-      "server/engine/draft/commit",
-      "server/engine/draft/versions",
-      "server/engine/draft/current",
-      "server/engine/draft/canvasPack",
-      "server/engine/draft/ops/index",
-      "server/engine/draft/ops/edit",
-      "server/engine/draft/ops/importObjects",
-      "server/engine/draft/ops/subjectClass",
+      "server/features/ontology/editDraft",
+      "server/features/ontology/commit",
+      "server/features/ontology/versions",
+      "server/features/ontology/current",
+      "server/features/ontology/canvasPack",
+      "server/features/ontology/ops/index",
+      "server/features/ontology/ops/edit",
+      "server/features/ontology/ops/importObjects",
+      "server/features/ontology/ops/subjectClass",
     ],
     why: "读路径不依赖写路径：views 只消费纯函数（ops/replaceObject 的 replaceBlockers 是纯判定，放行）",
   },
@@ -117,7 +150,7 @@ describe("结构守门", () => {
     expect(offenders, "这些点绕过 MSG 内联了用户可见文案——搬进 src/server/errors.ts 的 MSG").toEqual([]);
   });
 
-  it("② 调用方向：值侧 import 不越界（schema 最底 / meta 不碰 engine / infra 不上指 / draft 读不依赖写 / errors 纯叶子）", () => {
+  it("② 调用方向：值侧 import 不越界（schema 最底 / meta 不碰 engine / infra 不上指 / 引擎不摸单例 / draft 读不依赖写 / errors 纯叶子）", () => {
     const offenders: string[] = [];
     for (const f of files) {
       const rel = relative(SRC, f);
@@ -134,6 +167,35 @@ describe("结构守门", () => {
       }
     }
     expect(offenders, "这些 import 越了调用方向").toEqual([]);
+  });
+
+  /* ---------- ③ 时间与随机注入：引擎领域不读系统时钟 / crypto / Math.random ---------- */
+
+  const TIME_RANDOM_PATTERNS: [RegExp, string][] = [
+    [/Date\.now\(/, "Date.now("],
+    [/new\s+Date\s*\(\s*\)/, "空参 new Date()"],
+    [/Math\.random\(/, "Math.random("],
+    [/crypto\./, "crypto."],
+  ];
+
+  it("③ 领域不读系统时钟与随机源：clock / uuid 由边界注入（无 Date.now( / 空参 new Date() / Math.random( / crypto.）", () => {
+    const offenders: string[] = [];
+    for (const f of files) {
+      if (!/^server\/features\//.test(relative(SRC, f))) continue;
+      const text = readFileSync(f, "utf8");
+      for (const [re, what] of TIME_RANDOM_PATTERNS) {
+        const m = text.match(re);
+        if (m) offenders.push(`${relative(SRC, f)}：${what}（${m[0].slice(0, 50)}…）`);
+      }
+    }
+    expect(offenders, "时间与随机必须注入（clock / uuid 由边界提供），领域不读系统时钟与 crypto").toEqual([]);
+  });
+
+  it("④ 共享能力不在领域包内：features 下无 llm/trail；schema/verdict 与 infra/llm 存在", () => {
+    const offenders = files.filter((f) => /^server\/features\/(llm\/|trail\.ts)/.test(relative(SRC, f)));
+    expect(offenders, "llm / trail 是跨域共享能力，住 infra 不住领域包").toEqual([]);
+    expect(existsSync(join(SRC, "server", "infra", "llm", "slot.ts")), "共享词汇与槽位接口应在 schema/verdict 与 infra/llm").toBe(true);
+    expect(existsSync(join(SRC, "server", "schema", "verdict.ts"))).toBe(true);
   });
 
   it("守门自假检查：errors.ts 若被加 relative import 必须能被抓到（规则确实覆盖了它）", () => {

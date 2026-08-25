@@ -5,8 +5,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiDel, apiGet, apiPost } from "../wsClient";
-import { Q_STATUS } from "../../server/engine/query/questionStatus";
+import { apiDel, apiGet, apiPost } from "../workspaceClient";
+import { Q_STATUS } from "../../server/features/acceptance/questionStatus";
 import Bezel from "./Bezel";
 
 interface QItem {

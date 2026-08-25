@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import Bezel from "./Bezel";
-import { apiGet } from "../wsClient";
+import { apiGet } from "../workspaceClient";
 import { isBlankSeed, type OntologyResp } from "../ontFrame";
 
 export default function VersionsCard({

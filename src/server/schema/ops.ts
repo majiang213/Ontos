@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { actionSchema, objectTypeSchema } from "./config";
 
-/** 类/属性/关系名的合法形状：小写字母开头，小写字母/数字/下划线。名字校验的唯一出处——engine/draft/ops 各处不再各写正则。 */
+/** 类/属性/关系名的合法形状：小写字母开头，小写字母/数字/下划线。名字校验的唯一出处——features/ontology/ops 各处不再各写正则。 */
 export const NAME_RE = /^[a-z][a-z0-9_]*$/;
 
 /** 草稿路径的类体剥掉 actions / axioms：动作只走 set_action，公理本期没有写入 op。

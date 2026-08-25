@@ -2,13 +2,13 @@
 // 互不干扰；台账路由的列表/新建/拒绝。每个用例在独立临时目录里跑，元库文件从无到有。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
-import { Verdict } from "../server/engine/adjudication/verdict";
+import { cleanupRuntime, draftEngine, setupRuntime, unwrap, expectRejected } from "./helpers";
+import { Verdict } from "../server/schema/verdict";
 
 let tmp: string;
 
 beforeEach(async () => {
-  tmp = await setupRuntime("ontos-ws-");
+  tmp = await setupRuntime("ontos-workspace-");
 });
 afterEach(async () => {
   await cleanupRuntime(tmp);
@@ -20,19 +20,19 @@ describe("空间隔离", () => {
     const meta = (await import("../server/meta/store")).metaStore();
     // default 建对象并发布 → v2
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, "default");
-    expect((await s.publish("default")).version).toBe(2);
+    expect(unwrap(await s.publish("default")).version).toBe(2);
     // lab 首次访问：空白起步（v1、空本体）；default 也空白起步（没有模板类）——模板只属于 test
     expect((await s.getPublished("lab")).version).toBe(1);
     expect(Object.keys((await s.getPublished("lab")).config.object_types)).toEqual([]);
     expect((await s.getPublished("default")).config.object_types.equipment).toBeUndefined();
     expect((await s.getPublished("test")).config.object_types.equipment).toBeDefined();
     // fixture 连接只注入 test：default 空白起步，数据源自己接
-    const { getDriverRegistry } = await import("../server/engine/infra/connections");
+    const { getDriverRegistry } = await import("../server/infra/connections");
     expect((await getDriverRegistry("test")).connectionNames()).toContain("purchase_sys");
     expect((await getDriverRegistry("default")).connectionNames()).toEqual([]);
     // lab 自己发布：default 的版本与内容都不受影响
     await s.editDraft({ op: "create_object", name: "person_x", kind: "thing" }, "lab");
-    expect((await s.publish("lab")).version).toBe(2);
+    expect(unwrap(await s.publish("lab")).version).toBe(2);
     expect((await s.getPublished("default")).version).toBe(2);
     expect((await s.getPublished("default")).config.object_types.person_x).toBeUndefined();
     // 版本链在同一元库里按 workspace_id 分开：两个空间各有自己的 v2

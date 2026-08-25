@@ -6,8 +6,8 @@
 import { ConcernStore } from "./base";
 
 export class SeqStore extends ConcernStore {
-  async nextSeq(ws: string, name: string, start = 1): Promise<number> {
-    const id = await this.wsId(ws);
+  async nextSeq(workspace: string, name: string, start = 1): Promise<number> {
+    const id = await this.wsId(workspace);
     if (this.backend.dialect === "sqlite") {
       const row = await this.backend.get(
         `INSERT INTO meta_seq (workspace_id, name, value) VALUES (?, ?, ?)

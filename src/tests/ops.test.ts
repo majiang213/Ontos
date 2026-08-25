@@ -2,8 +2,8 @@
 // save_* 的落库在 editDraft 的界面状态分流（editDraft.test 的 rev 纪律覆盖），这里证「改内存」这一半。
 
 import { describe, expect, it } from "vitest";
-import { applyOp } from "../server/engine/draft/ops";
-import type { DraftState } from "../server/engine/draft/canvasPack";
+import { applyOp } from "../server/features/ontology/ops";
+import type { DraftState } from "../server/features/ontology/canvasPack";
 import type { OntologyConfig } from "../server/schema/config";
 
 const published = { object_types: {}, link_types: {} } as OntologyConfig;

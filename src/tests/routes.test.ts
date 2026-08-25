@@ -1,11 +1,11 @@
 // 路由层测试：错误分层（400/422/500）与裁决走真路由的集成。
 // 每用例一个临时目录 + 全新运行态（helpers.ts），与仓库运行态隔离。
-// 演示模板与 fixture 连接只在 test 空间，凡依赖 equipment/repair/person 等测试数据的请求都走 ?ws=test。
+// 演示模板与 fixture 连接只在 test 空间，凡依赖 equipment/repair/person 等测试数据的请求都走 /api/test/…。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { join } from "node:path";
 import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
-import { Verdict } from "../server/engine/adjudication/verdict";
+import { Verdict } from "../server/schema/verdict";
 
 let tmp: string;
 
@@ -16,17 +16,21 @@ afterEach(async () => {
   await cleanupRuntime(tmp);
 });
 
-async function post(path: string, body?: string, headers?: Record<string, string>, ws?: string) {
-  const mod = await import(`../app/api/${path}/route`);
+/** 路由参数：工作空间来自路径段（/api/<空间名>/…），测试按 URL 里的段给。 */
+const paramsOf = (workspace?: string) => ({ params: Promise.resolve({ workspace: workspace ?? "default" }) });
+
+async function post(path: string, body?: string, headers?: Record<string, string>, workspace?: string) {
+  const mod = await import(`../app/api/[workspace]/${path}/route`);
   const res = await mod.POST(
-    new Request(`http://x/api/${path}${ws ? `?ws=${ws}` : ""}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: body ?? "{}" }) as never
+    new Request(`http://x/api/${workspace ?? "default"}/${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: body ?? "{}" }) as never,
+    paramsOf(workspace)
   );
   return { status: res.status, data: await res.json() };
 }
 
-async function get(path: string, headers?: Record<string, string>, ws?: string) {
-  const mod = await import(`../app/api/${path}/route`);
-  const res = await mod.GET(new Request(`http://x/api/${path}${ws ? `?ws=${ws}` : ""}`, { headers }) as never);
+async function get(path: string, headers?: Record<string, string>, workspace?: string) {
+  const mod = await import(`../app/api/[workspace]/${path}/route`);
+  const res = await mod.GET(new Request(`http://x/api/${workspace ?? "default"}/${path}`, { headers }) as never, paramsOf(workspace));
   return { status: res.status, headers: res.headers, data: res.status === 304 ? null : await res.json() };
 }
 
@@ -55,7 +59,7 @@ describe("错误分层：400 / 422 / 500", () => {
     expect((await post("query", "not json")).status).toBe(400);
     expect((await post("query", JSON.stringify({ object: "ghost" }))).status).toBe(422);
     // 注入一个必炸的驱动顶替 purchase_sys：引擎故障落 500，不是 422
-    const { getDriverRegistry } = await import("../server/engine/infra/connections");
+    const { getDriverRegistry } = await import("../server/infra/connections");
     (await getDriverRegistry(TEST)).register("purchase_sys", {
       select: async () => { throw new Error("库炸了"); },
       insert: async () => {},

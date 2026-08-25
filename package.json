@@ -1,7 +1,7 @@
 {
   "name": "ontos",
   "private": true,
-  "description": "Ontos 平台（Next.js 前后端一体）：引擎 src/server/engine/，种子配置 src/server/config/ontology.yaml，测试 src/tests/。",
+  "description": "Ontos 平台（Next.js 前后端一体）：领域包 src/server/features/，种子配置 src/server/config/ontology.yaml，测试 src/tests/。",
   "engines": { "node": ">=22.5" },
   "scripts": {
     "dev": "next dev -p 6688",

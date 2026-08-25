@@ -13,7 +13,7 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 ## 接入
 
 <!-- BEGIN SHARED: mcp-access -->
-- 端点：`POST <host>/api/mcp?ws=<空间名>`（`ws` 省略即 `default`；演示场景一律用 `?ws=test`）。
+- 端点：`POST <host>/api/<空间名>/mcp`（演示场景一律用 `/api/test/mcp`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
 <!-- END SHARED: mcp-access -->
 - 鉴权：`run_action` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回错误码 `-32001`。`read_class` / `query` 只读放开。

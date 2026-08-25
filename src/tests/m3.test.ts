@@ -4,19 +4,19 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
-import { pickRule, normalizeWith, RULES } from "../server/engine/adjudication/normalize";
-import { overlapRate } from "../server/engine/adjudication/overlap";
-import { applyVerdict } from "../server/engine/adjudication/applyVerdict";
-import { Verdict } from "../server/engine/adjudication/verdict";
-import { listCandidates } from "../server/engine/adjudication/candidates";
-import { computeOverlap } from "../server/engine/adjudication/overlap";
-import { decide } from "../server/engine/adjudication/decide";
+import { cleanupRuntime, draftEngine, setupRuntime, unwrap, expectRejected } from "./helpers";
+import { pickRule, normalizeWith, RULES } from "../server/features/integrate/normalize";
+import { overlapRate } from "../server/features/integrate/overlap";
+import { applyVerdict } from "../server/features/integrate/applyVerdict";
+import { Verdict } from "../server/schema/verdict";
+import { listCandidates } from "../server/features/integrate/candidates";
+import { computeOverlap } from "../server/features/integrate/overlap";
+import { decide } from "../server/features/integrate/decide";
 import { EngineReject } from "../server/errors";
-import { freshDriver } from "../server/engine/infra/fixture";
+import { freshDriver } from "../server/infra/fixture";
 import { freshMetaStore } from "../server/meta/store";
 import { configSchema, type OntologyConfig } from "../server/schema/config";
-import { validateSemantics } from "../server/engine/draft/validate";
+import { validateSemantics } from "../server/features/ontology/validate";
 import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 
@@ -223,12 +223,12 @@ describe("裁决流水线", () => {
         po_b: { kind: "thing", identity: "serial_no", properties: { serial_no: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { serial_no: "serial_no" } } } },
       },
     });
-    const r = await decide({
+    const r = unwrap(await decide(s.env, {
       class_a: "po_a",
       class_b: "po_b",
       verdict: Verdict.Same,
       evidence: { norm_rule: "serial", count_a: 121, count_b: 100, count_hit: 40, rate: 0.33 },
-    });
+    }));
     expect(r).toEqual({ ok: true, recorded: true });
     const d = (await s.getDraft()).draft;
     expect(d.object_types.po_b).toBeUndefined();
@@ -251,7 +251,7 @@ describe("裁决流水线", () => {
         po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no" } } } },
       },
     });
-    await expect(decide({ class_a: "po_a", class_b: "po_b", verdict: Verdict.Stage, stage_names: { from: "在途", to: "在役" } })).rejects.toThrow();
+    await expectRejected(decide(s.env, { class_a: "po_a", class_b: "po_b", verdict: Verdict.Stage, stage_names: { from: "在途", to: "在役" } }));
     const meta = (await import("../server/meta/store")).metaStore();
     expect((await meta.listDecisions("default")).length).toBe(0);
     expect((await s.getDraft()).draft.object_types.po_b).toBeDefined();
@@ -268,18 +268,18 @@ describe("裁决流水线", () => {
     });
     const isPair = (p: { class_a: string; class_b: string }) =>
       (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a");
-    expect((await listCandidates()).some(isPair)).toBe(true);
+    expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(true);
     const before = JSON.stringify((await s.getDraft()).draft);
-    const r = await decide({ class_a: "po_a", class_b: "po_b", verdict: Verdict.Skip });
+    const r = unwrap(await decide(s.env, { class_a: "po_a", class_b: "po_b", verdict: Verdict.Skip }));
     expect(r.recorded).toBe(true);
     expect(JSON.stringify((await s.getDraft()).draft)).toBe(before);
-    expect((await listCandidates()).some(isPair)).toBe(false);
+    expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(false);
   });
 
   it("computeOverlap：无源类、同源对拒绝", async () => {
     const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
-    await expect(computeOverlap("default", "equipment", "vendor")).rejects.toThrow(EngineReject);
-    await expect(computeOverlap("default", "repair", "assignment")).rejects.toThrow(EngineReject);
+    expect((await computeOverlap(s.env, "default", "equipment", "vendor")).code).toBe(422);
+    expect((await computeOverlap(s.env, "default", "repair", "assignment")).code).toBe(422);
   });
 });

@@ -3,8 +3,8 @@
 
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { DraftReject, EngineReject, ConnectionReject, WsReject, MSG } from "@/server/errors";
-import { DEFAULT_WS, isWsName } from "@/server/engine/infra/workspace";
+import { DraftReject, EngineReject, ConnectionReject, WorkspaceReject, MSG } from "@/server/errors";
+import { isWorkspaceName } from "@/server/infra/workspace";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
 export class BadRequest extends Error {}
@@ -47,17 +47,21 @@ export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status
     if (e instanceof ConnectionReject) {
       return NextResponse.json({ error: e.message }, { status: e.kind === "bad_request" ? 400 : 422 });
     }
-    if (e instanceof DraftReject || e instanceof EngineReject || e instanceof WsReject) return NextResponse.json({ error: e.message }, { status: 422 });
+    if (e instanceof DraftReject || e instanceof EngineReject || e instanceof WorkspaceReject) return NextResponse.json({ error: e.message }, { status: 422 });
     return internalError(e);
   }
 }
 
-/** 工作空间：?ws= 或 x-ontos-ws 头，缺省 default；名字不合法抛 BadRequest。 */
-export function wsOf(req: Request): string {
-  const url = new URL(req.url);
-  const ws = url.searchParams.get("ws") ?? req.headers.get("x-ontos-ws") ?? DEFAULT_WS;
-  if (!isWsName(ws)) throw new BadRequest(MSG.wsNameBad(ws));
-  return ws;
+/** 工作空间来自 URL 路径段（/api/<空间名>/…）：Next 动态段经这里校验，名字不合法抛 BadRequest。 */
+export async function workspaceOf(params: Promise<{ workspace: string }>): Promise<string> {
+  const workspace = (await params).workspace;
+  if (!isWorkspaceName(workspace)) throw new BadRequest(MSG.workspaceNameBad(workspace));
+  return workspace;
+}
+
+/** Result 失败 → HTTP 响应：code 原样当 status（与 HTTP 状态码一致），body 保持 { error: message }。 */
+export function rejectRes(r: { code: 400 | 422; message: string }): NextResponse {
+  return NextResponse.json({ error: r.message }, { status: r.code });
 }
 
 /** 写端点的可选闸门：设了环境变量 ONTOS_TOKEN 才启用（演示默认放开）。

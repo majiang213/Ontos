@@ -56,7 +56,7 @@ export function walkFilter(config: OntologyConfig | null, clsName: string, filte
 }
 
 /** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。判定的唯一出处——
- *  静态核对（本文件 checkOperand）与运行期/下推（engine/query/filterOp 等）都从这里取。 */
+ *  静态核对（本文件 checkOperand）与运行期/下推（features/query/filterOp 等）都从这里取。 */
 export function isOpObject(v: unknown): v is Record<string, unknown> {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
   const keys = Object.keys(v);

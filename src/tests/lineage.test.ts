@@ -1,7 +1,7 @@
 // 血缘反查测试：列 → 本体属性；主键单列一行；未命中是「未映射」。
 
 import { describe, expect, it } from "vitest";
-import { columnTarget } from "../server/engine/draft/lineage";
+import { columnTarget } from "../server/features/ontology/lineage";
 
 const config = {
   object_types: {

@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS ont_question (
   version INT COMMENT '最后一次跑批时的本体版本',
   question TEXT NOT NULL COMMENT '自然语言问题',
   expected TEXT COMMENT '纯数字=比对行数；字段=值=至少一行对上；留空=能查出就算过',
-  status TEXT NOT NULL DEFAULT ('未跑') COMMENT '词表单源在 engine/query/questionStatus.ts 的 Q_STATUS（meta 不 import engine，按名互指）',
+  status TEXT NOT NULL DEFAULT ('未跑') COMMENT '词表单源在 features/acceptance/questionStatus.ts 的 Q_STATUS（meta 不 import engine，按名互指）',
   detail TEXT COMMENT '失败原因（白话），通过时清空',
   INDEX idx_ont_question_ws (workspace_id),
   FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)

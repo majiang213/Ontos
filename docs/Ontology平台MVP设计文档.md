@@ -427,7 +427,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 - **后端可换**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 见 `src/server/meta/ddl/mysql.ts`。PG 作元库后端本期未接。
 - **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `test` 的 `onto_version` v1 行，此后不再被读；`default` 与新建空间一样空白起步（v1 是空本体），演示 fixture 连接也只注入 `test`——切换空间要看得出是另一套。
 
-**语义。** 默认空间 `default`（空白起步），测试空间 `test`（首次访问时若注册表里没有，自动建行并把演示模板插成 v1，常驻空间列表；演示数据按空间名填充，与是否配置 LLM Key 无关）。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有 API 接受 `?ws=<空间名>`，缺省即 `default`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。
+**语义。** 默认空间 `default`（空白起步），测试空间 `test`（首次访问时若注册表里没有，自动建行并把演示模板插成 v1，常驻空间列表；演示数据按空间名填充，与是否配置 LLM Key 无关）。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有接口（除 `/api/workspaces` 全局注册表外）走路径段 `/api/<空间名>/…`；已发布快照、工作副本、驱动注册表按空间名键控（内存态），元数据按 `workspace_id` 过滤（持久态），两层互不串。
 
 **迁移。** 文件制（`workspaces/<name>/` 目录 + 每空间 SQLite 文件）被本方案取代；迁移是把每个空间的最新 YAML 与版本链插入共享库对应 `workspace_id` 的行，元数据各行补写 `workspace_id`。
 

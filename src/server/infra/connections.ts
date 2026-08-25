@@ -1,0 +1,118 @@
+// 连接注册与生命周期 —— 「连接从哪来、怎么活、怎么死」：驱动注册表（全部路由的唯一驱动入口）+
+// 保存（测过才落库、失败还回旧驱动）与删除（已发布引用不可删）。
+// 单例挂运行态：Next dev 下各路由包各有模块实例，挂全局才能保证即时生效。
+// 本文件在 infra 层，不上指 draft：「连接是否被已发布引用」由调用方注入（refs.connectionInUse 是纯函数）。
+
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import type { ConnectionRec } from "../meta/types";
+import { metaStore } from "../meta/store";
+import { runtime } from "../runtime";
+import { SqliteFixtureDriver } from "./fixture";
+import { SqliteDriver } from "./sqliteDriver";
+import { DriverRegistry } from "./registry";
+import { makeSqlDriver } from "./sqlDriver";
+import { ConnectionReject, MSG, codeOf, type Result } from "../errors";
+import { DEFAULT_WORKSPACE, TEST_WORKSPACE } from "./workspace";
+import type { TableInfo } from "./driver";
+
+// 注册表按工作空间键控，挂运行态（runtime.ts）：Next dev 多模块实例共享，测试换运行态即隔离
+function registries(): Map<string, DriverRegistry> {
+  return (runtime().registries ??= new Map());
+}
+
+/** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 四个内置连接只注入 test——其余空间（含 default）空白起步，数据源自己接。按工作空间键控，与 LLM Key 无关。 */
+export async function getDriverRegistry(workspace: string = DEFAULT_WORKSPACE): Promise<DriverRegistry> {
+  let r = registries().get(workspace);
+  if (!r) {
+    const registry = new DriverRegistry();
+    if (workspace === TEST_WORKSPACE) {
+      const fixture = SqliteFixtureDriver.seeded();
+      for (const conn of fixture.connections()) registry.register(conn, fixture);
+    }
+    for (const rec of await metaStore().listConnections(workspace)) registerSaved(registry, rec);
+    r = registry;
+    registries().set(workspace, r);
+  }
+  return r;
+}
+
+/** 把元数据库里的连接注册成驱动。新保存的连接在运行时也走这里（即时生效）。
+ *  sqlite 文件必须已存在且不是目录——文件没了（被删/被移走）就跳过这个连接，不拖垮整个注册表。 */
+export function registerSaved(registry: DriverRegistry, rec: ConnectionRec): void {
+  if (rec.type === "sqlite") {
+    // SQLite 文件库：db_name 是文件路径
+    const p = rec.db_name;
+    if (!p || !existsSync(p) || !statSync(p).isFile()) {
+      console.warn(`[ontos] 连接 ${rec.name} 的 sqlite 文件不存在，跳过注册：${p}`);
+      return;
+    }
+    // 用户接入的 sqlite 文件库：裸 SqliteDriver——生产路径不背演示机器（种子/注释/剧本在 fixture 子类）
+    const d = new SqliteDriver();
+    d.registerFile(rec.name, p);
+    registry.register(rec.name, d);
+  } else {
+    registry.register(rec.name, makeSqlDriver({ type: rec.type, host: rec.host, port: rec.port, db_name: rec.db_name, ro_user: rec.ro_user, ro_pass: rec.ro_pass, rw_user: rec.rw_user, rw_pass: rec.rw_pass }));
+  }
+}
+
+/** 保存连接：先注册再测，通过才落库。失败还回旧驱动。test=true 时空库不落库。 */
+export async function saveConnection(workspace: string, rec: ConnectionRec, test?: boolean): Promise<Result<{ ok: true; saved: boolean; warning?: string; tables?: TableInfo[] }>> {
+  try {
+    const next = { ...rec };
+    if (next.type === "sqlite") {
+      if (!next.db_name) throw new ConnectionReject(MSG.sqliteNeedsPath, "bad_request");
+      // turbopackIgnore：路径来自请求，不能静态分析；cwd 只从运行态读，测试换 tmp 才隔得开
+      const p = resolve(/* turbopackIgnore: true */ runtime().cwd, next.db_name);
+      if (!existsSync(p)) throw new ConnectionReject(MSG.sqliteFileMissing(p), "bad_request");
+      next.db_name = p;
+    } else if (!next.host || !next.db_name) {
+      throw new ConnectionReject(MSG.sqlNeedsHost, "bad_request");
+    }
+    const registry = await getDriverRegistry(workspace);
+    const previous = (await metaStore().listConnections(workspace)).find((c) => c.name === next.name);
+    if (!previous && registry.has(next.name)) {
+      throw new ConnectionReject(MSG.demoSourceName(next.name));
+    }
+    registerSaved(registry, next);
+    if (test) {
+      try {
+        const tables = await registry.introspect(next.name);
+        if (tables.length === 0) {
+          registry.unregister(next.name);
+          if (previous) registerSaved(registry, previous);
+          return { code: 200, message: MSG.connectedNoTables, value: { ok: true, warning: MSG.connectedNoTables, tables, saved: false } };
+        }
+      } catch (e) {
+        registry.unregister(next.name);
+        if (previous) registerSaved(registry, previous);
+        // 驱动报错含主机/路径/服务端细节，不原样出网（与 listTables 的净化同一条纪律）；raw 错误吞掉由 catch 兜底
+        throw new ConnectionReject(MSG.connectFailed);
+      }
+    }
+    await metaStore().saveConnection(workspace, next);
+    return { code: 200, message: MSG.resultConnectionSaved, value: { ok: true, saved: true } };
+  } catch (e) {
+    const code = codeOf(e);
+    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
+    throw e;
+  }
+}
+
+/** 删除已保存的连接。内置演示源不在元库，删不了；已发布本体还引用着的也不能删——
+ *  引用判定由调用方注入（infra 不上指 draft；路由传 refs.connectionInUse ∘ getPublished）。 */
+export async function dropConnection(workspace: string, name: string, isReferenced: (name: string) => Promise<boolean>): Promise<Result<void>> {
+  try {
+    if (!(await metaStore().listConnections(workspace)).some((c) => c.name === name)) {
+      throw new ConnectionReject(MSG.connectionNotFoundBuiltin(name));
+    }
+    if (await isReferenced(name)) throw new ConnectionReject(MSG.connectionInUsePublished(name));
+    await metaStore().deleteConnection(workspace, name);
+    (await getDriverRegistry(workspace)).unregister(name);
+    return { code: 200, message: MSG.resultConnectionDropped, value: undefined };
+  } catch (e) {
+    const code = codeOf(e);
+    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
+    throw e;
+  }
+}

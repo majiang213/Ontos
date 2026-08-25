@@ -15,10 +15,10 @@ export abstract class ConcernStore {
 
   /** 空间 id；未注册的先注册。并发首写同一空间（如留痕与发号同时到达）SELECT 都 miss 后裸 INSERT 会撞
    *  onto_workspace.name 的 UNIQUE——insert-ignore 让败者无害，再 SELECT 拿赢家的 id。 */
-  protected async wsId(ws: string): Promise<number> {
-    const row = await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [ws]);
+  protected async wsId(workspace: string): Promise<number> {
+    const row = await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [workspace]);
     if (row) return row.id as number;
-    await this.runInsertIgnore(`onto_workspace (name, seed_from) VALUES (?, ?)`, [ws, "lazy"]);
-    return (await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [ws]))!.id as number;
+    await this.runInsertIgnore(`onto_workspace (name, seed_from) VALUES (?, ?)`, [workspace, "lazy"]);
+    return (await this.backend.get(`SELECT id FROM onto_workspace WHERE name = ?`, [workspace]))!.id as number;
   }
 }

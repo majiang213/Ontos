@@ -3,7 +3,7 @@
 "use client";
 
 import { useState } from "react";
-import { apiPost } from "../wsClient";
+import { apiPost } from "../workspaceClient";
 
 export function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, description: string, kind: "thing" | "event") => void; onCancel: () => void }) {
   const [name, setName] = useState("");

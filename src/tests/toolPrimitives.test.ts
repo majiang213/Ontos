@@ -2,8 +2,8 @@
 // 两个 handler 已回 parse+调用（mcp.test.ts 端到端断言不动，是等价活证）；这里钉原语本身的分支。
 
 import { describe, expect, it } from "vitest";
-import { actionSkeletonFor } from "../server/engine/draft/skeletons";
-import { draftClassesPayload } from "../server/engine/draft/views";
+import { actionSkeletonFor } from "../server/features/ontology/skeletons";
+import { draftClassesPayload } from "../server/features/ontology/views";
 import type { OntologyConfig } from "../server/schema/config";
 
 const cfg = (over: Partial<OntologyConfig>): OntologyConfig => ({ object_types: {}, link_types: {}, ...over } as OntologyConfig);

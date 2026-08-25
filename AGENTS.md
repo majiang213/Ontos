@@ -88,7 +88,7 @@ _UI 说法_：映射。_Avoid_：新系统、出码、运行中、对象列表�
 _UI 说法_：本体（产品核心词，保留）。
 
 **工作空间** 🔴：
-隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链与**工作副本**同在 `onto_version`（`version IS NULL` 的一行是可变头，画布全部内容——本体+摆位+弯折+钉点——只活在它的 `canvas_json`；发布 = 工作行复制成编号行），其余各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册）——按空间名判断填充，与是否配置 LLM Key 无关；API 用 `?ws=` 指定。
+隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链与**工作副本**同在 `onto_version`（`version IS NULL` 的一行是可变头，画布全部内容——本体+摆位+弯折+钉点——只活在它的 `canvas_json`；发布 = 工作行复制成编号行），其余各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册）——按空间名判断填充，与是否配置 LLM Key 无关；API 用 `/api/<空间名>/…` 路径段指定。
 _UI 说法_：工作空间（左上角下拉）。
 
 **对象类型 / 属性 / 关系** 🔶：
@@ -197,18 +197,18 @@ _UI 说法_：取数路径。
 - 通道与载荷分开：`edit_draft` 是通道（路由、引擎、MCP 同名），16 个 op 是载荷（MCP 抽掉 2 条界面状态，剩 14 条）——op 名在页面内部调用和 MCP 入参里是同一个词。
 - 页面暴露任务层（一个按钮一个动作），MCP 暴露 op 层——粒度不同是设计，不是遗漏。裁决、发布、交集率没有 MCP 工具是刻意的：关卡留给人。
 - 新加入口时词干从本表已有工程词里取，不另造。只建议不落地的工具一律 `propose_` 前缀（`propose_objects` / `propose_action`）。
-- 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
+- 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀；schema 也是**共享内核**——跨域词汇（五关系类型的 `schema/verdict`：机器键、展示文案、建议形状）住这里，领域与前端都能安全引用。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
 
 ## 代码结构纪律（评审六轴）
 
 每次 review（含 `/code-review` 的 Standards 轴）按这六条过。能机器化的条目必须有守门测试，不靠人扫——`src/tests/structureGuard.test.ts` 与 `purityBoundary.test.ts` 是现行守门，违规先红测试，不靠记忆。
 
-1. **调用方向**。层级：`schema` 最底（只引 errors 纯叶子）→ `meta` / `infra`（不反向依赖 engine 其它包）→ `engine` 各包 → 路由 / 前端。读路径不依赖写路径：`draft/views` 只消费纯函数（`refs` / `sameConfig` / `ops/replaceObject` 的纯判定）；读引擎（`query/`）经 `Env` / `SourceDriver` 接口，不摸写解释器。值侧无环；type-only 引用编译期擦除，不算越界。
+1. **调用方向**。层级：`schema` 最底（只引 errors 纯叶子）→ `meta` / `infra`（不反向依赖 features）→ `features` 各领域包 → 路由 / 前端。读路径不依赖写路径：`features/ontology/views` 只消费纯函数（`refs` / `sameConfig` / `ops/replaceObject` 的纯判定）；读引擎（`features/query/`）经 `Env` / `SourceDriver` 接口，不摸写解释器。值侧无环；type-only 引用编译期擦除，不算越界。
 2. **不变量落在哪**。一条不变量一个家，且家是文件不是注释：每步改动的「落定」在 `commit.ts`、引用扫描在 `refs.ts`、界面状态跟随在 `canvasState.ts`、op 分派在 `ops/index.ts`、厚不变量一文件一个（`editObject` / `editProperty` / `editLink` / `importObjects` / `replaceObject`）。文件头注释第一行写它回答的问题，不写谁调它。
 3. **打开文件能否读完一个问题**。切分轴是「编辑一份规定这条链上的问题」，不是按本体要素（类/关系/动作）分，也不是按 16 个 op 一人一个文件。浅 case（单点赋值级）留分派，厚不变量（跨键跟随级）独立成文件。一个概念要跨三个以上文件才能读完，就是切错了。
 4. **命名谓宾搭配**。主语要真：`configStore` 那种「声称存 config 实际不是」的假主语不许再出现。谓语和宾语要对得上：被 apply 的是 op 不是 draft，所以通道叫 `editDraft` 不叫 applyDraft。动词短语不当模块名（`editProperty` 这种「做什么编辑」的动名允许，因为它说的是住着的知识；`mustType` 这种纯调用句不行）。读路径和写路径共用规则时，规则放纯函数层，不许读 import 写。
-5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WS_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、转化动作名 `conversionActionName`（draft/skeletons）、界面状态原语 `definedPinEnds`（draft/canvasState）、insert-ignore `runInsertIgnore`（meta/stores/base）、验收状态词表 `Q_STATUS`（engine/query/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**。新单源先登记本表再落地。
-6. **代码坏味道**。报错文案不当机器判据（判定走结构参数，如 `exceptAction`）；吞错必须注释说清为什么安全；错误类型按域归一（EngineReject / DraftReject / ConnectionReject / WsReject），调用方不猜类型；内部形状（SQL / 主机 / 路径 / 堆栈）不进用户可见输出，生产只给「内部错误」（`_shared.internalErrorMessage` 单闸）；无调试残留（console.log / dbg）；无死导出。
+5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、转化动作名 `conversionActionName`（features/ontology/skeletons）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、insert-ignore `runInsertIgnore`（meta/stores/base）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**。新单源先登记本表再落地。
+6. **代码坏味道**。报错文案不当机器判据（判定走结构参数，如 `exceptAction`）；吞错必须注释说清为什么安全；错误类型按域归一（EngineReject / DraftReject / ConnectionReject / WorkspaceReject），调用方不猜类型；内部形状（SQL / 主机 / 路径 / 堆栈）不进用户可见输出，生产只给「内部错误」（`_shared.internalErrorMessage` 单闸）；无调试残留（console.log / dbg）；无死导出。
 
 ## 本体论要素 × 落地（附录对照，写代码按此表）
 
@@ -222,14 +222,14 @@ _UI 说法_：取数路径。
 | ④子类型 / `parent` | **未做**（V2） |
 | 事物 vs 事件 `kind` | **字段有**，未约束（引擎不按 thing/event 分支） |
 | 部分—整体 | **未做** |
-| 公理 / 谓词 / 动作 | 动作 **已落地**（`engine/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词即布尔派生，**已落地**（不另设构造）。导入落草稿时每类自动补一条 `set_fields`（按 identity 认人、写字段，唯一键与派生属性不可写，无可写字段不生成；字段改名/删除、部分重叠上移时级联跟随）；转化动作由阶段裁决自动立（`convert_to_<晚阶段>`）；业务动作经 `set_action` 由人/Agent 写 |
-| 变更事件与告知 | 拼装 **已落地**（`engine/action/notify`，随 `run_action` 结果返回，`delivered: false`）；外发 **未做** |
+| 公理 / 谓词 / 动作 | 动作 **已落地**（`features/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词即布尔派生，**已落地**（不另设构造）。导入落草稿时每类自动补一条 `set_fields`（按 identity 认人、写字段，唯一键与派生属性不可写，无可写字段不生成；字段改名/删除、部分重叠上移时级联跟随）；转化动作由阶段裁决自动立（`convert_to_<晚阶段>`）；业务动作经 `set_action` 由人/Agent 写 |
+| 变更事件与告知 | 拼装 **已落地**（`features/action/notify`，随 `run_action` 结果返回，`delivered: false`）；外发 **未做** |
 | 推理机 / OWL | **未做** |
 
 ## 写与 Agent（实现时按此，详见设计文档 §9）
 
 - **不造新库。** 写 = 改本体世界，再投影回原库。客户应用不改代码，最多给可写账号。
-- **执行器写在 Ontos 后端一份**（`engine/action`，对外经 MCP 的 `run_action` 工具）。不为每个源系统定制执行器；进新系统只加连接/映射/动作定义。
+- **执行器写在 Ontos 后端一份**（`features/action`，对外经 MCP 的 `run_action` 工具）。不为每个源系统定制执行器；进新系统只加连接/映射/动作定义。
 - **动作语言** = Zod JSON：`{ action, object, identity }`。本体里 `pre` / `effect` 必须机器可读；写回按效应和 `sources` 推出，动作上不写表名。禁止 `record: hr.employee` 直接绑表。禁止 PATCH 派生 `status`。录用前置只看 `person.status === 候选人`。
 - **生成要模型，执行不要。** 模型只产草稿（对象/关系/动作定义），人裁决。执行器解释已发布本体，禁自由 SQL。缺参可先补全，补完仍交执行器。
 - **不是 ReAct。** 画布纠错 = 人改字段或再勾表点「生成对象」（`proposeObjects` 一次）→ 停。不要后端自转圈、自己调工具写库。Claude / Codex 是 MCP 调用方，不是把循环做进 Ontos。
@@ -239,7 +239,7 @@ _UI 说法_：取数路径。
 
 ## 交互架构约定（画布优先 v5，别再退化）
 
-- **单一画布页**：「本体构建」是唯一页面；问数与动作不外置 UI——外部 Agent 经 MCP（`/api/mcp`，配套 skill 在 `skills/` 下四个目录：ontos-query / ontos-action-run / ontos-canvas / ontos-action）驱动，Claude / Codex 是 MCP 调用方，循环不做进 Ontos。
+- **单一画布页**：「本体构建」是唯一页面；问数与动作不外置 UI——外部 Agent 经 MCP（`/api/<空间名>/mcp`，配套 skill 在 `skills/` 下四个目录：ontos-query / ontos-action-run / ontos-canvas / ontos-action）驱动，Claude / Codex 是 MCP 调用方，循环不做进 Ontos。
 
 - **工作台 = 本体画布**：初始即空画布。画布内容永远是当前工作副本（已发布合并本体上的未发布改动；空空间是空画布），随时可拖、可点节点编辑。
 - **画布只放本体对象，schema 永不当节点**：源表是只读原料，躺在「表结构」抽屉里（每列标出映射去向）；画布节点 = 本体对象。对象 ↔ 源列是**多对多**：一列可喂多个对象，一个对象可挂多张表（编辑卡可从任意已连接源拉列进对象）。

@@ -4,8 +4,8 @@ import type { ConnectionRec } from "../types";
 import { ConcernStore } from "./base";
 
 export class ConnectionsStore extends ConcernStore {
-  async saveConnection(ws: string, c: ConnectionRec): Promise<void> {
-    const id = await this.wsId(ws);
+  async saveConnection(workspace: string, c: ConnectionRec): Promise<void> {
+    const id = await this.wsId(workspace);
     const cols = `(workspace_id, name, type, host, port, db_name, ro_user, ro_pass, rw_user, rw_pass, options)`;
     const vals = [id, c.name, c.type, c.host ?? null, c.port ?? null, c.db_name ?? null, c.ro_user ?? null, c.ro_pass ?? null, c.rw_user ?? null, c.rw_pass ?? null, c.options ? JSON.stringify(c.options) : null];
     const upsert =
@@ -15,8 +15,8 @@ export class ConnectionsStore extends ConcernStore {
     await this.backend.run(`INSERT INTO conn_source ${cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ${upsert}`, vals);
   }
 
-  async listConnections(ws: string): Promise<ConnectionRec[]> {
-    const id = await this.wsId(ws);
+  async listConnections(workspace: string): Promise<ConnectionRec[]> {
+    const id = await this.wsId(workspace);
     const rows = await this.backend.all(`SELECT * FROM conn_source WHERE workspace_id = ? ORDER BY name`, [id]);
     return rows.map((r) => ({
       name: r.name as string,
@@ -32,8 +32,8 @@ export class ConnectionsStore extends ConcernStore {
     }));
   }
 
-  async deleteConnection(ws: string, name: string): Promise<void> {
-    const id = await this.wsId(ws);
+  async deleteConnection(workspace: string, name: string): Promise<void> {
+    const id = await this.wsId(workspace);
     await this.backend.run(`DELETE FROM conn_source WHERE workspace_id = ? AND name = ?`, [id, name]);
   }
 }

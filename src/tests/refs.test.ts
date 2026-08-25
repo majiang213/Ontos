@@ -1,9 +1,9 @@
-// 引用扫描契约测试：删除属性/关系前的拦截面（engine/refs.ts）正反对照例。
+// 引用扫描契约测试：删除属性/关系前的拦截面（features/refs.ts）正反对照例。
 // 拦截面漏一处 = 删出悬空引用还放行；这里的每条对应一类引用出处。
 
 import { describe, expect, it } from "vitest";
 import { configSchema, type OntologyConfig } from "../server/schema/config";
-import { linkRefs, referencesOf } from "../server/engine/draft/refs";
+import { linkRefs, referencesOf } from "../server/features/ontology/refs";
 
 /** 两个类 + 正反两个关系 + 各类动作/派生，覆盖全部引用出处。 */
 function fixture(): OntologyConfig {

@@ -82,7 +82,7 @@ input { font-family: inherit; outline: none; }
   padding: 4px 12px 4px 14px;
 }
 /* ---------- 空间切换器（触发器 + 下拉面板） ---------- */
-.ws-trigger {
+.workspace-trigger {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -100,8 +100,8 @@ input { font-family: inherit; outline: none; }
   white-space: nowrap;
   transition: color var(--t-fast), border-color var(--t-fast);
 }
-.ws-trigger:hover { color: var(--ink); }
-.ws-menu {
+.workspace-trigger:hover { color: var(--ink); }
+.workspace-menu {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -115,7 +115,7 @@ input { font-family: inherit; outline: none; }
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow-lift);
 }
-.ws-row {
+.workspace-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -130,7 +130,7 @@ input { font-family: inherit; outline: none; }
   text-align: left;
   transition: background var(--t-fast), color var(--t-fast);
 }
-.ws-row:hover { background: var(--panel-2); color: var(--ink); }
+.workspace-row:hover { background: var(--panel-2); color: var(--ink); }
 
 /* ---------- 裁决结论行（疑似重复面板） ---------- */
 .verdict-row {
@@ -438,7 +438,7 @@ select.ctl { background: var(--panel); }
 @media (max-width: 900px) {
   .nav-sha { display: none; } /* 窄屏隐藏版本号 */
   .nav-brand { padding: 4px 6px 4px 0; }
-  .ws-trigger { max-width: 110px; }
+  .workspace-trigger { max-width: 110px; }
 }
 @media (max-width: 768px) {
   .float-tl, .float-tr { left: 12px; right: 12px; }
