@@ -147,7 +147,7 @@ async function runActionInner(
   try {
     notifications = buildNotifications(config, action, plan, req, ctx, projections);
   } catch (e) {
-    notifications = [{ object: "-", to: [], properties: {}, lines: [], delivered: false, note: `变更事件生成失败：${err(e)}` }];
+    notifications = [{ object: "-", to: [], properties: {}, lines: [], delivered: false, note: MSG.notifyBuildFailed(err(e)) }];
   }
   return { ok, stage: ok ? undefined : "project", projections, ...(notifications.length ? { notifications } : {}) };
 }

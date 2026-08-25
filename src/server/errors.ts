@@ -124,6 +124,7 @@ export const MSG = {
   noteAlreadyInserted: "已有这行，没重复插",
   notifyDeferred: "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
   notifyDeferredWithFailure: "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）",
+  notifyBuildFailed: (detail: string) => `变更事件生成失败：${detail}`,
   noWritableProps: "该类没有可写字段（唯一键与派生属性不可写）",
 
   // 裁决（adjudication：资格闸与定案应用；applyVerdict 的 Error 会被 mutateDraft 包装成用户可见拒绝）

@@ -199,6 +199,17 @@ _UI 说法_：取数路径。
 - 新加入口时词干从本表已有工程词里取，不另造。只建议不落地的工具一律 `propose_` 前缀（`propose_objects` / `propose_action`）。
 - 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
 
+## 代码结构纪律（评审六轴）
+
+每次 review（含 `/code-review` 的 Standards 轴）按这六条过。能机器化的条目必须有守门测试，不靠人扫——`src/tests/structureGuard.test.ts` 与 `purityBoundary.test.ts` 是现行守门，违规先红测试，不靠记忆。
+
+1. **调用方向**。层级：`schema` 最底（只引 errors 纯叶子）→ `meta` / `infra`（不反向依赖 engine 其它包）→ `engine` 各包 → 路由 / 前端。读路径不依赖写路径：`draft/views` 只消费纯函数（`refs` / `sameConfig` / `ops/replaceObject` 的纯判定）；读引擎（`query/`）经 `Env` / `SourceDriver` 接口，不摸写解释器。值侧无环；type-only 引用编译期擦除，不算越界。
+2. **不变量落在哪**。一条不变量一个家，且家是文件不是注释：每步改动的「落定」在 `commit.ts`、引用扫描在 `refs.ts`、界面状态跟随在 `canvasState.ts`、op 分派在 `ops/index.ts`、厚不变量一文件一个（`editObject` / `editProperty` / `editLink` / `importObjects` / `replaceObject`）。文件头注释第一行写它回答的问题，不写谁调它。
+3. **打开文件能否读完一个问题**。切分轴是「编辑一份规定这条链上的问题」，不是按本体要素（类/关系/动作）分，也不是按 16 个 op 一人一个文件。浅 case（单点赋值级）留分派，厚不变量（跨键跟随级）独立成文件。一个概念要跨三个以上文件才能读完，就是切错了。
+4. **命名谓宾搭配**。主语要真：`configStore` 那种「声称存 config 实际不是」的假主语不许再出现。谓语和宾语要对得上：被 apply 的是 op 不是 draft，所以通道叫 `editDraft` 不叫 applyDraft。动词短语不当模块名（`editProperty` 这种「做什么编辑」的动名允许，因为它说的是住着的知识；`mustType` 这种纯调用句不行）。读路径和写路径共用规则时，规则放纯函数层，不许读 import 写。
+5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WS_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、转化动作名 `conversionActionName`（draft/skeletons）、界面状态原语 `definedPinEnds`（draft/canvasState）、insert-ignore `runInsertIgnore`（meta/stores/base）、验收状态词表 `Q_STATUS`（engine/query/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**。新单源先登记本表再落地。
+6. **代码坏味道**。报错文案不当机器判据（判定走结构参数，如 `exceptAction`）；吞错必须注释说清为什么安全；错误类型按域归一（EngineReject / DraftReject / ConnectionReject / WsReject），调用方不猜类型；内部形状（SQL / 主机 / 路径 / 堆栈）不进用户可见输出，生产只给「内部错误」（`_shared.internalErrorMessage` 单闸）；无调试残留（console.log / dbg）；无死导出。
+
 ## 本体论要素 × 落地（附录对照，写代码按此表）
 
 | 要素 | 现状 |
