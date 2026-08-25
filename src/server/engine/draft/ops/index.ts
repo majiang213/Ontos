@@ -5,7 +5,7 @@
 
 import type { OntologyConfig } from "../../../schema/config";
 import { NAME_RE, type DraftOpInput as DraftOp } from "../../../schema/ops";
-import { DraftReject } from "../../../errors";
+import { DraftReject, MSG } from "../../../errors";
 import { setEdgeBend, setLayout } from "../canvasState";
 import type { DraftState } from "../canvasPack";
 import { deleteObject } from "./editObject";
@@ -20,8 +20,8 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
   const d = state.draft;
   switch (input.op) {
     case "create_object": {
-      if (!NAME_RE.test(input.name)) throw new DraftReject("类名必须是小写字母/数字/下划线，字母开头");
-      if (d.object_types[input.name]) throw new DraftReject(`类已存在：${input.name}`);
+      if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.classNameBad);
+      if (d.object_types[input.name]) throw new DraftReject(MSG.classExists(input.name));
       d.object_types[input.name] = { kind: input.kind, description: input.description, properties: {} }; // 无源对象进 manual 桶
       break;
     }
@@ -35,8 +35,8 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
     }
     case "add_property": {
       const t = mustType(d, input.object);
-      if (!NAME_RE.test(input.name)) throw new DraftReject("属性名必须是小写字母/数字/下划线，字母开头");
-      if (t.properties[input.name]) throw new DraftReject(`属性已存在：${input.name}`);
+      if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.propNameBad);
+      if (t.properties[input.name]) throw new DraftReject(MSG.propExists(input.name));
       t.properties[input.name] = { type: input.type, description: input.description, values: input.values };
       break;
     }
@@ -52,8 +52,8 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
         delete t.identity; // 取消识别字段
         break;
       }
-      if (!t.properties[input.name]) throw new DraftReject(`属性不存在：${input.name}`);
-      if (t.properties[input.name].derived) throw new DraftReject("派生属性不能当识别字段");
+      if (!t.properties[input.name]) throw new DraftReject(MSG.propNotFound(input.name));
+      if (t.properties[input.name].derived) throw new DraftReject(MSG.propDerivedNoIdentity);
       t.identity = input.name;
       break;
     }
@@ -61,7 +61,7 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
       setLayout(state, input.positions); // 摆位只进内存；落库在 editDraft 的界面状态分流
       break;
     case "save_edge_bend": {
-      if (!state.draft.link_types[input.name]) throw new DraftReject(`关系不存在：${input.name}`);
+      if (!state.draft.link_types[input.name]) throw new DraftReject(MSG.linkNotFound(input.name));
       setEdgeBend(state, input.name, input.bend); // null = 拉直
       break;
     }
@@ -83,19 +83,19 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
     case "set_action": {
       // 单条 upsert：同名覆盖、不同名新增。def 已在 schema 层过 actionSchema；形状四查在 validateActionShapes
       const t = d.object_types[input.object];
-      if (!t) throw new DraftReject(`类不存在：${input.object}，新建类请先 import_objects`);
+      if (!t) throw new DraftReject(MSG.classNotFoundImport(input.object));
       t.actions ??= {};
       t.actions[input.name] = input.def;
       break;
     }
     case "remove_action": {
       const t = mustType(d, input.object);
-      if (!t.actions?.[input.name]) throw new DraftReject(`动作不存在：${input.name}`);
+      if (!t.actions?.[input.name]) throw new DraftReject(MSG.actionNotFound(input.name));
       delete t.actions[input.name];
       if (Object.keys(t.actions).length === 0) delete t.actions; // 空 map 会让 sameConfig 的 dirty 收不回来，删干净
       break;
     }
     default:
-      throw new DraftReject(`未知操作：${JSON.stringify(input)}`);
+      throw new DraftReject(MSG.unknownOp(input));
   }
 }

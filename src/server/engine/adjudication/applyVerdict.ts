@@ -10,6 +10,7 @@ import { dropClass } from "../draft/ops/editObject";
 import { mutateDraft } from "../draft/editDraft";
 import { conversionAction, conversionActionName, removeFieldsUpdateKeys } from "../draft/skeletons";
 import { Verdict } from "./verdict";
+import { MSG } from "../../errors";
 
 export type { Verdict } from "./verdict";
 
@@ -19,7 +20,7 @@ export type { Verdict } from "./verdict";
 function mergeInto(d: OntologyConfig, a: string, b: string): void {
   const A = d.object_types[a];
   const B = d.object_types[b];
-  if (!A || !B) throw new Error(`类不存在：${a} 或 ${b}`);
+  if (!A || !B) throw new Error(MSG.classPairNotFound(a, b));
   const remapId = A.identity && B.identity && A.identity !== B.identity ? B.identity : undefined;
   for (const [prop, def] of Object.entries(B.properties)) {
     if (prop === remapId) continue; // B 的识别属性并入 A 的识别属性，不另立
@@ -134,18 +135,18 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       const from = stageNames?.from ?? `${a}_前`;
       const to = stageNames?.to ?? `${b}_后`;
       const A = d.object_types[a];
-      if (!A || !d.object_types[b]) throw new Error(`类不存在：${a} 或 ${b}`);
+      if (!A || !d.object_types[b]) throw new Error(MSG.classPairNotFound(a, b));
       // 先并属性与源（与「同一」同款），再立阶段结构
       const srcKeysBefore = new Set(Object.keys(A.sources ?? {}));
       mergeInto(d, a, b);
       const newKeys = Object.keys(A.sources ?? {}).filter((k) => !srcKeysBefore.has(k));
       const srcA = Object.keys(A.sources ?? {})[0];
       const srcB = newKeys[0] ?? srcA; // B 并进来的第一个源条目
-      if (!srcA || !srcB || srcA === srcB) throw new Error("阶段裁决需要两个不同的源条目");
+      if (!srcA || !srcB || srcA === srcB) throw new Error(MSG.stageNeedsTwoSources);
       // 撞名不静默覆盖：合并后已有 status 属性 / 同名关系 / 同名动作时让人先改名
-      if (A.properties.status) throw new Error(`阶段裁决需要立派生属性 status，但 ${a} 上已有同名属性——先把它改名或删掉`);
-      if (d.link_types[`${a}_to_${to}`]) throw new Error(`关系名 ${a}_to_${to} 已存在——换个阶段名再裁`);
-      if (A.actions?.[conversionActionName(to)]) throw new Error(`动作名 ${conversionActionName(to)} 已存在——换个阶段名再裁`);
+      if (A.properties.status) throw new Error(MSG.stageStatusClash(a));
+      if (d.link_types[`${a}_to_${to}`]) throw new Error(MSG.stageLinkNameClash(`${a}_to_${to}`));
+      if (A.actions?.[conversionActionName(to)]) throw new Error(MSG.stageActionNameClash(conversionActionName(to)));
       A.properties.status = {
         type: "enum",
         values: [from, to],
@@ -170,12 +171,12 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       // 公共属性立上位对象：属性移上去，识别字段复制不移动（移了原类悬空）
       const A = d.object_types[a];
       const B = d.object_types[b];
-      if (!A || !B) throw new Error(`类不存在：${a} 或 ${b}`);
+      if (!A || !B) throw new Error(MSG.classPairNotFound(a, b));
       const idProps = new Set([A.identity, B.identity].filter(Boolean) as string[]);
       const common = Object.keys(A.properties).filter(
         (p) => p in B.properties && !A.properties[p].derived && !B.properties[p].derived && !idProps.has(p)
       );
-      if (common.length === 0) throw new Error("两类没有公共属性（识别字段除外），立不了上位对象");
+      if (common.length === 0) throw new Error(MSG.overlapNoCommon);
       const parent = `shared_${a}_${b}`;
       // 上位对象的源：公共列 + 识别列（识别列是读公共属性的对齐齐）
       const parentSources: NonNullable<OntologyConfig["object_types"][string]["sources"]> = {};

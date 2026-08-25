@@ -4,6 +4,7 @@
 
 import type { Filter, LinkType, OntologyConfig } from "../config";
 import { FILTER_OPS } from "../config";
+import { MSG } from "../../errors";
 
 /** 关系解析（唯一出处）：正向名在 from 侧（目标 to），反向名（inverse）在 to 侧（目标 from）。找不到返回 undefined。 */
 export function resolveLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } | undefined {
@@ -62,7 +63,7 @@ export function walkFilter(config: OntologyConfig | null, clsName: string, filte
 export function checkOperand(v: unknown, where: string): void {
   if (Array.isArray(v)) {
     for (const x of v) {
-      if (x !== null && typeof x === "object") throw new Error(`配置不合法：${where} 的数组元素只许是字面量`);
+      if (x !== null && typeof x === "object") throw new Error(MSG.cfgOperandArrayLiteral(where));
     }
     return;
   }
@@ -75,11 +76,11 @@ export function checkOperand(v: unknown, where: string): void {
   }
   if (typeof rec.property === "string") {
     const from = rec.from === undefined ? "current" : rec.from;
-    if (from !== "current" && from !== "request") throw new Error(`配置不合法：${where} 的取值 { property } 组合的 from 只许 current/request：${JSON.stringify(v)}`);
+    if (from !== "current" && from !== "request") throw new Error(MSG.cfgValueFromBad(where, JSON.stringify(v)));
     return; // 效应过滤逐个体求值，current 合法
   }
   if (rec.from === "identity") return;
-  throw new Error(`配置不合法：${where} 的取值来源不认识：${JSON.stringify(v)}`);
+  throw new Error(MSG.cfgValueUnknown(where, JSON.stringify(v)));
 }
 
 /** 过滤树里每个属性条件的操作数逐个核对。 */

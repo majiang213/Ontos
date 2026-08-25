@@ -7,7 +7,7 @@ import type { LinkType, ObjectType, OntologyConfig } from "../../schema/config";
 import { sourceKeyProp } from "../../schema/config";
 import { resolveLink } from "../../schema/spec/filterSpec";
 import type { SourceDriver } from "../infra/driver";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import type { EvalContext } from "./expr";
 
 /** 类名 + 类定义，成对传。 */
@@ -32,13 +32,13 @@ export interface Env {
 /** 关系名对不上配置即拒绝（问数展开、个体组装、Env.linkHolds 共用）。 */
 export function mustLink(config: OntologyConfig, clsName: string, name: string): { link: LinkType; reversed: boolean } {
   const found = resolveLink(config, clsName, name);
-  if (!found) throw new EngineReject(`关系名对不上配置：${clsName} 出发没有 ${name}`);
+  if (!found) throw new EngineReject(MSG.linkNameUnknown(clsName, name));
   return found;
 }
 
 export function mustCls(config: OntologyConfig, name: string): Cls {
   const def = config.object_types[name];
-  if (!def) throw new EngineReject(`配置中没有类：${name}`);
+  if (!def) throw new EngineReject(MSG.classNotInConfig(name));
   return { name, def };
 }
 
@@ -49,16 +49,16 @@ export function sourcesOf(cls: Cls): [string, NonNullable<ObjectType["sources"]>
 /** 该源用来对齐、认行的列：对齐属性（sourceKeyProp，schema/config 单源）映射到的那列。 */
 export function keyColumn(cls: Cls, entry: { fields: Record<string, string>; key?: string }): string {
   const keyProp = sourceKeyProp(cls.def, entry);
-  if (!keyProp) throw new EngineReject("类没有 identity，源条目也没有 key");
+  if (!keyProp) throw new EngineReject(MSG.noIdentity);
   const col = entry.fields[keyProp];
-  if (!col) throw new EngineReject(`源条目的 fields 里没有对齐属性 ${keyProp}`);
+  if (!col) throw new EngineReject(MSG.keyPropUnmapped(keyProp));
   return col;
 }
 
 /** 源列属性的值：按 sources 声明顺序，排在前面的源优先；该源无行则看下一个。 */
 export function propValue(cls: Cls, ind: Individual, prop: string): unknown {
   const def = cls.def.properties[prop];
-  if (!def) throw new EngineReject(`类上没有属性：${prop}`); // 点错名是配置/请求问题（422），不是系统故障
+  if (!def) throw new EngineReject(MSG.classPropUnknown(prop)); // 点错名是配置/请求问题（422），不是系统故障
   for (const [src, entry] of sourcesOf(cls)) {
     const col = entry.fields[prop];
     const row = ind.rows[src];

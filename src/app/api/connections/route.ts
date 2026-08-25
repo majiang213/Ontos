@@ -7,10 +7,11 @@ import { connectionInUse } from "@/server/engine/draft/refs";
 import { getPublished } from "@/server/engine/draft/current";
 import { NAME_RE } from "@/server/schema/ops";
 import { metaStore } from "@/server/meta/store";
+import { MSG } from "@/server/errors";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const connectionSchema = z.object({
-  name: z.string().regex(NAME_RE, "连接名必须是小写字母/数字/下划线"),
+  name: z.string().regex(NAME_RE, MSG.connectionNameBad),
   type: z.enum(["mysql", "pg", "sqlite"]),
   host: z.string().optional(),
   port: z.number().int().optional(),
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
   return respond(async () => {
     const { test, ...rec } = connectionSchema.parse(await bodyJson(req));
     return saveConnection(wsOf(req), rec, test);
-  }, { zod: { status: 400, error: "连接形状不合法" } });
+  }, { zod: { status: 400, error: MSG.zodConnectionShape } });
 }
 
 export async function DELETE(req: Request) {

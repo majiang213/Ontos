@@ -4,7 +4,7 @@
 
 import type { ActionDef, LinkType, ObjectType, OntologyConfig } from "../../schema/config";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 
 /** 固定动作名：调用方（run_action）、文档、测试都引它，不让模型起名。 */
 export const FIELDS_UPDATE_ACTION = "set_fields";
@@ -79,7 +79,7 @@ export function conversionAction(linkName: string, link: LinkType): ActionDef {
  *  否则给 set_fields 骨架（与导入自动生成的同形同名，fieldsUpdateAction）；都是草稿，不发布。 */
 export function actionSkeletonFor(config: OntologyConfig, clsName: string): { name: string; action: ActionDef } | { name: string; action: null; reason: string } {
   const cls = config.object_types[clsName];
-  if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
+  if (!cls) throw new EngineReject(MSG.classNotInConfig(clsName));
   const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
   if (transition) return { name: conversionActionName(transition[1].transition!.to), action: conversionAction(transition[0], transition[1]) };
   const skel = fieldsUpdateAction(clsName, cls);

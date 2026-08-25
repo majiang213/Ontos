@@ -12,7 +12,7 @@ import { SqliteFixtureDriver } from "./fixture";
 import { SqliteDriver } from "./sqliteDriver";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
-import { ConnectionReject } from "../../errors";
+import { ConnectionReject, MSG } from "../../errors";
 import { DEFAULT_WS, TEST_WS } from "./workspace";
 import type { TableInfo } from "./driver";
 
@@ -60,18 +60,18 @@ export function registerSaved(registry: DriverRegistry, rec: ConnectionRec): voi
 export async function saveConnection(ws: string, rec: ConnectionRec, test?: boolean): Promise<{ ok: true; saved: boolean; warning?: string; tables?: TableInfo[] }> {
   const next = { ...rec };
   if (next.type === "sqlite") {
-    if (!next.db_name) throw new ConnectionReject("sqlite 连接必须给文件路径（db_name）", "bad_request");
+    if (!next.db_name) throw new ConnectionReject(MSG.sqliteNeedsPath, "bad_request");
     // turbopackIgnore：路径来自请求，不能静态分析；cwd 只从运行态读，测试换 tmp 才隔得开
     const p = resolve(/* turbopackIgnore: true */ runtime().cwd, next.db_name);
-    if (!existsSync(p)) throw new ConnectionReject(`sqlite 文件不存在：${p}`, "bad_request");
+    if (!existsSync(p)) throw new ConnectionReject(MSG.sqliteFileMissing(p), "bad_request");
     next.db_name = p;
   } else if (!next.host || !next.db_name) {
-    throw new ConnectionReject("mysql/pg 连接必须给 host 与 db_name", "bad_request");
+    throw new ConnectionReject(MSG.sqlNeedsHost, "bad_request");
   }
   const registry = await getDriverRegistry(ws);
   const previous = (await metaStore().listConnections(ws)).find((c) => c.name === next.name);
   if (!previous && registry.has(next.name)) {
-    throw new ConnectionReject(`${next.name} 是内置演示源，换个名字`);
+    throw new ConnectionReject(MSG.demoSourceName(next.name));
   }
   registerSaved(registry, next);
   if (test) {
@@ -85,7 +85,7 @@ export async function saveConnection(ws: string, rec: ConnectionRec, test?: bool
     } catch (e) {
       registry.unregister(next.name);
       if (previous) registerSaved(registry, previous);
-      throw new ConnectionReject(`连不上：${e instanceof Error ? e.message : String(e)}`);
+      throw new ConnectionReject(MSG.connectFailed(e instanceof Error ? e.message : String(e)));
     }
   }
   await metaStore().saveConnection(ws, next);
@@ -96,9 +96,9 @@ export async function saveConnection(ws: string, rec: ConnectionRec, test?: bool
  *  引用判定由调用方注入（infra 不上指 draft；路由传 refs.connectionInUse ∘ getPublished）。 */
 export async function dropConnection(ws: string, name: string, isReferenced: (name: string) => Promise<boolean>): Promise<void> {
   if (!(await metaStore().listConnections(ws)).some((c) => c.name === name)) {
-    throw new ConnectionReject(`连接不存在：${name}（内置演示源不能删）`);
+    throw new ConnectionReject(MSG.connectionNotFoundBuiltin(name));
   }
-  if (await isReferenced(name)) throw new ConnectionReject(`连接 ${name} 仍被已发布本体引用，先改本体再删`);
+  if (await isReferenced(name)) throw new ConnectionReject(MSG.connectionInUsePublished(name));
   await metaStore().deleteConnection(ws, name);
   (await getDriverRegistry(ws)).unregister(name);
 }

@@ -5,7 +5,7 @@
 import type { Filter, LinkType, OntologyConfig } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
 import type { ExpandNode } from "../../schema/request";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import { dialectFor, toColumnValue, type Condition, type SourceDriver } from "../infra/driver";
 import type { EvalContext } from "./expr";
 import { isOpObject, pushCondition } from "./filterOp";
@@ -55,10 +55,10 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
       const cls = mustCls(config, clsName);
       const { link, reversed } = mustLink(config, clsName, linkName);
       if (link.transition) {
-        if (targetFilter !== undefined) throw new EngineReject(`转化关系不支持目标侧过滤：${linkName}`);
+        if (targetFilter !== undefined) throw new EngineReject(MSG.transitionNoTargetFilter(linkName));
         return transitionHolds(cls, ind, link, env, ctx);
       }
-      const merged = matchConds(cls, ind, link, reversed, targetFilter as Filter | undefined, (k) => `目标侧过滤 ${k} 与关系 ${linkName} 的配对字段冲突`);
+      const merged = matchConds(cls, ind, link, reversed, targetFilter as Filter | undefined, (k) => MSG.filterConflictsPair(k, linkName));
       if (!merged) return false;
       const targetClsName = reversed ? link.from : link.to;
       return (await selectIndividuals(env, targetClsName, { filter: merged, ctx })).length > 0;
@@ -88,7 +88,7 @@ function neededProps(cls: Cls, requested: string[] | undefined, filter: Filter |
     if (need.has(p)) return;
     need.add(p);
     const def = cls.def.properties[p];
-    if (!def) throw new EngineReject(`名字对不上配置：${cls.name}.${p}`);
+    if (!def) throw new EngineReject(MSG.propUnknown(cls.name, p));
     if (def.derived) {
       if (Array.isArray(def.derived)) {
         for (const rule of def.derived) {
@@ -114,7 +114,7 @@ async function pushdownConditions(cls: Cls, filter: Filter | undefined, ctx: Eva
   for (const [prop, cv] of Object.entries(filter)) {
     if (prop.startsWith("$")) continue;
     const def = cls.def.properties[prop];
-    if (!def) throw new EngineReject(`过滤里的名字对不上配置：${cls.name}.${prop}`);
+    if (!def) throw new EngineReject(MSG.filterPropUnknown(cls.name, prop));
     if (def.derived) continue;
     const mapped = sourcesOf(cls).filter(([, e]) => e.fields[prop]);
     if (mapped.length !== 1) continue; // 多源都有时按声明顺序取值，推送会改变语义，留内存

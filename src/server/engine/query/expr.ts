@@ -3,6 +3,7 @@
 
 import type { PropertyDef, ValueSource } from "../../schema/config";
 import { EXPR_LIKE } from "../../schema/spec/valueSpec";
+import { MSG } from "../../errors";
 
 /* 求值上下文：一次过滤核对或一条效应赋值能看到的全部来源。 */
 export interface EvalContext {
@@ -29,7 +30,7 @@ function isDateExpr(v: unknown): v is string {
 }
 
 function evalDateExpr(expr: string, now = Math.floor(Date.now() / 1000)): number {
-  if (!DATE_RE.test(expr)) throw new Error(`非法日期表达式：${expr}`);
+  if (!DATE_RE.test(expr)) throw new Error(MSG.dateExprBad(expr));
   let t = now;
   const steps = expr.match(/[+-]\d+[yMwdhms]/g) ?? [];
   for (const s of steps) {
@@ -38,7 +39,7 @@ function evalDateExpr(expr: string, now = Math.floor(Date.now() / 1000)): number
   }
   const floor = /\/([yMwdhms])$/.exec(expr)?.[1];
   if (floor) {
-    if (floor === "y" || floor === "M") throw new Error(`日期取整只支持 /w /d /h /m /s：${expr}`);
+    if (floor === "y" || floor === "M") throw new Error(MSG.dateFloorBad(expr));
     t = Math.floor(t / UNIT_S[floor]) * UNIT_S[floor];
   }
   return t;
@@ -59,13 +60,13 @@ function numOperand(tok: string, ctx: EvalContext): number {
   const prop = tok.slice(dot + 1);
   const bag = scope === "current" ? ctx.current : ctx.request;
   const v = bag?.[prop];
-  if (typeof v !== "number") throw new Error(`数字表达式取不到数：${tok}`);
+  if (typeof v !== "number") throw new Error(MSG.numExprNoValue(tok));
   return v;
 }
 
 function evalNumberExpr(expr: string, ctx: EvalContext): number {
   const m = NUM_RE.exec(expr);
-  if (!m) throw new Error(`非法数字表达式：${expr}`);
+  if (!m) throw new Error(MSG.numExprBad(expr));
   const a = numOperand(m[1], ctx);
   const b = numOperand(m[3], ctx);
   return m[2] === "+" ? a + b : a - b;
@@ -76,7 +77,7 @@ function isoToSeconds(s: string): number {
   const hasZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
   const iso = s.includes("T") ? (hasZone ? s : `${s}Z`) : s.includes(" ") ? (hasZone ? s.replace(" ", "T") : `${s.replace(" ", "T")}Z`) : s;
   const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) throw new Error(`非法日期字面量：${s}`);
+  if (Number.isNaN(ms)) throw new Error(MSG.dateLiteralBad(s));
   return Math.floor(ms / 1000);
 }
 
@@ -87,7 +88,7 @@ function isoToSeconds(s: string): number {
 function resolveStringLiteral(s: string, ctx: EvalContext | undefined, allowNumber: boolean): unknown {
   if (isDateExpr(s)) return evalDateExpr(s);
   if (allowNumber && isNumberExpr(s)) return evalNumberExpr(s, ctx!);
-  if (EXPR_LIKE.test(s)) throw new Error(`非法表达式：${s}`);
+  if (EXPR_LIKE.test(s)) throw new Error(MSG.exprBad(s));
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return isoToSeconds(s);
   return s;
 }
@@ -109,30 +110,30 @@ export function resolveValue(v: ValueSource, propName: string, ctx: EvalContext,
     if (typeof rec.property === "string") {
       const bag = from === "request" ? ctx.request : ctx.current;
       const hit = bag?.[rec.property as string];
-      if (hit === undefined) throw new Error(`取不到值：${String(rec.property)}`);
+      if (hit === undefined) throw new Error(MSG.valueMissing(String(rec.property)));
       return hit;
     }
     if (from === "request") {
       const hit = ctx.request?.[propName];
-      if (hit === undefined) throw new Error(`请求缺参数：${propName}`);
+      if (hit === undefined) throw new Error(MSG.requestParamMissing(propName));
       return hit;
     }
     if (from === "identity") {
-      if (ctx.identity === undefined) throw new Error("请求缺识别值 identity");
+      if (ctx.identity === undefined) throw new Error(MSG.identityMissing);
       return ctx.identity;
     }
     if (from === "action") return ctx.action;
     if (from === "object") return ctx.object;
     if (from === "current") {
       const hit = ctx.current?.[propName];
-      if (hit === undefined) throw new Error(`取不到值：${propName}`); // 与 { property } 同口径，不静默少写列
+      if (hit === undefined) throw new Error(MSG.valueMissing(propName)); // 与 { property } 同口径，不静默少写列
       return hit;
     }
     if (from === "generated") {
-      if (!gen) throw new Error(`该路径不支持 from: generated（属性 ${propName}：发号只在 create 投影里可用）`);
+      if (!gen) throw new Error(MSG.generatedUnsupported(propName));
       return gen();
     }
-    throw new Error(`无法识别的取值来源：${JSON.stringify(v)}`);
+    throw new Error(MSG.valueSourceUnknown(JSON.stringify(v)));
   }
   if (typeof v === "string") return resolveStringLiteral(v, ctx, true); // 效应侧：开数字表达式
   return v;
@@ -167,7 +168,7 @@ function uuidV7(): string {
 }
 
 export async function generateValue(cls: string, prop: string, def: PropertyDef, ctx: EvalContext): Promise<string> {
-  if (!def.generate) throw new Error(`${cls}.${prop} 没有 generate`);
+  if (!def.generate) throw new Error(MSG.noGenerate(cls, prop));
   const parts: string[] = [];
   for (const item of def.generate) {
     if (typeof item === "string") {
@@ -184,7 +185,7 @@ export async function generateValue(cls: string, prop: string, def: PropertyDef,
       continue;
     }
     if (rec.sequence) {
-      if (!ctx.nextSequence) throw new Error("没有计数器，不能发号");
+      if (!ctx.nextSequence) throw new Error(MSG.noSequence);
       const seq = rec.sequence as { start?: number; width?: number };
       parts.push(pad(await ctx.nextSequence(`${cls}.${prop}`, seq.start ?? 1), seq.width ?? 4));
       continue;
@@ -193,7 +194,7 @@ export async function generateValue(cls: string, prop: string, def: PropertyDef,
       parts.push(uuidV7());
       continue;
     }
-    throw new Error(`无法识别的 generate 项：${JSON.stringify(item)}`);
+    throw new Error(MSG.generateItemUnknown(JSON.stringify(item)));
   }
   return parts.join("");
 }

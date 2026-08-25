@@ -5,7 +5,7 @@
 import type { ActionDef, OntologyConfig } from "../../schema/config";
 import { replaceBlockers } from "./ops/replaceObject";
 import { sameConfig } from "./sameConfig";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 
 /** 类相对已发布快照的状态（与 GET /api/ontology 的 states 同一算法）。 */
 export type ClassState = "new" | "modified" | "same";
@@ -14,7 +14,7 @@ export type ClassState = "new" | "modified" | "same";
 export function classState(draft: OntologyConfig, published: OntologyConfig, name: string): ClassState {
   const pub = published.object_types[name];
   const t = draft.object_types[name];
-  if (!t) throw new EngineReject(`配置中没有类：${name}`);
+  if (!t) throw new EngineReject(MSG.classNotInConfig(name));
   return !pub ? "new" : sameConfig(pub, t) ? "same" : "modified";
 }
 
@@ -73,7 +73,7 @@ export interface ClassView {
 /** 视图二：读取一个类。 */
 export function readClass(config: OntologyConfig, name: string): ClassView {
   const t = config.object_types[name];
-  if (!t) throw new EngineReject(`配置中没有类：${name}`);
+  if (!t) throw new EngineReject(MSG.classNotInConfig(name));
   const relations: ClassView["relations"] = [];
   for (const [linkName, l] of Object.entries(config.link_types)) {
     const kind = l.transition ? ("transition" as const) : ("match" as const);

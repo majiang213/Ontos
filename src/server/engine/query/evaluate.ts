@@ -3,7 +3,7 @@
 // 递归经 Env 接口的 linkHolds 缝走，不反向依赖组装。
 
 import type { Filter, LinkType, WhenRule } from "../../schema/config";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import type { EvalContext } from "./expr";
 import { conditionHolds } from "./compare";
 import { currentView, propValue, propValueFrom, type Cls, type Env, type Individual } from "./individual";
@@ -12,7 +12,7 @@ import { currentView, propValue, propValueFrom, type Cls, type Env, type Individ
 
 /** when 里一个键是否成立：true=有行；false=无行；过滤=有行且已映射属性满足。 */
 async function whenKeyHolds(cls: Cls, ind: Individual, src: string, cond: boolean | Filter, env: Env, ctx: EvalContext): Promise<boolean> {
-  if (!(src in ind.rows)) throw new EngineReject(`when 规则指向不存在的源条目：${cls.name} 没有 ${src}`); // 拼错源名不能静默吞
+  if (!(src in ind.rows)) throw new EngineReject(MSG.whenSourceUnknown(cls.name, src)); // 拼错源名不能静默吞
   const row = ind.rows[src];
   if (cond === true) return row != null;
   if (cond === false) return row == null;
@@ -40,7 +40,7 @@ export async function whenRuleHits(cls: Cls, ind: Individual, rule: WhenRule, en
 export async function evalDerived(cls: Cls, ind: Individual, prop: string, env: Env, ctx: EvalContext): Promise<unknown> {
   const def = cls.def.properties[prop];
   const derived = def?.derived;
-  if (!derived) throw new EngineReject(`属性不是派生的：${prop}`);
+  if (!derived) throw new EngineReject(MSG.propNotDerived(prop));
   if (Array.isArray(derived)) {
     for (const r of derived) {
       if (await whenRuleHits(cls, ind, r, env, ctx)) return r.value;
@@ -67,12 +67,12 @@ export async function evalFilterOnIndividual(cls: Cls, ind: Individual, filter: 
       continue;
     }
     if (fromSource) {
-      if (key.startsWith("$")) throw new EngineReject(`when 下的过滤不支持 ${key}`);
+      if (key.startsWith("$")) throw new EngineReject(MSG.whenFilterSpecial(key));
       if (!(await conditionHolds(propValueFrom(cls, ind, fromSource, key), v, evalCtx, cls.def.properties[key]?.type === "date"))) return false;
       continue;
     }
     if ((key === "$request" || key === "$exists") && !ctx.allowPreKeys) {
-      throw new EngineReject(`${key} 只属于前置，查询过滤不支持`);
+      throw new EngineReject(MSG.preKeyOnly(key));
     }
     if (key === "$request") {
       for (const [param, cv] of Object.entries(v as Record<string, unknown>)) {
@@ -93,7 +93,7 @@ export async function evalFilterOnIndividual(cls: Cls, ind: Individual, filter: 
     }
     // 属性条件：派生属性先算，源列属性按映射取值
     const def = cls.def.properties[key];
-    if (!def) throw new EngineReject(`过滤里的名字对不上配置：${cls.name}.${key}`);
+    if (!def) throw new EngineReject(MSG.filterPropUnknown(cls.name, key));
     const actual = def.derived ? await evalDerived(cls, ind, key, env, ctx) : propValue(cls, ind, key);
     if (!(await conditionHolds(actual, v, evalCtx, def.type === "date"))) return false;
   }
@@ -121,10 +121,10 @@ export async function currentOf(cls: Cls, ind: Individual, env: Env, ctx: EvalCo
 export async function transitionHolds(cls: Cls, ind: Individual, link: LinkType, env: Env, ctx: EvalContext): Promise<boolean> {
   const t = link.transition!;
   const def = cls.def.properties[t.property];
-  if (!def?.derived || !Array.isArray(def.derived)) throw new EngineReject(`transition.property 不是 when 派生：${t.property}`);
+  if (!def?.derived || !Array.isArray(def.derived)) throw new EngineReject(MSG.transitionPropNotWhen(t.property));
   const fromRule = def.derived.find((r) => r.value === t.from);
   const toRule = def.derived.find((r) => r.value === t.to);
-  if (!fromRule || !toRule) throw new EngineReject(`派生规则里找不到阶段 ${String(t.from)} / ${String(t.to)}`);
+  if (!fromRule || !toRule) throw new EngineReject(MSG.stageNotInRules(String(t.from), String(t.to)));
   const fromSourcesHaveRows = Object.entries(fromRule.when)
     .filter(([, cond]) => cond === true)
     .every(([src]) => ind.rows[src] != null);

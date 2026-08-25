@@ -4,7 +4,7 @@
 import { dump, load } from "js-yaml";
 import { configSchema, type OntologyConfig } from "../../schema/config";
 import { metaStore } from "../../meta/store";
-import { DraftReject } from "../../errors";
+import { DraftReject, MSG } from "../../errors";
 import { DEFAULT_WS, seedYamlFor } from "../infra/workspace";
 import { applyPack, canvasSnapshot, persistWorkingCopy, unpackCanvas } from "./canvasPack";
 import { bumpRev, commitDraft, validateFull } from "./commit";
@@ -55,7 +55,7 @@ export function listVersions(ws: string = DEFAULT_WS): Promise<{ version: number
 export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Promise<{ version: number }> {
   return enqueue(ws, async () => {
     const yaml = await metaStore().versionYaml(ws, version);
-    if (yaml === undefined) throw new DraftReject(`版本不存在：v${version}`);
+    if (yaml === undefined) throw new DraftReject(MSG.versionNotFound(version));
     const snap = await metaStore().versionCanvas(ws, version);
     const pack = snap !== undefined ? unpackCanvas(snap) : { config: undefined }; // 老行没有 canvas_json：config 从 yaml 解
     let config: OntologyConfig;
@@ -63,7 +63,7 @@ export async function rollbackTo(version: number, ws: string = DEFAULT_WS): Prom
       config = configSchema.parse(pack.config ?? load(yaml));
       validateSemantics(config);
     } catch (e) {
-      throw new DraftReject(`配置不合法：v${version} 的内容读不回来（${e instanceof Error ? e.message : String(e)}）`);
+      throw new DraftReject(MSG.versionUnreadable(version, e instanceof Error ? e.message : String(e)));
     }
     const state = await getDraft(ws);
     state.draft = structuredClone(config);

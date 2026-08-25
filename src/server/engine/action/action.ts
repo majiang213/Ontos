@@ -13,6 +13,7 @@ import { currentView, keyColumn, mustCls, propValue, sourcesOf, type Cls, type E
 import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "../query/expr";
 import { enqueueKeyed, runtime } from "../../runtime";
 import { buildNotifications, type NotificationRecord } from "./notify";
+import { MSG } from "../../errors";
 
 export interface ProjectionRecord {
   source: string;
@@ -165,8 +166,8 @@ export type Planned =
 async function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Individual, ctx: EvalContext): Promise<Planned> {
   if ("link" in item) {
     const link = env.config.link_types[item.link];
-    if (!link?.transition) throw new Error(`link 只用于转化关系：${item.link}`);
-    if (link.from !== reqCls.name || link.to !== reqCls.name) throw new Error(`转化关系 ${item.link} 不在 ${reqCls.name} 上`);
+    if (!link?.transition) throw new Error(MSG.linkOnlyTransition(item.link));
+    if (link.from !== reqCls.name || link.to !== reqCls.name) throw new Error(MSG.transitionNotOnClass(item.link, reqCls.name));
     return { kind: "link", cls: reqCls, linkName: item.link, subject };
   }
   if ("create" in item) {
@@ -192,9 +193,9 @@ async function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Indi
     assertFilterShapes(op.filter, "效应过滤");
     targets = await selectIndividuals(env, cls.name, { filter: op.filter, allColumns: true, ctx: filterCtx });
   } else {
-    throw new Error(`认人必须写明：${op.object} 缺 identity 或 filter`);
+    throw new Error(MSG.effectIdentify(op.object));
   }
-  if (targets.length === 0) throw new Error(`效应找不到对象：${op.object}`);
+  if (targets.length === 0) throw new Error(MSG.effectNoTarget(op.object));
   if ("update" in item) {
     for (const prop of Object.keys(item.update.properties)) rejectIfDerived(cls, prop);
     return { kind: "update", cls, targets, setSpec: item.update.properties };
@@ -204,8 +205,8 @@ async function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Indi
 
 function rejectIfDerived(cls: Cls, prop: string) {
   const def = cls.def.properties[prop];
-  if (!def) throw new Error(`效应里的名字对不上配置：${cls.name}.${prop}`);
-  if (def.derived) throw new Error(`派生属性不能写入：${cls.name}.${prop}`);
+  if (!def) throw new Error(MSG.effectPropUnknown(cls.name, prop));
+  if (def.derived) throw new Error(MSG.derivedNoWrite(cls.name, prop));
 }
 
 /** 个体求值视图（唯一构造点）：current 读源列值、派生属性按需现算。
@@ -329,7 +330,7 @@ async function projectCreate(env: Env, p: Extract<Planned, { kind: "create" }>, 
   }
   // 承接规则：源映射了全部所赋属性
   const targets = sourcesOf(p.cls).filter(([, entry]) => Object.keys(p.propSpec).every((prop) => entry.fields[prop]));
-  if (targets.length === 0) throw new Error(`没有源能承接 ${p.cls.name} 的全部所赋属性`);
+  if (targets.length === 0) throw new Error(MSG.noSourceCarries(p.cls.name));
   for (const [srcName, entry] of targets) {
     try {
       if (await alreadyInserted(env, p, entry, vals)) {

@@ -5,6 +5,7 @@
 import type { OntologyConfig } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
+import { MSG } from "../../errors";
 
 /** 连接是否被已发布本体引用（删连接前的拦截面）：任一类的任一源条目挂着它即算。 */
 export function connectionInUse(config: OntologyConfig, name: string): boolean {
@@ -17,16 +18,16 @@ export function connectionInUse(config: OntologyConfig, name: string): boolean {
 export function referencesOf(d: OntologyConfig, clsName: string, prop: string, opts?: { exceptAction?: string }): string[] {
   const refs: string[] = [];
   const cls = d.object_types[clsName];
-  for (const [src, e] of Object.entries(cls.sources ?? {})) if (e.fields[prop]) refs.push(`源映射 ${src}`);
-  for (const [name, ax] of Object.entries(cls.axioms ?? {})) if (ax.property === prop) refs.push(`公理 ${name}`);
+  for (const [src, e] of Object.entries(cls.sources ?? {})) if (e.fields[prop]) refs.push(MSG.trailSource(src));
+  for (const [name, ax] of Object.entries(cls.axioms ?? {})) if (ax.property === prop) refs.push(MSG.trailAxiom(name));
   for (const [name, link] of Object.entries(d.link_types)) {
-    if (link.from === clsName && link.match?.some((p) => p.from === prop)) refs.push(`关系 ${name}`);
-    if (link.to === clsName && link.match?.some((p) => p.to === prop)) refs.push(`关系 ${name}`);
-    if (link.from === clsName && link.transition?.property === prop) refs.push(`关系 ${name}`);
+    if (link.from === clsName && link.match?.some((p) => p.from === prop)) refs.push(MSG.trailLink(name));
+    if (link.to === clsName && link.match?.some((p) => p.to === prop)) refs.push(MSG.trailLink(name));
+    if (link.from === clsName && link.transition?.property === prop) refs.push(MSG.trailLink(name));
   }
   // 同类派生规则的过滤键
   for (const [p, def] of Object.entries(cls.properties)) {
-    if (p !== prop && def.derived && derivedFilterKeys(def.derived).includes(prop)) refs.push(`派生属性 ${p}`);
+    if (p !== prop && def.derived && derivedFilterKeys(def.derived).includes(prop)) refs.push(MSG.trailDerivedProp(p));
   }
   refs.push(...actionRefs(d, clsName, prop, opts?.exceptAction));
   // 他类派生经 $link 落到本类的过滤键（键侧，跨类）
@@ -34,7 +35,7 @@ export function referencesOf(d: OntologyConfig, clsName: string, prop: string, o
     if (hostName === clsName) continue;
     for (const [p, def] of Object.entries(hostCls.properties)) {
       if (!def.derived) continue;
-      for (const cond of derivedConds(def.derived)) collectNestedLinkRefs(d, cond, hostName, clsName, prop, `派生属性 ${hostName}.${p}`, (t) => refs.push(t));
+      for (const cond of derivedConds(def.derived)) collectNestedLinkRefs(d, cond, hostName, clsName, prop, MSG.trailDerived(hostName, p), (t) => refs.push(t));
     }
   }
   // 值侧引用：过滤/赋值里的 { property: prop }（被比较、被读取的属性也是引用）。
@@ -44,10 +45,10 @@ export function referencesOf(d: OntologyConfig, clsName: string, prop: string, o
   for (const [hostName, hostCls] of Object.entries(d.object_types)) {
     for (const [p, def] of Object.entries(hostCls.properties)) {
       if (!def.derived) continue;
-      for (const cond of derivedConds(def.derived)) valuePropRefs(cond, hostName, `派生属性 ${hostName}.${p}`, d, clsName, prop, valueRefs);
+      for (const cond of derivedConds(def.derived)) valuePropRefs(cond, hostName, MSG.trailDerived(hostName, p), d, clsName, prop, valueRefs);
     }
     for (const [actName, act] of Object.entries(hostCls.actions ?? {})) {
-      const trail = `动作 ${hostName}.${actName}`;
+      const trail = MSG.trailAction(hostName, actName);
       valuePropRefs(act.pre, hostName, trail, d, clsName, prop, valueRefs);
       walkEffectItems(act, {
         update: (item) => {
@@ -87,7 +88,7 @@ export function linkRefs(d: OntologyConfig, linkName: string): string[] {
   };
   for (const [clsName, cls] of Object.entries(d.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
-      const trail = `动作 ${clsName}.${actName}`;
+      const trail = MSG.trailAction(clsName, actName);
       walk(act.pre, trail);
       walkEffectItems(act, {
         link: (name) => { if (name === linkName) refs.add(trail); },
@@ -97,7 +98,7 @@ export function linkRefs(d: OntologyConfig, linkName: string): string[] {
     }
     for (const [p, def] of Object.entries(cls.properties)) {
       if (!def.derived) continue;
-      for (const cond of derivedConds(def.derived)) walk(cond, `派生属性 ${clsName}.${p}`);
+      for (const cond of derivedConds(def.derived)) walk(cond, MSG.trailDerived(clsName, p));
     }
   }
   return [...refs];
@@ -168,7 +169,7 @@ function actionRefs(d: OntologyConfig, clsName: string, prop: string, exceptActi
   for (const [hostName, hostCls] of Object.entries(d.object_types)) {
     for (const [actName, act] of Object.entries(hostCls.actions ?? {})) {
       if (hostName === clsName && actName === exceptAction) continue; // 结构例外，不靠文案识别
-      const trail = `动作 ${hostName}.${actName}`;
+      const trail = MSG.trailAction(hostName, actName);
       if (hostName === clsName && act.pre && filterTopKeys(act.pre).includes(prop)) refs.add(trail);
       collectNestedLinkRefs(d, act.pre, hostName, clsName, prop, trail, (t) => refs.add(t));
       const effRef = (item: UpdateItem | CreateItem | DeleteItem) => {

@@ -4,7 +4,7 @@
 
 import type { OntologyConfig } from "../../schema/config";
 import { isUiStateOp, type DraftOpInput as DraftOp } from "../../schema/ops";
-import { DraftReject } from "../../errors";
+import { DraftReject, MSG } from "../../errors";
 import { DEFAULT_WS } from "../infra/workspace";
 import { applyOp } from "./ops";
 import { persistWorkingCopy, type DraftState } from "./canvasPack";
@@ -16,7 +16,7 @@ export async function editDraft(input: DraftOp, ws: string = DEFAULT_WS, opts?: 
   return enqueue(ws, async () => {
     // base_rev 的比较必须在同一个 task 开头——比在队列外会被并发吞掉
     if (opts?.base_rev !== undefined && opts.base_rev !== getRev(ws)) {
-      throw new DraftReject(`草稿已变（rev=${getRev(ws)}），请重新读取再改`);
+      throw new DraftReject(MSG.draftChanged(getRev(ws)));
     }
     const state = await getDraft(ws);
     const published = (await getPublished(ws)).config;

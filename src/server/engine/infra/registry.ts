@@ -2,7 +2,7 @@
 // 问数与动作只认连接名；注册表是 SourceDriver 的一种（多方言混合，不带 dialect 属性）。
 
 import type { Condition, SourceDriver, TableInfo } from "./driver";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 
 export class DriverRegistry implements SourceDriver {
   private drivers = new Map<string, SourceDriver>();
@@ -33,7 +33,7 @@ export class DriverRegistry implements SourceDriver {
 
   private resolve(connection: string): SourceDriver {
     const d = this.drivers.get(connection);
-    if (!d) throw new EngineReject(`未注册的连接：${connection}`);
+    if (!d) throw new EngineReject(MSG.connectionUnregistered(connection));
     return d;
   }
 
@@ -51,12 +51,12 @@ export class DriverRegistry implements SourceDriver {
   }
   async introspect(connection: string): Promise<TableInfo[]> {
     const d = this.resolve(connection);
-    if (!d.introspect) throw new Error(`连接 ${connection} 不支持内省`);
+    if (!d.introspect) throw new Error(MSG.introspectUnsupported(connection));
     return d.introspect(connection);
   }
   async sample(connection: string, table: string, limit = 3): Promise<Record<string, unknown>[]> {
     const d = this.resolve(connection);
-    if (!d.sample) throw new Error(`连接 ${connection} 不支持采样`);
+    if (!d.sample) throw new Error(MSG.sampleUnsupported(connection));
     return d.sample(connection, table, limit);
   }
 }

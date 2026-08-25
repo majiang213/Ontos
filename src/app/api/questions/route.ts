@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getPublished } from "@/server/engine/draft/current";
 import { EXPECTED_HINT, parseExpected, runQuestions } from "@/server/engine/query/questions";
 import { metaStore } from "@/server/meta/store";
+import { MSG } from "@/server/errors";
 import { BadRequest, bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 export async function GET(req: Request) {
@@ -31,12 +32,12 @@ export async function POST(req: Request) {
         try {
           parsed = JSON.parse(raw);
         } catch {
-          throw new BadRequest("请求体不是合法 JSON");
+          throw new BadRequest(MSG.bodyNotJson);
         }
         onlyId = z.object({ id: z.number().int().optional() }).parse(parsed).id;
       }
       const { results, version } = await runQuestions(ws, { onlyId, target });
-      if (onlyId !== undefined && results.length === 0) throw new BadRequest("没有这条问题");
+      if (onlyId !== undefined && results.length === 0) throw new BadRequest(MSG.questionNotFound);
       return { results, version };
     });
   }

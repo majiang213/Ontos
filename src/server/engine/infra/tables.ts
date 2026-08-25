@@ -3,6 +3,7 @@
 
 import type { DriverRegistry } from "./registry";
 import type { TableInfo } from "./driver";
+import { MSG } from "../../errors";
 
 /** 按连接分组内省、逐表定位（每个连接只内省一次）。找不到表时抛 notFound 产出的错误（调用方定错误类型）。 */
 export async function resolveTableInfos(
@@ -16,7 +17,7 @@ export async function resolveTableInfos(
   }
   return tables.map(({ connection, table }) => {
     const info = byConn.get(connection)!.find((t) => t.name === table);
-    if (!info) throw notFound(`表不存在：${connection}.${table}`);
+    if (!info) throw notFound(MSG.tableNotFound(connection, table));
     return { connection, table: info };
   });
 }

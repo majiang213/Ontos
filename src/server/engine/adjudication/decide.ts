@@ -5,7 +5,7 @@ import { metaStore } from "../../meta/store";
 import { getDraft } from "../draft/current";
 import { adjudicate, type Verdict } from "./applyVerdict";
 import { hasSources, isCrossSource, SAME_SOURCE_OK_VERDICTS, sharedSourcesMsg } from "./eligibility";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import { DEFAULT_WS } from "../infra/workspace";
 
 export interface DecideInput {
@@ -29,9 +29,9 @@ export async function decide(input: DecideInput, ws: string = DEFAULT_WS): Promi
   const d = (await getDraft(ws)).draft;
   const clsA = d.object_types[input.class_a];
   const clsB = d.object_types[input.class_b];
-  if (!clsA || !clsB) throw new EngineReject("类不存在，先刷新画布");
+  if (!clsA || !clsB) throw new EngineReject(MSG.decideClassMissing);
   if (!hasSources(clsA) || !hasSources(clsB)) {
-    throw new EngineReject("无源对象不进裁决（先给它挂来源）");
+    throw new EngineReject(MSG.decideNoSources);
   }
   if (!isCrossSource(clsA, clsB) && !SAME_SOURCE_OK_VERDICTS.has(input.verdict)) {
     throw new EngineReject(sharedSourcesMsg(clsA, clsB));

@@ -4,6 +4,7 @@
 
 import { FROM_KEY_SET, isFromOnly, isPlainLiteral, propertyRef } from "./valueSpec";
 import type { ActionDef } from "../config";
+import { MSG } from "../../errors";
 
 /* ---------- 位置规则：静态校验（validate 消费） ---------- */
 
@@ -28,24 +29,24 @@ export type ValuePosition = keyof typeof VALUE_POSITIONS;
  *  { property } 组合的 from 只许 current/request；from 词表按位置规则放闸。 */
 export function checkActionValue(pos: ValuePosition, v: unknown, where: string, opts?: { hasGenerate?: boolean }): void {
   if (v === null || typeof v !== "object") return; // 字面量与表达式串：运行期管，这里不管
-  if (Array.isArray(v)) throw new Error(`配置不合法：${where} 的取值不接受数组`);
+  if (Array.isArray(v)) throw new Error(MSG.cfgValueNoArray(where));
   const rule: ValuePosRule = VALUE_POSITIONS[pos];
   const ref = propertyRef(v);
   if (ref) {
     const from = ref.from === undefined ? "current" : ref.from; // { property } 缺省 from = current
-    if (from !== "current" && from !== "request") throw new Error(`配置不合法：${where} 的取值 { property } 组合的 from 只许 current/request：${JSON.stringify(v)}`);
-    if (from === "current" && !rule.allowCurrent) throw new Error(`配置不合法：${where} 没有当前个体，取值不能来自 current：${JSON.stringify(v)}`);
+    if (from !== "current" && from !== "request") throw new Error(MSG.cfgValueFromBad(where, JSON.stringify(v)));
+    if (from === "current" && !rule.allowCurrent) throw new Error(MSG.cfgValueNoCurrent(where, JSON.stringify(v)));
     return;
   }
   const rec = v as Record<string, unknown>;
   if (typeof rec.from === "string" && FROM_KEY_SET.has(rec.from)) {
-    if (rec.from === "current" && !rule.allowCurrent) throw new Error(`配置不合法：${where} 没有当前个体，取值不能来自 current：${JSON.stringify(v)}`);
+    if (rec.from === "current" && !rule.allowCurrent) throw new Error(MSG.cfgValueNoCurrent(where, JSON.stringify(v)));
     if (rec.from === "generated" && !(rule.generated === "withGenerate" && opts?.hasGenerate)) {
-      throw new Error(`配置不合法：${where} 的 from: generated 只许用在 create 效应且目标属性带 generate 列表：${JSON.stringify(v)}`);
+      throw new Error(MSG.cfgValueGenerated(where, JSON.stringify(v)));
     }
     return;
   }
-  throw new Error(`配置不合法：${where} 的取值来源不认识：${JSON.stringify(v)}`);
+  throw new Error(MSG.cfgValueUnknown(where, JSON.stringify(v)));
 }
 
 /* ---------- 表单子集（actionView formCompatible 消费） ----------

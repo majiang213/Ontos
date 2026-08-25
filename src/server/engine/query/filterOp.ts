@@ -3,6 +3,7 @@
 
 import { FILTER_OPS, treatsNullAsUntilNow } from "../../schema/config";
 import type { Condition, CondOp } from "../infra/driver";
+import { MSG } from "../../errors";
 
 /** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。 */
 export function isOpObject(v: unknown): v is Record<string, unknown> {
@@ -38,7 +39,7 @@ export function compare(actual: unknown, op: string, expected: unknown, dateLike
     case "gte": return num(actual) && num(expected) && (actual as number) >= (expected as number);
     case "in": return Array.isArray(expected) && expected.includes(actual);
     case "contains": return String(actual).includes(String(expected));
-    default: throw new Error(`未知运算符：${op}`);
+    default: throw new Error(MSG.operatorUnknown(op));
   }
 }
 

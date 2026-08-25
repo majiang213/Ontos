@@ -4,6 +4,7 @@
 
 import type { ObjectType } from "../../schema/config";
 import { Verdict } from "./verdict";
+import { MSG } from "../../errors";
 
 /** 类的连接集合（无源 = 空集）。 */
 export function connectionsOf(t: ObjectType): Set<string> {
@@ -37,5 +38,5 @@ export const SAME_SOURCE_OK_VERDICTS = new Set<Verdict>([Verdict.NameSimilar, Ve
 /** 同源对的拒绝文案（交集率与定案共用）：资格谓词的文案与谓词同住。 */
 export function sharedSourcesMsg(a: ObjectType, b: ObjectType): string {
   const shared = [...connectionsOf(a)].filter((c) => connectionsOf(b).has(c));
-  return `这两个对象有共同来源（${shared.join("、")}），不算疑似重复`;
+  return MSG.sharedSources(shared);
 }

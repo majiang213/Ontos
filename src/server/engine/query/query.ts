@@ -5,7 +5,7 @@ import type { OntologyConfig } from "../../schema/config";
 import type { ExpandNode, QueryRequest } from "../../schema/request";
 import type { SourceDriver } from "../infra/driver";
 import type { EvalContext } from "./expr";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import { assertFilterShapes } from "./compare";
 import { createEnv, matchConds, selectIndividuals } from "./assemble";
 import { currentOf, evalDerived, transitionHolds } from "./evaluate";
@@ -30,10 +30,10 @@ export async function query(config: OntologyConfig, driver: SourceDriver, req: Q
   const checkExpand = (exs?: ExpandNode[]) => exs?.forEach((e) => { if (e.filter) assertFilterShapes(e.filter, `展开 ${e.relation}`); checkExpand(e.expand); });
   checkExpand(req.expand);
 
-  if (req.aggregate && req.expand?.length) throw new EngineReject("聚合与展开不能同给：分组统计不携带逐个体明细");
+  if (req.aggregate && req.expand?.length) throw new EngineReject(MSG.aggregateWithExpand);
   // 展开深度上限：每层都是一轮下推，无上限会被深层请求打爆
   const depthOf = (exs: ExpandNode[] | undefined, d: number): number => (exs?.length ? Math.max(...exs.map((e) => depthOf(e.expand, d + 1))) : d);
-  if (depthOf(req.expand, 0) > 3) throw new EngineReject("展开最多三层");
+  if (depthOf(req.expand, 0) > 3) throw new EngineReject(MSG.expandTooDeep);
 
   // 聚合的分组键与指标字段也要下推进去
   const requested = req.aggregate
@@ -87,7 +87,7 @@ export async function query(config: OntologyConfig, driver: SourceDriver, req: Q
           }),
         ])
       : new Set(req.properties ?? Object.keys(cls.def.properties)); // 按未返回的属性排序等于按 undefined 排，拒绝
-    if (!legal.has(prop)) throw new EngineReject(`order 里的名字对不上配置：${prop}`);
+    if (!legal.has(prop)) throw new EngineReject(MSG.orderPropUnknown(prop));
     rows.sort((a, b) => compareRows(a[prop], b[prop]) * (dir === "desc" ? -1 : 1));
   }
   const limit = req.limit ?? DEFAULT_LIMIT;
@@ -109,12 +109,12 @@ async function expandItem(
 ): Promise<[string, Record<string, unknown>[]]> {
   const { link, reversed } = mustLink(env.config, cls.name, item.relation);
   if (link.transition) {
-    if (item.expand?.length) throw new EngineReject(`转化关系不支持嵌套展开：${item.relation}`);
-    if (item.filter !== undefined) throw new EngineReject(`转化关系不支持目标侧过滤：${item.relation}`); // 与 linkHolds 同口径，不静默吞
+    if (item.expand?.length) throw new EngineReject(MSG.transitionNoNestedExpand(item.relation));
+    if (item.filter !== undefined) throw new EngineReject(MSG.transitionNoTargetFilter(item.relation)); // 与 linkHolds 同口径，不静默吞
     return [item.relation, (await transitionHolds(cls, ind, link, env, ctx)) ? [await project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
-  const merged = matchConds(cls, ind, link, reversed, item.filter, (k) => `展开 ${item.relation} 的目标侧过滤 ${k} 与配对字段冲突`);
+  const merged = matchConds(cls, ind, link, reversed, item.filter, (k) => MSG.expandFilterConflict(item.relation, k));
   if (!merged) return [item.relation, []]; // 配对值为空：关系不成立，没有目标——与 linkHolds 同语义
   const targetCls = mustCls(env.config, targetClsName);
   const sub = await selectIndividuals(env, targetClsName, {
@@ -142,7 +142,7 @@ async function project(cls: Cls, ind: Individual, requested: string[] | undefine
   const row: Record<string, unknown> = {};
   for (const p of props) {
     const def = cls.def.properties[p];
-    if (!def) throw new EngineReject(`properties 里的名字对不上配置：${cls.name}.${p}`);
+    if (!def) throw new EngineReject(MSG.propertiesPropUnknown(cls.name, p));
     row[p] = def.derived ? await evalDerived(cls, ind, p, env, ctx) : propValue(cls, ind, p);
   }
   return row;
@@ -182,7 +182,7 @@ async function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<Q
       else if (op === "sum") row[name] = vals.reduce((a, b) => a + b, 0);
       else if (op === "min") row[name] = vals.length ? Math.min(...vals) : null;
       else if (op === "max") row[name] = vals.length ? Math.max(...vals) : null;
-      else throw new EngineReject(`未知聚合：${op}`);
+      else throw new EngineReject(MSG.aggregateUnknown(op));
     }
     rows.push(row);
   }

@@ -3,7 +3,7 @@
 // 只读采样，内存里算，集合算完即弃；落库的只有计数与比率（adj_overlap）。
 
 import type { SourceDriver } from "../infra/driver";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import { mustCls, keyColumn, sourcesOf, type Cls } from "../query/individual";
 import { getDraft } from "../draft/current";
 import { getDriverRegistry } from "../infra/connections";
@@ -18,13 +18,13 @@ export async function computeOverlap(ws: string, class_a: string, class_b: strin
   const a = mustCls(d, class_a);
   const b = mustCls(d, class_b);
   if (!hasSources(a.def) || !hasSources(b.def)) {
-    throw new EngineReject("无源对象不算疑似重复（先给它挂来源）");
+    throw new EngineReject(MSG.pairNoSources);
   }
   if (!isCrossSource(a.def, b.def)) {
     throw new EngineReject(sharedSourcesMsg(a.def, b.def));
   }
   if (!a.def.identity || !b.def.identity) {
-    throw new EngineReject("两边对不上号：有类没设唯一键");
+    throw new EngineReject(MSG.pairNoIdentity);
   }
   return overlapRate(await getDriverRegistry(ws), a, b, metaStore(), ws);
 }
@@ -49,7 +49,7 @@ export async function overlapRate(driver: SourceDriver, clsA: Cls, clsB: Cls, me
     for (const [, entry] of sourcesOf(cls)) {
       const col = keyColumn(cls, entry);
       const rows = await driver.select(entry.connection, entry.table, [col], [], MAX_SCAN + 1); // 多取一行探测超限
-      if (rows.length > MAX_SCAN) throw new EngineReject(`${cls.name} 的识别列超过 ${MAX_SCAN} 行，交集算不了（先收窄范围）`);
+      if (rows.length > MAX_SCAN) throw new EngineReject(MSG.identityColumnTooBig(cls.name, MAX_SCAN));
       out.push(rows.map((r) => r[col]).filter((v) => v != null && String(v).trim() !== "").map(String)); // 空串不算标识，防幻影交集
     }
     return out;

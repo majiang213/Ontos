@@ -3,7 +3,7 @@
 
 import type { Filter } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import { resolveLiteral, type EvalContext } from "./expr";
 import { compare, isOpObject } from "./filterOp";
 
@@ -31,12 +31,12 @@ export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unkn
         // 派生按需现算。错误分类在源头就是对的：点错名（evalDerived/propValue）抛 EngineReject，
         // 源库故障（$link 派生真查库）是原生异常——都不需要在这里归一，原样透传即可
         if (ctx.currentDerived) return await ctx.currentDerived(rec.property);
-        throw new EngineReject(`操作数取不到值：${rec.property}`); // 下推层接到这个错就退回内存核对
+        throw new EngineReject(MSG.operandMissing(String(rec.property))); // 下推层接到这个错就退回内存核对
       }
       return dataLiteral(hit); // 源库数据：只转换，不抛错
     }
     if (rec.from === "identity") return ctx.identity;
-    throw new EngineReject(`无法识别的操作数：${JSON.stringify(v)}`);
+    throw new EngineReject(MSG.operandUnknown(JSON.stringify(v)));
   }
   try {
     return resolveLiteral(v); // 请求侧表达式非法 → 422
@@ -73,17 +73,17 @@ export async function conditionHolds(actual: unknown, condVal: unknown, ctx: Eva
 export function assertFilterShapes(filter: Filter, trail = "过滤"): void {
   walkFilter(null, "", filter, {
     link: (_cls, _ln, _target, _sub, depth) => {
-      if (depth + 1 > 3) throw new EngineReject(`${trail}：$link 嵌套最多三层`);
+      if (depth + 1 > 3) throw new EngineReject(MSG.linkNestTooDeep(trail));
       // 存在性写法（true/false）没有子过滤：walker 对非对象本就不递归
     },
     prop: (_cls, key, v) => {
-      if (Array.isArray(v)) throw new EngineReject(`${trail}的 ${key}：等值位不接受数组（数组只能出现在 in 里）`);
+      if (Array.isArray(v)) throw new EngineReject(MSG.eqNoArray(trail, key));
       if (isOpObject(v)) {
         for (const [op, operand] of Object.entries(v)) {
           if (op === "in") {
-            if (!Array.isArray(operand)) throw new EngineReject(`${trail}的 ${key}.in：值必须是数组`);
+            if (!Array.isArray(operand)) throw new EngineReject(MSG.inNeedsArray(trail, key));
           } else if (Array.isArray(operand)) {
-            throw new EngineReject(`${trail}的 ${key}.${op}：不接受数组`);
+            throw new EngineReject(MSG.opNoArray(trail, key, op));
           }
         }
       }

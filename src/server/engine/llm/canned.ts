@@ -8,7 +8,7 @@ import type { ObjectType, OntologyConfig } from "../../schema/config";
 import type { TableInfo } from "../infra/driver";
 import { TEST_WS } from "../infra/workspace";
 import { Verdict, type PairAdvice, type Tendency } from "../adjudication/verdict";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import { IDENTITY_COL_RE } from "./identityHint";
 import type { LlmSlot } from "./slot";
 
@@ -26,13 +26,13 @@ export class CannedSlot implements LlmSlot {
   async nlToQuery(question: string, config: OntologyConfig, ws: string): Promise<QueryRequest> {
     // 空间守门（真实约束，写进签名的原因）：剧本是 test 空间的演示数据，别的空间问数必须配模型 Key——
     // 不能靠「config 里有没有同名类」巧合放行，否则别的空间任何问法都会被静默编成演示查询（错答案比报错糟）
-    if (ws !== TEST_WS) throw new EngineReject("离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问");
+    if (ws !== TEST_WS) throw new EngineReject(MSG.cannedWsOnly);
     // 剧本在本文件 demoQueries（test 空间的演示数据）：正则顺序即优先级，末条兜底。
     // 形状与 generateText + Output.object 产物一致，过同一道 Zod。
     // 无模型时问数没有通用编译法，剧本只对上了类才编；对不上说明不是演示问题，得配模型 Key
     const hit = demoQueries.find((q) => q.pattern.test(question))!;
     if (!config.object_types[hit.query.object]) {
-      throw new EngineReject("离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问");
+      throw new EngineReject(MSG.cannedScriptOnly);
     }
     return queryRequestSchema.parse(hit.query);
   }

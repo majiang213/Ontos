@@ -3,11 +3,12 @@
 
 import { z } from "zod";
 import { computeOverlap } from "@/server/engine/adjudication/overlap";
+import { MSG } from "@/server/errors";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z
   .object({ class_a: z.string(), class_b: z.string() })
-  .refine((b) => b.class_a !== b.class_b, { message: "自己和自己不算疑似重复" });
+  .refine((b) => b.class_a !== b.class_b, { message: MSG.pairSelfOverlap });
 
 export async function POST(req: Request) {
   const denied = requireWriteAuth(req); // 触发两列全量扫 + 写计数，口径与写端点对齐

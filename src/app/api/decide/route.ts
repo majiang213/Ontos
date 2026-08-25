@@ -5,6 +5,7 @@ import { z } from "zod";
 import { decide } from "@/server/engine/adjudication/decide";
 import { Verdict } from "@/server/engine/adjudication/verdict";
 import { metaStore } from "@/server/meta/store";
+import { MSG } from "@/server/errors";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z
@@ -25,7 +26,7 @@ const bodySchema = z
       .optional(),
     decided_by: z.string().default("画布操作者"),
   })
-  .refine((b) => b.class_a !== b.class_b, { message: "class_a 与 class_b 不能是同一个类" });
+  .refine((b) => b.class_a !== b.class_b, { message: MSG.pairSelfDecide });
 
 export async function GET(req: Request) {
   return respond(async () => ({ decisions: await metaStore().listDecisions(wsOf(req)) }));

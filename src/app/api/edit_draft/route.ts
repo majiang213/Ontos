@@ -3,6 +3,7 @@
 
 import { draftOpSchema } from "@/server/schema/ops";
 import { editDraft } from "@/server/engine/draft/editDraft";
+import { MSG } from "@/server/errors";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 export async function POST(req: Request) {
@@ -12,5 +13,5 @@ export async function POST(req: Request) {
     const op = draftOpSchema.parse(await bodyJson(req));
     const state = await editDraft(op, wsOf(req));
     return { ok: true, dirty: state.dirty };
-  }, { zod: { status: 400, error: "操作形状不合法" } });
+  }, { zod: { status: 400, error: MSG.zodOpShape } });
 }

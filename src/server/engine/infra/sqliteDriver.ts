@@ -4,7 +4,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
-import { EngineReject } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 
 // node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
 // node:sqlite 不认 boolean，绑定前归一成 1/0。
@@ -30,7 +30,7 @@ export class SqliteDriver implements SourceDriver {
 
   protected db(connection: string): DatabaseSync {
     const db = this.dbs.get(connection);
-    if (!db) throw new EngineReject(`未注册的连接：${connection}`);
+    if (!db) throw new EngineReject(MSG.connectionUnregistered(connection));
     return db;
   }
 

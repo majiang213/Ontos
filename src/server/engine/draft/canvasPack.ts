@@ -6,7 +6,7 @@ import { z } from "zod";
 import { configSchema, type OntologyConfig } from "../../schema/config";
 import { borderPinSchema, type BorderPin } from "../../schema/ops";
 import { metaStore } from "../../meta/store";
-import { DraftReject } from "../../errors";
+import { DraftReject, MSG } from "../../errors";
 import { sameConfig } from "./sameConfig";
 
 export interface DraftState {
@@ -86,7 +86,7 @@ export async function readWorkingCopy(ws: string, config: OntologyConfig, versio
     try {
       draft = configSchema.parse(pack.config);
     } catch (e) {
-      throw new DraftReject(`工作副本读不回来：${e instanceof Error ? e.message : String(e)}`);
+      throw new DraftReject(MSG.workingCopyUnreadable(e instanceof Error ? e.message : String(e)));
     }
   }
   const state: DraftState = { draft: structuredClone(draft), baseVersion: version, dirty: !sameConfig(draft, config), layout: {}, edgeBends: {}, edgePins: {} };

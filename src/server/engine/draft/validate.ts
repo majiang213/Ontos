@@ -4,6 +4,7 @@
 import { sourceKeyProp, type OntologyConfig } from "../../schema/config";
 import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
 import { checkActionValue, walkEffectItems, walkEffectValues, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
+import { MSG } from "../../errors";
 
 export function validateSemantics(config: OntologyConfig): void {
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
@@ -11,32 +12,32 @@ export function validateSemantics(config: OntologyConfig): void {
     if (!config.object_types[clsName]) return; // 类不存在由效应目标检查报「不存在的类」，这里不抢话
     walkFilter(config, clsName, f, {
       link: (_cls, ln, target) => {
-        if (!target) throw new Error(`配置不合法：${trail} 引用了不存在的关系 ${ln}`);
+        if (!target) throw new Error(MSG.cfgLinkUnknown(trail, ln));
       },
       prop: (cls, k) => {
-        if (!config.object_types[cls]?.properties[k]) throw new Error(`配置不合法：${trail} 过滤了 ${cls} 上不存在的属性 ${k}`);
+        if (!config.object_types[cls]?.properties[k]) throw new Error(MSG.cfgFilterPropUnknown(trail, cls, k));
       },
     });
   };
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     if (cls.identity && !cls.properties[cls.identity]) {
-      throw new Error(`配置不合法：${clsName} 的 identity 指向不存在的属性 ${cls.identity}`);
+      throw new Error(MSG.cfgIdentityMissing(clsName, cls.identity!));
     }
     if (cls.identity && cls.properties[cls.identity]?.derived) {
-      throw new Error(`配置不合法：${clsName} 的 identity 指向派生属性 ${cls.identity}`);
+      throw new Error(MSG.cfgIdentityDerived(clsName, cls.identity!));
     }
     const derivedProps = new Set(Object.entries(cls.properties).filter(([, d]) => d.derived).map(([p]) => p));
     for (const [srcName, entry] of Object.entries(cls.sources ?? {})) {
       const keyProp = sourceKeyProp(cls, entry); // 对齐属性：条目 key 省略则用类 identity（schema/config 单源）
       if (!keyProp) {
-        throw new Error(`配置不合法：${clsName}.${srcName} 没有认行依据（类无 identity，条目也无 key）`);
+        throw new Error(MSG.cfgNoRowKey(clsName, srcName));
       }
       if (!entry.fields[keyProp]) {
-        throw new Error(`配置不合法：${clsName}.${srcName} 的 fields 缺对齐属性 ${keyProp}`);
+        throw new Error(MSG.cfgFieldsMissingKey(clsName, srcName, keyProp));
       }
       for (const prop of Object.keys(entry.fields)) {
-        if (derivedProps.has(prop)) throw new Error(`配置不合法：派生属性不得进 fields（${clsName}.${srcName} 的 ${prop}）`);
-        if (!cls.properties[prop]) throw new Error(`配置不合法：${clsName}.${srcName} 的 fields 指向不存在的属性 ${prop}`);
+        if (derivedProps.has(prop)) throw new Error(MSG.cfgDerivedInFields(clsName, srcName, prop));
+        if (!cls.properties[prop]) throw new Error(MSG.cfgFieldsUnknownProp(clsName, srcName, prop));
       }
     }
     // when 派生的每条规则：键必须是该类的源条目名；规则里的过滤键必须是该源条目映射了的属性（拼错会被静默吞，发布闸拦住）
@@ -45,22 +46,22 @@ export function validateSemantics(config: OntologyConfig): void {
       for (const rule of def.derived) {
         for (const [src, cond] of Object.entries(rule.when)) {
           const entry = cls.sources?.[src];
-          if (!entry) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则指向不存在的源条目 ${src}`);
+          if (!entry) throw new Error(MSG.cfgDerivedUnknownSource(clsName, prop, src));
           if (cond && typeof cond === "object") {
             // 遍历走 schema 层 walkFilter：顶层键查源条目映射；嵌套键按目标类查类属性（与 checkFilterKeys 同口径）
             walkFilter(config, clsName, cond as Record<string, unknown>, {
               prop: (c, k, _v, depth) => {
                 if (depth === 0) {
-                  if (!entry.fields[k]) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则在 ${src} 上过滤未映射的属性 ${k}`);
+                  if (!entry.fields[k]) throw new Error(MSG.cfgDerivedUnmappedProp(clsName, prop, src, k));
                 } else if (!config.object_types[c]?.properties[k]) {
-                  throw new Error(`配置不合法：${clsName}.${prop} 的派生规则过滤了 ${c} 上不存在的属性 ${k}`);
+                  throw new Error(MSG.cfgDerivedUnknownProp(clsName, prop, c, k));
                 }
               },
               link: (_c, ln, target) => {
-                if (!target) throw new Error(`配置不合法：${clsName}.${prop} 的派生规则引用了不存在的关系 ${ln}`);
+                if (!target) throw new Error(MSG.cfgDerivedUnknownLink(clsName, prop, ln));
               },
               special: (_c, k, _v) => {
-                throw new Error(`配置不合法：${clsName}.${prop} 的派生规则里 ${src} 的过滤不支持 ${k}`);
+                throw new Error(MSG.cfgDerivedSpecialKey(clsName, prop, src, k));
               },
             });
           }
@@ -84,32 +85,32 @@ export function validateSemantics(config: OntologyConfig): void {
   }
   for (const [linkName, link] of Object.entries(config.link_types)) {
     for (const end of [link.from, link.to]) {
-      if (!config.object_types[end]) throw new Error(`配置不合法：关系 ${linkName} 的端点 ${end} 不存在`);
+      if (!config.object_types[end]) throw new Error(MSG.cfgLinkEndMissing(linkName, end));
     }
     if (link.match) {
       for (const pair of link.match) {
         const fromDef = config.object_types[link.from].properties[pair.from];
         const toDef = config.object_types[link.to].properties[pair.to];
         if (!fromDef) {
-          throw new Error(`配置不合法：关系 ${linkName} 的 match 指向不存在的属性 ${link.from}.${pair.from}`);
+          throw new Error(MSG.cfgMatchPropMissing(linkName, `${link.from}.${pair.from}`));
         }
         if (!toDef) {
-          throw new Error(`配置不合法：关系 ${linkName} 的 match 指向不存在的属性 ${link.to}.${pair.to}`);
+          throw new Error(MSG.cfgMatchPropMissing(linkName, `${link.to}.${pair.to}`));
         }
         // 配对要读真实列值：派生属性没有列，配上了也永远不成立
-        if (fromDef.derived) throw new Error(`配置不合法：关系 ${linkName} 的 match 指向派生属性 ${link.from}.${pair.from}`);
-        if (toDef.derived) throw new Error(`配置不合法：关系 ${linkName} 的 match 指向派生属性 ${link.to}.${pair.to}`);
+        if (fromDef.derived) throw new Error(MSG.cfgMatchPropDerived(linkName, `${link.from}.${pair.from}`));
+        if (toDef.derived) throw new Error(MSG.cfgMatchPropDerived(linkName, `${link.to}.${pair.to}`));
       }
     }
     if (link.transition) {
       const def = config.object_types[link.from].properties[link.transition.property];
       if (!def?.derived || !Array.isArray(def.derived)) {
-        throw new Error(`配置不合法：关系 ${linkName} 的 transition.property 不是 when 派生（${link.from}.${link.transition.property}）`);
+        throw new Error(MSG.cfgTransitionNotWhen(linkName, link.from, link.transition.property));
       }
       // 转化的两个端点值必须都在派生规则的产出里，否则运行期永远判不出来
       const values = new Set(def.derived.map((r) => r.value));
       if (!values.has(link.transition.from) || !values.has(link.transition.to)) {
-        throw new Error(`配置不合法：关系 ${linkName} 的 transition 阶段值不在派生规则里（${String(link.transition.from)} / ${String(link.transition.to)}）`);
+        throw new Error(MSG.cfgTransitionValues(linkName, String(link.transition.from), String(link.transition.to)));
       }
     }
   }
@@ -118,11 +119,11 @@ export function validateSemantics(config: OntologyConfig): void {
       // 效应指向的类必须存在；update/create 写的属性必须是该类的源列属性；$request 认人的类必须存在
       const effTarget = (item: UpdateItem | CreateItem | DeleteItem) => {
         const target = config.object_types[item.object];
-        if (!target) throw new Error(`配置不合法：${clsName}.${actName} 的效应指向不存在的类 ${item.object}`);
+        if (!target) throw new Error(MSG.cfgEffectClassMissing(clsName, actName, item.object));
         if ("properties" in item && item.properties) {
           for (const prop of Object.keys(item.properties)) {
-            if (!target.properties[prop]) throw new Error(`配置不合法：${clsName}.${actName} 的效应写了不存在的属性 ${item.object}.${prop}`);
-            if (target.properties[prop].derived) throw new Error(`配置不合法：${clsName}.${actName} 的效应写了派生属性 ${item.object}.${prop}`);
+            if (!target.properties[prop]) throw new Error(MSG.cfgEffectPropMissing(clsName, actName, item.object, prop));
+            if (target.properties[prop].derived) throw new Error(MSG.cfgEffectPropDerived(clsName, actName, item.object, prop));
           }
         }
       };
@@ -131,13 +132,13 @@ export function validateSemantics(config: OntologyConfig): void {
       for (const cv of Object.values(reqBlock ?? {})) {
         if (cv !== null && typeof cv === "object" && "object" in (cv as Record<string, unknown>)) {
           const target = String((cv as Record<string, unknown>).object);
-          if (!config.object_types[target]) throw new Error(`配置不合法：${clsName}.${actName} 的 $request 指向不存在的类 ${target}`);
+          if (!config.object_types[target]) throw new Error(MSG.cfgRequestClassMissing(clsName, actName, target));
         }
       }
       for (const inf of act.inform ?? []) {
-        if (!config.object_types[inf.object]) throw new Error(`配置不合法：${clsName}.${actName} 的 inform 对象 ${inf.object} 不存在`);
+        if (!config.object_types[inf.object]) throw new Error(MSG.cfgInformObjectMissing(clsName, actName, inf.object));
         for (const outlet of inf.to) {
-          if (!config.outlets?.[outlet]) throw new Error(`配置不合法：${clsName}.${actName} 的 inform 指向未声明的出站 ${outlet}`);
+          if (!config.outlets?.[outlet]) throw new Error(MSG.cfgInformOutletUnknown(clsName, actName, outlet));
         }
       }
     }
@@ -160,14 +161,14 @@ export function validateActionShapes(config: OntologyConfig): void {
       // 取值形状（③）走 actionSpec.walkEffectValues——位置分派不再在这里另写一份
       const identityOrFilter = (item: UpdateItem | DeleteItem) => {
         if (item.identity === undefined && !item.filter) {
-          throw new Error(`配置不合法：${where} 的效应认人必须写明：${item.object} 缺 identity 或 filter`);
+          throw new Error(MSG.cfgEffectIdentify(where, item.object));
         }
       };
       walkEffectItems(act, {
         link: (name) => {
           const l = config.link_types[name];
-          if (!l?.transition) throw new Error(`配置不合法：${where} 的效应 link 指向不存在的转化关系 ${name}`);
-          if (l.from !== clsName || l.to !== clsName) throw new Error(`配置不合法：转化关系 ${name} 不在 ${clsName} 上`);
+          if (!l?.transition) throw new Error(MSG.cfgEffectLinkUnknown(where, name));
+          if (l.from !== clsName || l.to !== clsName) throw new Error(MSG.cfgTransitionNotOn(name, clsName));
         },
         update: identityOrFilter,
         delete: identityOrFilter,
@@ -197,7 +198,7 @@ export function validateActionShapes(config: OntologyConfig): void {
       })
     );
     if (!referenced) {
-      throw new Error(`配置不合法：转化关系 ${linkName} 没有任何动作的效应 link 引用它——先写一条同样 link 该转化关系的替代动作，再删旧的`);
+      throw new Error(MSG.cfgTransitionOrphan(linkName));
     }
   }
 }

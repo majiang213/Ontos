@@ -1,6 +1,7 @@
 // 版本链与工作行：YAML 全量快照入库；onto_version 里 version IS NULL 的一行是可变头（画布全部内容的唯一落点）。
 
 import { ConcernStore } from "./base";
+import { MSG } from "../../errors";
 
 export class VersionChainStore extends ConcernStore {
   async latestVersion(ws: string, seedYaml: string): Promise<{ version: number; yaml: string }> {
@@ -55,7 +56,7 @@ export class VersionChainStore extends ConcernStore {
     try {
       return JSON.parse(raw);
     } catch {
-      throw new Error("工作副本读不回来：不是合法 JSON");
+      throw new Error(MSG.workingPackBadJson);
     }
   }
 

@@ -9,6 +9,7 @@ import type { PairAdvice } from "../adjudication/verdict";
 import type { DriverRegistry } from "../infra/registry";
 import { resolveTableInfos } from "../infra/tables";
 import { runtime } from "../../runtime";
+import { MSG } from "../../errors";
 import { createXai } from "@ai-sdk/xai";
 import { CannedSlot } from "./canned";
 import { AiSdkSlot } from "./aiSdk";
@@ -34,7 +35,7 @@ export function getSlot(): LlmSlot {
   const rt = runtime();
   if (!rt.llmSlot) {
     const model = process.env.OPENAI_MODEL;
-    if (!model) throw new Error("OPENAI_MODEL 未设置：接真模型必须显式指定模型名");
+    if (!model) throw new Error(MSG.openaiModelMissing);
     const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
     rt.llmSlot = new AiSdkSlot(xai.responses(model));
   }

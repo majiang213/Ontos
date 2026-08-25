@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { DraftReject, EngineReject, ConnectionReject, WsReject } from "@/server/errors";
+import { DraftReject, EngineReject, ConnectionReject, WsReject, MSG } from "@/server/errors";
 import { DEFAULT_WS, isWsName } from "@/server/engine/infra/workspace";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
@@ -13,7 +13,7 @@ export async function bodyJson(req: Request): Promise<unknown> {
   try {
     return await req.json();
   } catch {
-    throw new BadRequest("请求体不是合法 JSON");
+    throw new BadRequest(MSG.bodyNotJson);
   }
 }
 
@@ -34,7 +34,7 @@ export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status
     return out instanceof NextResponse ? out : NextResponse.json(out);
   } catch (e) {
     if (e instanceof ZodError) {
-      const z = opts.zod ?? { status: 400, error: "请求形状不合法" };
+      const z = opts.zod ?? { status: 400, error: MSG.zodRequestShape };
       return NextResponse.json({ error: z.error, issues: e.issues }, { status: z.status });
     }
     if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
@@ -50,7 +50,7 @@ export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status
 export function wsOf(req: Request): string {
   const url = new URL(req.url);
   const ws = url.searchParams.get("ws") ?? req.headers.get("x-ontos-ws") ?? DEFAULT_WS;
-  if (!isWsName(ws)) throw new BadRequest(`空间名不合法：${ws}`);
+  if (!isWsName(ws)) throw new BadRequest(MSG.wsNameBad(ws));
   return ws;
 }
 

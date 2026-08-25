@@ -3,7 +3,7 @@
 
 import type { ObjectType, OntologyConfig } from "../../../schema/config";
 import type { DraftOpInput as DraftOp } from "../../../schema/ops";
-import { DraftReject } from "../../../errors";
+import { DraftReject, MSG } from "../../../errors";
 
 type ReplaceObjectOp = Extract<DraftOp, { op: "replace_object" }>;
 
@@ -29,8 +29,8 @@ export function replaceBlockers(existing: ObjectType, publishedHasClass: boolean
  *  替换后 match 断了由 validateSemantics 整步回退。 */
 export function replaceObject(d: OntologyConfig, input: ReplaceObjectOp, published: OntologyConfig): void {
   const cur = d.object_types[input.name];
-  if (!cur) throw new DraftReject(`类不存在：${input.name}，新建请用 import_objects`);
+  if (!cur) throw new DraftReject(MSG.classNotFoundReplace(input.name));
   const blockers = replaceBlockers(cur, Boolean(published.object_types[input.name]));
-  if (blockers.length) throw new DraftReject(`${input.name} 不能整对象替换：${blockers.join("；")}。请用增删字段等逐步操作`);
+  if (blockers.length) throw new DraftReject(MSG.replaceBlocked(input.name, blockers));
   d.object_types[input.name] = input.def; // Zod 已在 schema 层 parse（并剥掉 actions/axioms）
 }
