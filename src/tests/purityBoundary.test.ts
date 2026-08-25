@@ -85,12 +85,12 @@ describe("组件 → server 导入方向（只许纯叶子）", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("守门自检：元库与驱动实现被判不纯（meta/store、infra/sqlDriver、llmSlot）", () => {
+  it("守门自检：元库与驱动实现被判不纯（meta/store、infra/sqlDriver、llm/slot）", () => {
     // 守门规则本身有效的活证：这几个已知不纯的模块必须被判出来，否则上面的全绿是假绿
     for (const [file, expectPure] of [
       ["meta/store.ts", false],
       ["engine/infra/sqlDriver.ts", false],
-      ["engine/llmSlot.ts", false],
+      ["engine/llm/slot.ts", false],
       ["etag.ts", true],
       ["engine/adjudication/verdict.ts", true],
       ["schema/spec/actionSpec.ts", true],

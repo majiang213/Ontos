@@ -13,6 +13,12 @@ export type Literal = z.infer<typeof literalSchema>;
 export const FILTER_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "in", "contains"] as const;
 export type FilterOp = (typeof FILTER_OPS)[number];
 
+/** 「空=至今」作用在哪些运算符上（唯一出处）：date 空值按至今——内存侧 actual 为空时这些运算符成立，SQL 侧 NULL 也算满足。
+ *  消费方：query/filterOp（内存比较与下推编成）、infra/driver（WHERE 渲染）。 */
+export function treatsNullAsUntilNow(op: string): boolean {
+  return op === "gt" || op === "gte";
+}
+
 export type Filter = Record<string, unknown>;
 export const filterSchema: z.ZodType<Filter> = z.record(z.string(), z.unknown());
 

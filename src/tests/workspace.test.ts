@@ -27,7 +27,7 @@ describe("空间隔离", () => {
     expect((await s.getPublished("default")).config.object_types.equipment).toBeUndefined();
     expect((await s.getPublished("test")).config.object_types.equipment).toBeDefined();
     // fixture 连接只注入 test：default 空白起步，数据源自己接
-    const { getDriverRegistry } = await import("../server/engine/infra/load");
+    const { getDriverRegistry } = await import("../server/engine/infra/connections");
     expect((await getDriverRegistry("test")).connectionNames()).toContain("purchase_sys");
     expect((await getDriverRegistry("default")).connectionNames()).toEqual([]);
     // lab 自己发布：default 的版本与内容都不受影响

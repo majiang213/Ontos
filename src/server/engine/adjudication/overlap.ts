@@ -1,12 +1,33 @@
 // 交集率 —— 候选对两端识别字段（归一化后）的集合重合度 = |∩| / max(|A|, |B|)。
+// 编排（资格闸 + 取数）与算率（overlapRate）同住：一个问题一个文件。
 // 只读采样，内存里算，集合算完即弃；落库的只有计数与比率（adj_overlap）。
 
 import type { SourceDriver } from "../infra/driver";
 import { EngineReject } from "../../errors";
-import { keyColumn, sourcesOf, type Cls } from "../query/individual";
+import { mustCls, keyColumn, sourcesOf, type Cls } from "../query/individual";
+import { getDraft } from "../draft/current";
+import { getDriverRegistry } from "../infra/connections";
+import { hasSources, isCrossSource, sharedSourcesMsg } from "./eligibility";
 import { pickRule, normalizeWith } from "./normalize";
 import { DEFAULT_WS } from "../infra/workspace";
-import type { MetaStore } from "../../meta/store";
+import { metaStore, type MetaStore } from "../../meta/store";
+
+/** 两端识别字段归一化后的集合重合度。无源 / 同源 / 缺识别字段拒绝。不收已定案闸——证据允许重算。 */
+export async function computeOverlap(ws: string, class_a: string, class_b: string): Promise<OverlapResult> {
+  const d = (await getDraft(ws)).draft;
+  const a = mustCls(d, class_a);
+  const b = mustCls(d, class_b);
+  if (!hasSources(a.def) || !hasSources(b.def)) {
+    throw new EngineReject("无源对象不算疑似重复（先给它挂来源）");
+  }
+  if (!isCrossSource(a.def, b.def)) {
+    throw new EngineReject(sharedSourcesMsg(a.def, b.def));
+  }
+  if (!a.def.identity || !b.def.identity) {
+    throw new EngineReject("两边对不上号：有类没设唯一键");
+  }
+  return overlapRate(await getDriverRegistry(ws), a, b, metaStore(), ws);
+}
 
 /** 识别列全量扫的行数上限：交集是内存集合运算，超大表先收窄再算。 */
 const MAX_SCAN = 50_000;

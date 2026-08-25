@@ -3,8 +3,8 @@
 // 与 MCP propose_objects 同名同义；落地走 edit_draft 的 import_objects。
 
 import { z } from "zod";
-import { getDriverRegistry } from "@/server/engine/infra/load";
-import { proposeObjectsFor } from "@/server/engine/llmSlot";
+import { getDriverRegistry } from "@/server/engine/infra/connections";
+import { proposeObjectsFor } from "@/server/engine/llm/slot";
 import { EngineReject } from "@/server/errors";
 import { bodyJson, respond, wsOf } from "@/app/api/_shared";
 

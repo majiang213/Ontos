@@ -2,12 +2,13 @@
 // 薄适配：形状校验 + 写闸 → load.saveConnection / dropConnection。
 
 import { z } from "zod";
-import { dropConnection, saveConnection } from "@/server/engine/infra/load";
+import { dropConnection, saveConnection } from "@/server/engine/infra/connections";
+import { NAME_RE } from "@/server/schema/ops";
 import { metaStore } from "@/server/meta/store";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const connectionSchema = z.object({
-  name: z.string().regex(/^[a-z][a-z0-9_]*$/, "连接名必须是小写字母/数字/下划线"),
+  name: z.string().regex(NAME_RE, "连接名必须是小写字母/数字/下划线"),
   type: z.enum(["mysql", "pg", "sqlite"]),
   host: z.string().optional(),
   port: z.number().int().optional(),

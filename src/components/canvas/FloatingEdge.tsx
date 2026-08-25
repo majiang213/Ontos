@@ -120,7 +120,6 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
         nodeId: fixed.nodeId,
         edgeUpdaterType: fixed.type, // 语义是「不动那端的连接点类型」：决定预览 fromHandle.type，进而决定预览箭头朝向
         onConnect: (connection) => {
-          console.log("[dbg] edge onConnect", JSON.stringify(connection));
           fireSession(); // 已落成：松手补命中的闸
           const { source: ns, target: nt } = connection;
           if (!ns || !nt || ns === nt) return; // 自连不改接

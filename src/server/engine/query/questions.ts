@@ -5,8 +5,8 @@
 // 路由只做解析与错误阶梯，跑批逻辑收在这里（薄路由）。
 
 import { query } from "./query";
-import { getSlot, type LlmSlot } from "../llmSlot";
-import { getDriverRegistry } from "../infra/load";
+import { getSlot, type LlmSlot } from "../llm/slot";
+import { getDriverRegistry } from "../infra/connections";
 import { getDraft, getPublished } from "../draft/current";
 import { metaStore } from "../../meta/store";
 

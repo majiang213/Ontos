@@ -1,12 +1,16 @@
 // SQLite fixture 驱动 —— 演示层：继承裸驱动 SqliteDriver（sqliteDriver.ts），只加演示关注点
-// （列注释覆写 / seedDemo 种子 / seeded 工厂 / demoQueries 问数剧本）。
+// （列注释覆写 / seedDemo 种子 / seeded 工厂）。
 // 两种用途：引擎 golden 测试；test 空间的离线演示种子。用户接入的 sqlite 文件库不走本类（裸 SqliteDriver）。
 // 种子数据按演示剧本：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）。
-// 演示问数剧本也住这里（demoQueries）：test 空间离线回退的确定性编译脚本，引擎 llmSlot 只读不写。
+// 演示问数剧本不住这里：它是罐头槽位的编译脚本，在 llm/canned.ts（demoQueries）。
 
-import type { TableInfo } from "./driver";
-import type { QueryRequest } from "../../schema/request";
+import type { SourceDriver, TableInfo } from "./driver";
 import { SqliteDriver } from "./sqliteDriver";
+
+/** 测试用：每次拿全新的 fixture（不经注册表）。 */
+export function freshDriver(): SourceDriver {
+  return SqliteFixtureDriver.seeded();
+}
 
 export class SqliteFixtureDriver extends SqliteDriver {
   private comments = new Map<string, Map<string, Record<string, string>>>(); // connection → table → 列名 → 中文注释（SQLite 没有列注释，演示注释由种子手写）
@@ -94,34 +98,3 @@ export function seedDemo(d: SqliteFixtureDriver) {
   d.setComments("hr_sys", "person", { person_no: "人员编号", name: "姓名" });
   d.setComments("hr_sys", "appointment", { appt_no: "任职编号", person_no: "人员编号", title: "职务", dept_id: "部门编号", valid_from: "生效时间", valid_to: "失效时间" });
 }
-
-/* ---------- 演示问数剧本（test 空间离线回退的编译脚本） ----------
-   正则 → 查询，顺序即优先级，最后一条兜底。这是演示数据，不是引擎逻辑：
-   llmSlot 的 CannedSlot 从这里读，引擎源码不出现领域词。 */
-
-export const demoQueries: { pattern: RegExp; query: QueryRequest }[] = [
-  {
-    pattern: /每个部门|各部门|多少台|多少设备/,
-    query: { object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } },
-  },
-  {
-    pattern: /过保/,
-    query: { object: "equipment", properties: ["name", "serial_no"], filter: { in_warranty: false } },
-  },
-  {
-    pattern: /在途/,
-    query: { object: "equipment", properties: ["name", "serial_no"], filter: { status: "in_transit" } },
-  },
-  {
-    pattern: /报废/,
-    query: { object: "equipment", properties: ["name", "serial_no"], filter: { status: "scrapped" } },
-  },
-  {
-    pattern: /在役|部门/,
-    query: { object: "equipment", properties: ["name"], filter: { status: "in_service" }, expand: [{ relation: "belongs_to", properties: ["name"] }] },
-  },
-  {
-    pattern: /.*/,
-    query: { object: "equipment", properties: ["name", "status"] },
-  },
-];

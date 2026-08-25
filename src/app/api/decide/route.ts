@@ -2,7 +2,7 @@
 // 定案只能是人。薄适配：形状校验 + 写闸 → 裁决流水线 decide。GET 列出留痕。
 
 import { z } from "zod";
-import { decide } from "@/server/engine/adjudication/pairs";
+import { decide } from "@/server/engine/adjudication/decide";
 import { Verdict } from "@/server/engine/adjudication/verdict";
 import { metaStore } from "@/server/meta/store";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";

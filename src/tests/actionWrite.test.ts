@@ -104,7 +104,7 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
 
   it("先阶段后合并的多跳裁决不炸：转化动作随被吸收类的转化关系一起消亡（不复制）", async () => {
     const s = await freshStore(tmp);
-    const { adjudicate } = await import("../server/engine/adjudication/adjudicate");
+    const { adjudicate } = await import("../server/engine/adjudication/applyVerdict");
     await s.editDraft({
       op: "import_objects",
       objects: {
@@ -127,7 +127,7 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
 
   it("B 的动作引用 B 自身（set_fields 效应 object:B、pre 过滤 remapId）：随 B 消亡不搬进 A，裁决落地不弹回", async () => {
     const s = await freshStore(tmp);
-    const { adjudicate } = await import("../server/engine/adjudication/adjudicate");
+    const { adjudicate } = await import("../server/engine/adjudication/applyVerdict");
     // main2 只有唯一键（无 set_fields）；aux 有可写字段（带 set_fields）且 identity 与 main2 不同名（remapId = serial_no）
     await s.editDraft(
       {

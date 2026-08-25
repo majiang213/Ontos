@@ -2,7 +2,7 @@
 // 薄适配：形状校验 + 写闸 → 裁决流水线 computeOverlap。
 
 import { z } from "zod";
-import { computeOverlap } from "@/server/engine/adjudication/pairs";
+import { computeOverlap } from "@/server/engine/adjudication/overlap";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
 
 const bodySchema = z

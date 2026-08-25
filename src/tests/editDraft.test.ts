@@ -52,7 +52,7 @@ describe("配置存储（工作副本与发布）", () => {
     expect(await (await meta()).versionYaml(WS, 2)).toBeDefined(); // v2 快照在 onto_version
     // 引擎读已发布：新类可查（无源 → 空结果，不报错）
     const { query } = await import("../server/engine/query/query");
-    const { freshDriver } = await import("../server/engine/infra/load");
+    const { freshDriver } = await import("../server/engine/infra/fixture");
     const res = await query((await s.getPublished(WS)).config, freshDriver(), { object: "vendor" });
     expect(res.rows).toEqual([]);
   });

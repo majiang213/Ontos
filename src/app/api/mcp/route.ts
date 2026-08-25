@@ -8,7 +8,7 @@ import { z, ZodError } from "zod";
 import { EngineReject } from "@/server/errors";
 import { DraftReject } from "@/server/errors";
 import { getDraft, getPublished } from "@/server/engine/draft/current";
-import { getDriverRegistry } from "@/server/engine/infra/load";
+import { getDriverRegistry } from "@/server/engine/infra/connections";
 import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
 import { TOOLS, type ToolContext } from "./tools";
 

@@ -9,15 +9,15 @@ import type { OntologyConfig } from "@/server/schema/config";
 import { query } from "@/server/engine/query/query";
 import { runAction } from "@/server/engine/action/action";
 import { EngineReject } from "@/server/errors";
-import { actionSkeletonFor } from "@/server/engine/adjudication/adjudicate";
-import { proposeObjectsFor } from "@/server/engine/llmSlot";
+import { actionSkeletonFor } from "@/server/engine/draft/skeletons";
+import { proposeObjectsFor } from "@/server/engine/llm/slot";
 import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/engine/draft/views";
-import { listTables } from "@/server/engine/infra/load";
+import { listTables } from "@/server/engine/infra/tables";
 import type { DriverRegistry } from "@/server/engine/infra/registry";
 import { editDraft } from "@/server/engine/draft/editDraft";
 import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
 import { metaStore } from "@/server/meta/store";
-import { withActionLog, withQueryLog } from "@/server/engine/logging";
+import { withActionLog, withQueryLog } from "@/server/engine/trail";
 
 /** 处理器上下文：空间、驱动、space 选择与取配置的两个入口。 */
 export interface ToolContext {
@@ -94,7 +94,7 @@ export const TOOLS: ToolDef[] = [
     inputSchema: json(z.object({ tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty() })),
     handler: async (ctx, args) => {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
-      // 按连接分组内省 + 逐表定位 + 槽位产草稿：组合原语（llmSlot.proposeObjectsFor，REST 同款）
+      // 按连接分组内省 + 逐表定位 + 槽位产草稿：组合原语（llm/slot.proposeObjectsFor，REST 同款）
       const draft = await proposeObjectsFor(ctx.driver, tables, (m) => new EngineReject(m));
       return { payload: { object_types: draft } };
     },

@@ -126,7 +126,7 @@ describe("连接生命周期", () => {
   });
 
   it("相对路径 sqlite 按运行态 cwd 解析并落库", async () => {
-    const { saveConnection, getDriverRegistry } = await import("../server/engine/infra/load");
+    const { saveConnection, getDriverRegistry } = await import("../server/engine/infra/connections");
     writeFileSync(join(tmp, "rel_demo.db"), "");
     const r = await saveConnection("default", { name: "rel_db", type: "sqlite", db_name: "rel_demo.db" }, false);
     expect(r.saved).toBe(true);
@@ -135,7 +135,7 @@ describe("连接生命周期", () => {
   });
 
   it("内置演示源不许覆盖；不在元库的删不了；已发布引用不能删", async () => {
-    const { saveConnection, dropConnection } = await import("../server/engine/infra/load");
+    const { saveConnection, dropConnection } = await import("../server/engine/infra/connections");
     // 内置演示 fixture 只属于 test 空间
     await expect(saveConnection("test", { name: "device_sys", type: "mysql", host: "127.0.0.1", db_name: "x" })).rejects.toThrow(/内置演示源/);
     await expect(dropConnection("test", "device_sys")).rejects.toThrow(/内置演示源不能删/);

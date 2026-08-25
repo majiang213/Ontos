@@ -11,7 +11,7 @@ import { query } from "../server/engine/query/query";
 import { createEnv, selectIndividuals } from "../server/engine/query/assemble";
 import { EngineReject } from "../server/errors";
 import { runAction } from "../server/engine/action/action";
-import { freshDriver } from "../server/engine/infra/load";
+import { freshDriver } from "../server/engine/infra/fixture";
 import { SqliteFixtureDriver, seedDemo } from "../server/engine/infra/fixture";
 import { generateValue } from "../server/engine/query/expr";
 import type { QueryRequest } from "../server/schema/request";

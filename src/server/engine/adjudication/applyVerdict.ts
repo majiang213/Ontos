@@ -1,42 +1,17 @@
-// 裁决应用 —— 把定案写进工作副本（《ontos-article.md》§3.2 五种结论的处理）。
+// 定案应用 —— 把裁决结论变成配置变换（《ontos-article.md》§3.2 五种结论的处理）。
 // 同一：合并为一个对象、挂多源。阶段：收成一类 + 派生阶段 + 转化关系 + 转化动作。
 // 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
+// 骨架（conversionAction / set_fields）的唯一构造点在 draft/skeletons.ts，这里只消费。
 
-import type { ActionDef, Filter, LinkType, OntologyConfig, WhenRule } from "../../schema/config";
+import type { ActionDef, OntologyConfig, WhenRule } from "../../schema/config";
 import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
-import { EngineReject } from "../../errors";
 import { dropClass } from "../draft/ops/editObject";
 import { mutateDraft } from "../draft/editDraft";
-import { FIELDS_UPDATE_ACTION, fieldsUpdateAction, removeFieldsUpdateKeys } from "../draft/skeletons";
+import { conversionAction, removeFieldsUpdateKeys } from "../draft/skeletons";
 import { Verdict } from "./verdict";
 
 export type { Verdict } from "./verdict";
-
-/** 转化动作骨架（唯一构造点）：前置 = 当前在早阶段 ∧ 还没转化过（$link false），效应 = 记一条转化关系。
- *  「阶段」裁决的产物与 MCP propose_action 的模板都走这里；附录 B 改骨架只动这一个函数。 */
-export function conversionAction(linkName: string, link: LinkType): ActionDef {
-  const t = link.transition!;
-  return {
-    description: `转化为${t.to}`,
-    pre: { [t.property]: t.from, $link: { [linkName]: false } },
-    effect: [{ link: linkName }],
-  };
-}
-
-/** 按类挑动作骨架（MCP propose_action 的规则单源）：本类上有转化关系给转化模板（conversionAction），
- *  否则给 set_fields 骨架（与导入自动生成的同形同名，fieldsUpdateAction）；都是草稿，不发布。
- *  选择器放这而不放 skeletons：要同时见两个构造点，skeletons 反向引本会成环（本文件已引它）。 */
-export function actionSkeletonFor(config: OntologyConfig, clsName: string): { name: string; action: ActionDef } | { name: string; action: null; reason: string } {
-  const cls = config.object_types[clsName];
-  if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
-  const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
-  if (transition) return { name: `convert_to_${transition[1].transition!.to}`, action: conversionAction(transition[0], transition[1]) };
-  const skel = fieldsUpdateAction(clsName, cls);
-  return skel
-    ? { name: FIELDS_UPDATE_ACTION, action: skel }
-    : { name: FIELDS_UPDATE_ACTION, action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" };
-}
 
 /** B 的属性并入 A（同名跳过、特有带过来），B 的源映射照搬，B 挂着的关系撤掉。
  *  识别属性不同名时（A.sn × B.serial_no）：B 的识别属性不另立，B 源条目的 fields 键改写为 A 的识别属性——

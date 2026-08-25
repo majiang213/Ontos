@@ -1,6 +1,6 @@
 // SQLite 驱动 —— 每个连接一个 node:sqlite 库（内存或文件），用真实 SQL 执行下推与写回。
 // 真驱动聚一处（pool 家族在 sqlDriver.ts）：本类只管驱动，不背演示机器——
-// 用户接入的 sqlite 文件库走本类（load.ts registerSaved）；演示种子/列注释/问数剧本在 fixture.ts（继承本类）。
+// 用户接入的 sqlite 文件库走本类（connections.ts registerSaved）；演示种子/列注释在 fixture.ts（继承本类），问数剧本在 llm/canned.ts。
 
 import { DatabaseSync } from "node:sqlite";
 import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";

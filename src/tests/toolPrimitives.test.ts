@@ -2,7 +2,7 @@
 // 两个 handler 已回 parse+调用（mcp.test.ts 端到端断言不动，是等价活证）；这里钉原语本身的分支。
 
 import { describe, expect, it } from "vitest";
-import { actionSkeletonFor } from "../server/engine/adjudication/adjudicate";
+import { actionSkeletonFor } from "../server/engine/draft/skeletons";
 import { draftClassesPayload } from "../server/engine/draft/views";
 import type { OntologyConfig } from "../server/schema/config";
 

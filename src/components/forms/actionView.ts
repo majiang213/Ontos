@@ -3,6 +3,7 @@
 // 不依赖 React。规则见《外部Agent编辑画布.md》§6。轮询 toast 与帧类型在 ../ontFrame。
 
 import type { ActionDef, OntologyConfig } from "../../server/schema/config";
+import { NAME_RE } from "../../server/schema/ops";
 import { isFromOnly } from "../../server/schema/spec/valueSpec";
 import { formLinkOk, formPreOk, formValueKind, inFormSubset, walkEffectItems, walkEffectValues } from "../../server/schema/spec/actionSpec";
 import { walkFilter } from "../../server/schema/spec/filterSpec";
@@ -124,7 +125,7 @@ export function prefillEff(def: Pick<ActionDef, "effect"> | undefined): EffRow[]
 /** 拼 def（附录 B 形状）；缺必填项返回 { ok: false, error } 由表单显示。 */
 export function buildActionDef(input: { clsName: string; name: string; description: string; preRows: PreRow[]; effRows: EffRow[] }): { ok: true; def: Record<string, unknown> } | { ok: false; error: string } {
   const { clsName, name, description, preRows, effRows } = input;
-  if (!/^[a-z][a-z0-9_]*$/.test(name.trim())) return { ok: false, error: "名字必须是小写字母/数字/下划线，字母开头" };
+  if (!NAME_RE.test(name.trim())) return { ok: false, error: "名字必须是小写字母/数字/下划线，字母开头" };
   const pre: Record<string, unknown> = {};
   for (const r of preRows) {
     if (r.kind === "prop") {

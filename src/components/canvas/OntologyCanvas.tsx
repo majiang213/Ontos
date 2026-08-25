@@ -300,7 +300,6 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
         finishConnect(c, currentSession()?.fromHandleType === "target"); // 顶点拖出时 xyflow 会给成反向，换回来
       }}
       onConnectEnd={(event) => {
-        console.log("[dbg] flow onConnectEnd", "clientX" in event ? (event as { clientX: number }).clientX : "no-x");
         // 补命中的三条纪律（已落成不补 / 命中须别个节点 / last 先更新为松手处）收在 connectSession.dropSession；
         // 命中后干什么由会话的 onDrop 定（新建 = 上面的 finishConnect；改接 = FloatingEdge 的 commitReconnect）
         if ("clientX" in event) dropSession(event.clientX, event.clientY, (p) => rf.screenToFlowPosition(p));

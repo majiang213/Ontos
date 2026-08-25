@@ -1,7 +1,7 @@
 // 过滤运算符表 —— 内存比较与下推编成 Condition 的唯一出处。
-// SQL 文本仍由 driver 按 Condition 渲染（方言接缝）；「空=至今」作用在哪些运算符上只在这里定。
+// SQL 文本仍由 driver 按 Condition 渲染（方言接缝）；「空=至今」的运算符名单在 schema/config（单源），这里只消费。
 
-import { FILTER_OPS } from "../../schema/config";
+import { FILTER_OPS, treatsNullAsUntilNow } from "../../schema/config";
 import type { Condition, CondOp } from "../infra/driver";
 
 /** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。 */
@@ -9,11 +9,6 @@ export function isOpObject(v: unknown): v is Record<string, unknown> {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
   const keys = Object.keys(v);
   return keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k));
-}
-
-/** date 空值按至今：内存侧 actual 为空时这些运算符成立；SQL 侧 NULL 也算满足。 */
-export function treatsNullAsUntilNow(op: string): boolean {
-  return op === "gt" || op === "gte";
 }
 
 const num = (v: unknown) => typeof v === "number";

@@ -200,143 +200,186 @@ function rejectIfDerived(cls: Cls, prop: string) {
   if (def.derived) throw new Error(`派生属性不能写入：${cls.name}.${prop}`);
 }
 
-/* ---------- 写回：表在哪、插还是改，按效应和 sources 推出 ---------- */
+/* ---------- 写回：表在哪、插还是改，按效应和 sources 推出 ----------
+   project 只做分派；四种写回各一个函数。两层分清：「哪些源能承接这次变化」（承接规则）
+   与「这一行怎么插/改、方言怎么归一」（单源写入细节）——后者收在各函数内部的小函数里。 */
 
 const err = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+type SourceEntry = NonNullable<OntologyConfig["object_types"][string]["sources"]>[string];
+
 async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Promise<ProjectionRecord[]> {
+  if (p.kind === "update") return projectUpdate(env, p, ctx);
+  if (p.kind === "create") return projectCreate(env, p, ctx);
+  if (p.kind === "link") return projectLink(env, p, req);
+  return projectDelete(env, p);
+}
+
+/** 源能不能承接这次 update：第 3 步在该源读到了行，且所改属性全部映射了列。 */
+function carriesUpdate(row: Record<string, unknown> | null, entry: SourceEntry, changed: string[]): boolean {
+  return row != null && changed.every((prop) => entry.fields[prop]);
+}
+
+async function projectUpdate(env: Env, p: Extract<Planned, { kind: "update" }>, ctx: EvalContext): Promise<ProjectionRecord[]> {
+  const out: ProjectionRecord[] = [];
+  const changed = Object.keys(p.setSpec);
+  for (const target of p.targets) {
+    let setVals: Record<string, unknown>;
+    try {
+      const evalCtx: EvalContext = {
+        ...ctx,
+        current: currentView(p.cls, target),
+        currentDerived: (prop) => evalDerived(p.cls, target, prop, env, ctx),
+      };
+      setVals = Object.fromEntries(
+        Object.entries(p.setSpec).map(([prop, spec]) => [prop, resolveValue(spec, prop, evalCtx)])
+      );
+    } catch (e) {
+      out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 取值失败：${err(e)}` });
+      continue;
+    }
+    let handled = 0;
+    for (const [srcName, entry] of sourcesOf(p.cls)) {
+      const row = target.rows[srcName];
+      if (!carriesUpdate(row, entry, changed)) continue; // 没行 / 没映射全：这源不承接
+      handled++; // 有源承接才计数；尝试后失败按各源条目记
+      out.push(await updateOneSource(env, p, srcName, entry, row!, setVals, changed));
+    }
+    if (handled === 0) {
+      out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 没有来源能承接这次变化（字段没映射，或源库里没这行）` });
+    }
+  }
+  return out;
+}
+
+/** 条件更新一个源：识别列 = 读到的键，且要改的列仍等于读到的值。0 行不等于失败——见 rereadMatchesTarget。 */
+async function updateOneSource(
+  env: Env,
+  p: Extract<Planned, { kind: "update" }>,
+  srcName: string,
+  entry: SourceEntry,
+  row: Record<string, unknown>,
+  setVals: Record<string, unknown>,
+  changed: string[]
+): Promise<ProjectionRecord> {
+  const driver = env.driver;
+  try {
+    const dialect = dialectFor(driver, entry.connection);
+    const set: Record<string, unknown> = {};
+    for (const prop of changed) set[entry.fields[prop]] = toColumnValue(setVals[prop], p.cls.def.properties[prop]?.type, dialect);
+    const keyCol = keyColumn(p.cls, entry);
+    const conds = [
+      { column: keyCol, op: "eq" as const, value: row[keyCol] },
+      ...changed.map((prop) => ({ column: entry.fields[prop], op: "eq" as const, value: row[entry.fields[prop]] ?? null })),
+    ];
+    const n = await driver.update(entry.connection, entry.table, set, conds);
+    if (n > 0) return { source: srcName, table: entry.table, op: "update", ok: true };
+    const already = await rereadMatchesTarget(env, entry, keyCol, row[keyCol], changed, set);
+    return already
+      ? { source: srcName, table: entry.table, op: "update", ok: true, note: "已是目标值，没重复写" }
+      : { source: srcName, table: entry.table, op: "update", ok: false, error: "条件更新未命中（行可能已被并发改动）" };
+  } catch (e) {
+    return { source: srcName, table: entry.table, op: "update", ok: false, error: err(e) };
+  }
+}
+
+/** MySQL 同值不改记 0 行：按键重读核对，与写入的列值比对，已是目标值算幂等命中。
+ *  读回与写入的形态可能不同（如 MySQL DATE 列读出日期串、写入带时分秒）：过同一道字面量归一再比。 */
+async function rereadMatchesTarget(
+  env: Env,
+  entry: SourceEntry,
+  keyCol: string,
+  keyVal: unknown,
+  changed: string[],
+  set: Record<string, unknown>
+): Promise<boolean> {
+  const reread = await env.driver.select(entry.connection, entry.table, [keyCol, ...changed.map((prop) => entry.fields[prop])], [{ column: keyCol, op: "eq", value: keyVal }]);
+  const cur = reread[0];
+  if (cur == null) return false;
+  const norm = (x: unknown) => {
+    try {
+      return resolveLiteral(x);
+    } catch {
+      return x;
+    }
+  };
+  return changed.every((prop) => {
+    const col = entry.fields[prop];
+    return norm(cur[col]) === norm(set[col]) || (cur[col] ?? null) === (set[col] ?? null);
+  });
+}
+
+async function projectCreate(env: Env, p: Extract<Planned, { kind: "create" }>, ctx: EvalContext): Promise<ProjectionRecord[]> {
   const driver = env.driver;
   const out: ProjectionRecord[] = [];
-
-  if (p.kind === "update") {
-    const changed = Object.keys(p.setSpec);
-    for (const target of p.targets) {
-      let setVals: Record<string, unknown>;
-      try {
-        const evalCtx: EvalContext = {
-          ...ctx,
-          current: currentView(p.cls, target),
-          currentDerived: (prop) => evalDerived(p.cls, target, prop, env, ctx),
-        };
-        setVals = Object.fromEntries(
-          Object.entries(p.setSpec).map(([prop, spec]) => [prop, resolveValue(spec, prop, evalCtx)])
-        );
-      } catch (e) {
-        out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 取值失败：${err(e)}` });
+  const vals: Record<string, unknown> = {};
+  for (const [prop, spec] of Object.entries(p.propSpec)) {
+    // generateValue 现在异步（发号器落库）：Promise.resolve 统一解包，非 generated 的取值不受影响
+    vals[prop] = await Promise.resolve(resolveValue(spec, prop, ctx, () => generateValue(p.cls.name, prop, p.cls.def.properties[prop], ctx)));
+  }
+  // 承接规则：源映射了全部所赋属性
+  const targets = sourcesOf(p.cls).filter(([, entry]) => Object.keys(p.propSpec).every((prop) => entry.fields[prop]));
+  if (targets.length === 0) throw new Error(`没有源能承接 ${p.cls.name} 的全部所赋属性`);
+  for (const [srcName, entry] of targets) {
+    try {
+      if (await alreadyInserted(env, p, entry, vals)) {
+        out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有这行，没重复插" });
         continue;
       }
-      let handled = 0;
-      for (const [srcName, entry] of sourcesOf(p.cls)) {
-        const row = target.rows[srcName];
-        if (!row) continue; // 第 3 步该源没行，不改
-        if (!changed.every((prop) => entry.fields[prop])) continue; // 只改映射了全部所改属性的源
-        handled++; // 有源承接才计数；尝试后失败按各源条目记
-        try {
-          const dialect = dialectFor(driver, entry.connection);
-          const set: Record<string, unknown> = {};
-          for (const prop of changed) set[entry.fields[prop]] = toColumnValue(setVals[prop], p.cls.def.properties[prop]?.type, dialect);
-          // 条件更新：识别列 = 读到的键，且要改的列仍等于读到的值
-          const keyCol = keyColumn(p.cls, entry);
-          const conds = [
-            { column: keyCol, op: "eq" as const, value: row[keyCol] },
-            ...changed.map((prop) => ({ column: entry.fields[prop], op: "eq" as const, value: row[entry.fields[prop]] ?? null })),
-          ];
-          const n = await driver.update(entry.connection, entry.table, set, conds);
-          if (n > 0) {
-            out.push({ source: srcName, table: entry.table, op: "update", ok: true });
-          } else {
-            // MySQL 同值不改记 0 行：按键重读核对，与写入的列值比对（方言归一后的值），已是目标值算幂等命中
-            const reread = await driver.select(entry.connection, entry.table, [keyCol, ...changed.map((p) => entry.fields[p])], [{ column: keyCol, op: "eq", value: row[keyCol] }]);
-            const cur = reread[0];
-            // 读回与写入的形态可能不同（如 MySQL DATE 列读出日期串、写入带时分秒）：过同一道字面量归一再比
-            const norm = (x: unknown) => {
-              try {
-                return resolveLiteral(x);
-              } catch {
-                return x;
-              }
-            };
-            const already = cur != null && changed.every((prop) => {
-              const col = entry.fields[prop];
-              return norm(cur[col]) === norm(set[col]) || (cur[col] ?? null) === (set[col] ?? null);
-            });
-            out.push(
-              already
-                ? { source: srcName, table: entry.table, op: "update", ok: true, note: "已是目标值，没重复写" }
-                : { source: srcName, table: entry.table, op: "update", ok: false, error: "条件更新未命中（行可能已被并发改动）" }
-            );
-          }
-        } catch (e) {
-          out.push({ source: srcName, table: entry.table, op: "update", ok: false, error: err(e) });
-        }
+      const row: Record<string, unknown> = {};
+      const dialect = dialectFor(driver, entry.connection);
+      for (const [prop, col] of Object.entries(entry.fields)) {
+        if (vals[prop] !== undefined) row[col] = toColumnValue(vals[prop], p.cls.def.properties[prop]?.type, dialect);
       }
-      if (handled === 0) {
-        out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 没有来源能承接这次变化（字段没映射，或源库里没这行）` });
-      }
+      await driver.insert(entry.connection, entry.table, row); // 未映射的 pk 由源库自生
+      out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
+    } catch (e) {
+      out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
     }
-    return out;
   }
+  return out;
+}
 
-  if (p.kind === "create") {
-    const vals: Record<string, unknown> = {};
-    for (const [prop, spec] of Object.entries(p.propSpec)) {
-      // generateValue 现在异步（发号器落库）：Promise.resolve 统一解包，非 generated 的取值不受影响
-      vals[prop] = await Promise.resolve(resolveValue(spec, prop, ctx, () => generateValue(p.cls.name, prop, p.cls.def.properties[prop], ctx)));
-    }
-    const targets = sourcesOf(p.cls).filter(([, entry]) => Object.keys(p.propSpec).every((prop) => entry.fields[prop]));
-    if (targets.length === 0) throw new Error(`没有源能承接 ${p.cls.name} 的全部所赋属性`);
-    for (const [srcName, entry] of targets) {
-      try {
-        // 幂等：对齐属性（源条目的 key，省略则是类的 identity）的值已有行就跳过——补偿重发不会重复插（§6.3）
-        const keyProp = entry.key ?? p.cls.def.identity;
-        const idVal = keyProp ? vals[keyProp] : undefined;
-        if (keyProp && idVal !== undefined && entry.fields[keyProp]) {
-          const keyCol = keyColumn(p.cls, entry);
-          const dup = await driver.select(entry.connection, entry.table, [keyCol], [{ column: keyCol, op: "eq", value: idVal }]);
-          if (dup.length > 0) {
-            out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有这行，没重复插" });
-            continue;
-          }
-        }
-        const row: Record<string, unknown> = {};
-        const dialect = dialectFor(driver, entry.connection);
-        for (const [prop, col] of Object.entries(entry.fields)) {
-          if (vals[prop] !== undefined) row[col] = toColumnValue(vals[prop], p.cls.def.properties[prop]?.type, dialect);
-        }
-        await driver.insert(entry.connection, entry.table, row); // 未映射的 pk 由源库自生
-        out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
-      } catch (e) {
-        out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
+/** create 幂等：对齐属性（源条目的 key，省略则是类的 identity）的值已有行就跳过——补偿重发不会重复插（§6.3）。 */
+async function alreadyInserted(env: Env, p: Extract<Planned, { kind: "create" }>, entry: SourceEntry, vals: Record<string, unknown>): Promise<boolean> {
+  const keyProp = entry.key ?? p.cls.def.identity;
+  const idVal = keyProp ? vals[keyProp] : undefined;
+  if (!keyProp || idVal === undefined || !entry.fields[keyProp]) return false;
+  const keyCol = keyColumn(p.cls, entry);
+  const dup = await env.driver.select(entry.connection, entry.table, [keyCol], [{ column: keyCol, op: "eq", value: idVal }]);
+  return dup.length > 0;
+}
+
+async function projectLink(env: Env, p: Extract<Planned, { kind: "link" }>, req: ActionRequest): Promise<ProjectionRecord[]> {
+  const driver = env.driver;
+  const out: ProjectionRecord[] = [];
+  // 转化：插入该类里第 3 步没有行、又映射了识别字段的源；值取读到的个体属性，写回不再查一遍
+  const cls = mustCls(env.config, req.object);
+  const subject = p.subject;
+  for (const [srcName, entry] of sourcesOf(cls)) {
+    if (subject.rows[srcName] != null) continue; // 已有行的源不动
+    const idProp = cls.def.identity;
+    if (!idProp || !entry.fields[idProp]) continue;
+    try {
+      const row: Record<string, unknown> = {};
+      const dialect = dialectFor(driver, entry.connection);
+      for (const [prop, col] of Object.entries(entry.fields)) {
+        const v = prop === idProp ? req.identity : propValue(cls, subject, prop);
+        if (v !== undefined && v !== null) row[col] = toColumnValue(v, cls.def.properties[prop]?.type, dialect);
       }
+      await driver.insert(entry.connection, entry.table, row);
+      out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
+    } catch (e) {
+      out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
     }
-    return out;
   }
+  return out;
+}
 
-  if (p.kind === "link") {
-    // 转化：插入该类里第 3 步没有行、又映射了识别字段的源；值取读到的个体属性，写回不再查一遍
-    const cls = mustCls(env.config, req.object);
-    const subject = p.subject;
-    for (const [srcName, entry] of sourcesOf(cls)) {
-      if (subject.rows[srcName] != null) continue; // 已有行的源不动
-      const idProp = cls.def.identity;
-      if (!idProp || !entry.fields[idProp]) continue;
-      try {
-        const row: Record<string, unknown> = {};
-        const dialect = dialectFor(driver, entry.connection);
-        for (const [prop, col] of Object.entries(entry.fields)) {
-          const v = prop === idProp ? req.identity : propValue(cls, subject, prop);
-          if (v !== undefined && v !== null) row[col] = toColumnValue(v, cls.def.properties[prop]?.type, dialect);
-        }
-        await driver.insert(entry.connection, entry.table, row);
-        out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
-      } catch (e) {
-        out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
-      }
-    }
-    return out;
-  }
-
-  // delete：删掉第 3 步读到行的那些源上的行
+/** delete：删掉第 3 步读到行的那些源上的行。 */
+async function projectDelete(env: Env, p: Extract<Planned, { kind: "delete" }>): Promise<ProjectionRecord[]> {
+  const driver = env.driver;
+  const out: ProjectionRecord[] = [];
   for (const target of p.targets) {
     for (const [srcName, entry] of sourcesOf(p.cls)) {
       if (!target.rows[srcName]) continue;

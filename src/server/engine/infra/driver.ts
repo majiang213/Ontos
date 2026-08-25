@@ -1,9 +1,9 @@
 // 源驱动抽象 —— 引擎与源库之间的唯一接口。
 // 引擎把对某个源的需求编成「列 + 条件」，驱动翻成方言 SQL 下推。
 // 条件里的 column 已经是源列名（经 sources.fields 翻好），驱动不认属性名。
-// 「空=至今」作用在哪些运算符上见 filterOp.treatsNullAsUntilNow。
+// 「空=至今」作用在哪些运算符上见 schema/config.treatsNullAsUntilNow（运算符语义单源，本层不再上指 query）。
 
-import { treatsNullAsUntilNow } from "../query/filterOp";
+import { treatsNullAsUntilNow } from "../../schema/config";
 
 export type CondOp =
   | "eq" | "ne" | "lt" | "lte" | "gt" | "gte"

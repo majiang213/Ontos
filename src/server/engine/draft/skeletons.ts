@@ -1,9 +1,10 @@
-// 动作骨架：set_fields 的唯一构造点与级联维护。
-// 转化骨架（conversionAction）在 adjudicate.ts；这里管导入时每个新类自动补的「更新字段」。
-// 生成要模型、执行不要——这条动作连模型也不用：形状固定，代码构造，过 set_action 同一份校验。
+// 动作骨架 —— 两类骨架的唯一构造点：set_fields（导入时每个新类自动补，含级联维护）与转化骨架（conversionAction，「阶段」裁决的产物）。
+// actionSkeletonFor 也住这里：按类挑骨架是 MCP propose_action 的规则单源，要同时见两个构造点。
+// 生成要模型、执行不要——set_fields 连模型也不用：形状固定，代码构造，过 set_action 同一份校验。
 
-import type { ActionDef, ObjectType } from "../../schema/config";
+import type { ActionDef, LinkType, ObjectType, OntologyConfig } from "../../schema/config";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
+import { EngineReject } from "../../errors";
 
 /** 固定动作名：调用方（run_action）、文档、测试都引它，不让模型起名。 */
 export const FIELDS_UPDATE_ACTION = "set_fields";
@@ -56,4 +57,28 @@ export function removeFieldsUpdateKeys(clsName: string, cls: ObjectType, names: 
     delete cls.actions![FIELDS_UPDATE_ACTION];
     if (Object.keys(cls.actions!).length === 0) delete cls.actions; // 空 map 会让 dirty 收不回来，删干净
   }
+}
+
+/** 转化动作骨架（唯一构造点）：前置 = 当前在早阶段 ∧ 还没转化过（$link false），效应 = 记一条转化关系。
+ *  「阶段」裁决的产物与 MCP propose_action 的模板都走这里；附录 B 改骨架只动这一个函数。 */
+export function conversionAction(linkName: string, link: LinkType): ActionDef {
+  const t = link.transition!;
+  return {
+    description: `转化为${t.to}`,
+    pre: { [t.property]: t.from, $link: { [linkName]: false } },
+    effect: [{ link: linkName }],
+  };
+}
+
+/** 按类挑动作骨架（MCP propose_action 的规则单源）：本类上有转化关系给转化模板（conversionAction），
+ *  否则给 set_fields 骨架（与导入自动生成的同形同名，fieldsUpdateAction）；都是草稿，不发布。 */
+export function actionSkeletonFor(config: OntologyConfig, clsName: string): { name: string; action: ActionDef } | { name: string; action: null; reason: string } {
+  const cls = config.object_types[clsName];
+  if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
+  const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
+  if (transition) return { name: `convert_to_${transition[1].transition!.to}`, action: conversionAction(transition[0], transition[1]) };
+  const skel = fieldsUpdateAction(clsName, cls);
+  return skel
+    ? { name: FIELDS_UPDATE_ACTION, action: skel }
+    : { name: FIELDS_UPDATE_ACTION, action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" };
 }

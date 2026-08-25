@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../server/engine/query/questions";
-import type { LlmSlot } from "../server/engine/llmSlot";
+import type { LlmSlot } from "../server/engine/llm/slot";
 import { cleanupRuntime, setupRuntime } from "./helpers";
 
 describe("期望结果写法", () => {

@@ -4,9 +4,9 @@
 
 import { queryRequestSchema } from "@/server/schema/request";
 import { query } from "@/server/engine/query/query";
-import { getDriverRegistry } from "@/server/engine/infra/load";
+import { getDriverRegistry } from "@/server/engine/infra/connections";
 import { getPublished } from "@/server/engine/draft/current";
-import { withQueryLog } from "@/server/engine/logging";
+import { withQueryLog } from "@/server/engine/trail";
 import { bodyJson, respond, wsOf } from "@/app/api/_shared";
 
 export async function POST(req: Request) {

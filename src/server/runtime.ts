@@ -9,7 +9,7 @@
 import type { MetaStore } from "./meta/store";
 import type { DriverRegistry } from "./engine/infra/registry";
 import type { Store as DraftStore } from "./engine/draft/current";
-import type { LlmSlot } from "./engine/llmSlot";
+import type { LlmSlot } from "./engine/llm/slot";
 
 export interface OntosRuntime {
   cwd: string;

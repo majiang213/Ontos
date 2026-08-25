@@ -78,7 +78,7 @@ describe("set_fields：导入自动生成与级联", () => {
   it("部分重叠：公共属性挪到上位对象，两类的 set_fields 摘键", async () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "import_objects", objects: { pa: mkCls("a_no", ["name", "a_only"], "ca"), pb: mkCls("b_no", ["name", "b_only"], "cb") } }, WS);
-    const { decide } = await import("../server/engine/adjudication/pairs");
+    const { decide } = await import("../server/engine/adjudication/decide");
     const { Verdict } = await import("../server/engine/adjudication/verdict");
     await decide({ class_a: "pa", class_b: "pb", verdict: Verdict.Overlap }, WS);
     const d = (await s.getDraft(WS)).draft;
@@ -91,7 +91,7 @@ describe("set_fields：导入自动生成与级联", () => {
   it("同一：留下类的 set_fields 不吸收并入属性，被并类的动作随之消失", async () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "import_objects", objects: { sa: mkCls("x", ["p1"], "csa"), sb: mkCls("x", ["p2"], "csb") } }, WS);
-    const { decide } = await import("../server/engine/adjudication/pairs");
+    const { decide } = await import("../server/engine/adjudication/decide");
     const { Verdict } = await import("../server/engine/adjudication/verdict");
     await decide({ class_a: "sa", class_b: "sb", verdict: Verdict.Same }, WS);
     const d = (await s.getDraft(WS)).draft;

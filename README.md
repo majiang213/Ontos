@@ -82,14 +82,15 @@ src/
 │   │   │                   ops/（op 分派 index + 厚不变量 editObject/editProperty/editLink/importObjects/replaceObject）、
 │   │   │                   refs（删除前的引用扫描）、sameConfig（结构比较）、validate（语义校验 + 动作形状四查）、
 │   │   │                   skeletons（set_fields 骨架与级联）、views（配置三视图）、lineage（列→属性反查）
-│   │   ├── adjudication/   adjudicate（裁决落地 + 转化骨架）、pairs（裁决流水线：候选/交集率/定案）、
-│   │   │                   eligibility（候选对资格谓词）、overlap / normalize（交集率与归一化）、
-│   │   │                   verdict（五关系类型枚举与倾向文案）
+│   │   ├── adjudication/   applyVerdict（定案 → 配置变换）、candidates（疑似重复的候选）、
+│   │   │                   overlap / normalize（交集率编排+算率 / 归一化）、decide（人定案：闸→写→留痕）、
+│   │   │                   eligibility（候选对资格谓词）、verdict（五关系类型枚举与倾向文案）
 │   │   ├── infra/          driver（源驱动接口 + 方言）、sqlDriver（MySQL/PG）、sqliteDriver（SQLite 文件）、
-│   │   │                   fixture（演示内存库，继承 sqliteDriver）、registry / load（驱动注册表 + 连接生命周期）、
-│   │   │                   workspace（工作空间）
-│   │   ├── logging.ts      问数/动作留痕编排
-│   │   └── llmSlot.ts      模型槽位 + 离线回退
+│   │   │                   fixture（演示内存库，继承 sqliteDriver）、registry（驱动注册表）、
+│   │   │                   connections（连接注册与生命周期）、tables（表结构发现）、workspace（工作空间）
+│   │   ├── llm/            模型槽位：slot（接口 + 槽位选择 + 组合原语）、canned（离线回退 + 演示剧本）、
+│   │   │                   aiSdk（真模型 + 提示词）、identityHint（识别字段猜测规则单源）
+│   │   └── trail.ts        问数/动作留痕编排
 │   ├── schema/             Zod 形状：config（本体配置）、request（问数/动作请求）、ops（编辑操作）
 │   │   └── spec/           形状规约：filterSpec（$link 过滤树的唯一遍历入口与关系解析）、
 │   │                       valueSpec（取值来源原语：{ from: X } 词表的唯一事实源）、
@@ -107,7 +108,7 @@ src/
 四条主线：
 
 - **建模流**：勾表「生成对象」→ `POST /api/propose_objects`（只建议）→ `POST /api/edit_draft` `{ op: import_objects }` 写工作副本 → `publish` 走 `validate` 校验 → `versions` 插新版本。画布读工作副本，问数与动作只读已发布快照。外部 Agent 同一套名字：MCP `propose_objects` 再 `edit_draft`（带 `base_rev` 防盖写）。开着的画布每 2 秒轮询 `/api/ontology` 的 `rev`（ETag/304），外部改动自动刷新并弹提示。
-- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/query/questions`）→ `llmSlot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `load` 按连接名找驱动 → 源库取数，内存对齐。
+- **问数流**：外部 Agent 走 `mcp` 路由的 `query` 工具（用法见 `skills/ontos-query/SKILL.md`）；站内只剩验收跑批（`questions?run=1` → `engine/query/questions`）→ `llm/slot` 产结构化查询（无 key 走离线回退）→ `schema/request` 校验 → `query` 编译下推 → `connections` 按连接名找驱动 → 源库取数，内存对齐。
 - **动作流**：外部 Agent 走 `mcp` 路由的 `run_action` 工具（用法见 `skills/ontos-action-run/SKILL.md`）→ `engine/action` 核前置、定效应、按效应和 `sources` 写回源库并留痕；有 `inform` 时拼装变更事件随结果返回（外发本期预留）。
 - **边界**：业务数据永不进平台，引擎只在内存拼装；`src/server/config` 里只有本体模板和平台自己的元库。
 
@@ -181,7 +182,7 @@ URL 没有注册表：文件路径即路由（`src/app/api/ontology/route.ts` �
 | 样式 | 手写 CSS | 无 Tailwind、无 CSS-in-JS；设计 token 与组件类在 `globals.css`，组件内联样式补局部 |
 | 画布 | @xyflow/react（ReactFlow 12）+ @dagrejs/dagre | 本体画布；dagre 负责自动分层布局 |
 | 校验 | Zod 4 | 本体配置、问数/动作请求、编辑操作三套 schema；模型产出也过同一套 |
-| 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llmSlot` 的三个槽位出现；不设 key 走离线确定性回退 |
+| 模型 | Vercel AI SDK（`ai` + `@ai-sdk/xai`，OpenAI 兼容） | 只在 `llm/` 的三个槽位出现；不设 key 走离线确定性回退 |
 | 源库驱动 | `mysql2`、`pg`、`node:sqlite`（DatabaseSync） | 真源库走 mysql2/pg；用户接入的 SQLite 文件走 `sqliteDriver`；演示 fixture 与平台元库走 node:sqlite |
 | 状态 | React 自带 useState / useRef | 无状态库 |
 | 测试 | vitest 4（pool: forks） | 引擎 golden 测试 + schema 契约测试，291 个用例 |

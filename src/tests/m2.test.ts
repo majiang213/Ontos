@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { listClasses, readClass, search } from "../server/engine/draft/views";
 import { Verdict } from "../server/engine/adjudication/verdict";
-import { CannedSlot } from "../server/engine/llmSlot";
+import { CannedSlot } from "../server/engine/llm/canned";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
 
@@ -46,7 +46,7 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
   const fakeModel = { modelId: "test-model" } as never;
 
   it("合法产出过闸；乱说话的产出被 Zod 拒绝（模型当顾问不当计算器）", async () => {
-    const { AiSdkSlot } = await import("../server/engine/llmSlot");
+    const { AiSdkSlot } = await import("../server/engine/llm/aiSdk");
     const good = { object: "equipment", filter: { status: "in_service" }, properties: ["name"] };
     const slot = new AiSdkSlot(fakeModel, (async () => ({ output: good })) as never);
     expect((await slot.nlToQuery("在役设备", config, "test")).object).toBe("equipment");
@@ -55,7 +55,7 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
   });
 
   it("getSlot：没 OPENAI_API_KEY 回退罐头；有 key 没指定模型报错；有 key 有模型走真模型", async () => {
-    const { getSlot } = await import("../server/engine/llmSlot");
+    const { getSlot } = await import("../server/engine/llm/slot");
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_MODEL;
     expect(getSlot().name).toBe("canned-离线回退");
@@ -68,7 +68,7 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
   });
 
   it("罐头问数只服务 test 空间：别的空间即使有 equipment 类也拒（不静默编成演示查询）", async () => {
-    const { CannedSlot } = await import("../server/engine/llmSlot");
+    const { CannedSlot } = await import("../server/engine/llm/canned");
     const slot = new CannedSlot();
     // 回归：守卫曾是类名巧合——config 里有 equipment 就放行，任何问法都被编成演示剧本（错答案）
     await expect(slot.nlToQuery("随便问点什么", config, "default")).rejects.toThrow(/只覆盖 test 演示空间/);
@@ -76,7 +76,7 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
   });
 
   it("罐头问数只对上了类的剧本编得动：空配置下不编幽灵查询，明说该配模型 Key", async () => {
-    const { CannedSlot } = await import("../server/engine/llmSlot");
+    const { CannedSlot } = await import("../server/engine/llm/canned");
     const slot = new CannedSlot();
     await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never, "test")).rejects.toThrow(/离线回退只覆盖演示剧本/);
   });
