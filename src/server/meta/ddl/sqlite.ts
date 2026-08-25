@@ -1,5 +1,9 @@
 // 元库 DDL（SQLite 方言）——建库单源：一种数据库一个文件（mysql.ts 同构手写，不做字符串替换派生）。
 // 不兼容旧库：老库直接删掉重建（MIGRATIONS/工作行迁移/stitchWorkingPack 已随旧兼容机制一并删除）。
+// 注释纪律：SQLite 没有 COMMENT 语法，行内 -- 注释是唯一的注释载体（mysql.ts 的 COMMENT 子句是这份文本的投影，两边对齐维护）。
+// 与 mysql.ts 的方言差异四处：① 自增列型 INTEGER AUTOINCREMENT；② 浮点型 REAL；③ 时间列 TEXT DEFAULT (datetime('now'))；
+// ④ 索引单独成句（CREATE INDEX IF NOT EXISTS；MySQL 无此语法，索引内联进表定义）。
+// 外键两方言都声明：本侧靠 SqliteBackend 打开时的 PRAGMA foreign_keys = ON 生效（backends.ts），MySQL 侧天生生效。
 
 export const SQLITE_DDL = `
 CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个空间一行，只登记身份（画布内容全在 onto_version 的工作行）
@@ -10,18 +14,18 @@ CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个�
 );
 CREATE TABLE IF NOT EXISTS onto_version (     -- 版本链 + 工作行：编号行是不可变历史；version IS NULL 的是工作行（每空间恰一行的可变头）
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   version INTEGER,                            -- 已发布编号（首版为 1）；NULL = 工作行
   yaml TEXT NOT NULL DEFAULT '',              -- 本体 YAML 全量快照（不存增量 diff）；工作行恒空串（内容在 canvas_json）
   canvas_json TEXT,                           -- 画布包 JSON：{ config, layout, edgeBends, edgePins }；老编号行可能没有
   origin TEXT NOT NULL DEFAULT 'publish',     -- 恒 publish（工作行带默认值，不读它）；rollback 行只见于历史库
   note TEXT,                                  -- 发布说明
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (workspace_id, version)
+  UNIQUE (workspace_id, version)              -- 编号行不重复；工作行靠 NULL 不参与约束——「每空间恰一行」的保证者是每空间写队列（runtime tails）
 );
 CREATE TABLE IF NOT EXISTS conn_source (      -- 数据源连接：本体按 name 引用
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   name TEXT NOT NULL,                         -- 连接名
   type TEXT NOT NULL,                         -- mysql | pg | sqlite
   host TEXT,
@@ -38,7 +42,7 @@ CREATE TABLE IF NOT EXISTS conn_source (      -- 数据源连接：本体按 nam
 );
 CREATE TABLE IF NOT EXISTS adj_decision (     -- 裁决留痕：人定的，不可重算
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   version INTEGER,                            -- 结论生效的已发布版本，发布时回填
   class_a TEXT NOT NULL,                      -- 被裁决的两个类
   class_b TEXT NOT NULL,
@@ -53,7 +57,7 @@ CREATE TABLE IF NOT EXISTS adj_decision (     -- 裁决留痕：人定的，不�
 );
 CREATE TABLE IF NOT EXISTS adj_overlap (      -- 交集计算记录：机器算的，可重算；只落计数，标识值集合不落盘
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   class_a TEXT NOT NULL,                      -- 被比对的两个类
   class_b TEXT NOT NULL,
   norm_rule TEXT,                             -- 归一化规则
@@ -66,7 +70,7 @@ CREATE TABLE IF NOT EXISTS adj_overlap (      -- 交集计算记录：机器算�
 );
 CREATE TABLE IF NOT EXISTS ont_question (     -- 验收问题集
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   version INTEGER,                            -- 最后一次跑批时的本体版本
   question TEXT NOT NULL,                     -- 自然语言问题
   expected TEXT,                              -- 纯数字=比对行数；字段=值=至少一行对上；留空=能查出就算过
@@ -75,7 +79,7 @@ CREATE TABLE IF NOT EXISTS ont_question (     -- 验收问题集
 );
 CREATE TABLE IF NOT EXISTS log_query (        -- 问数留痕：存请求与成败，不存结果集
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   version INTEGER,                            -- 查询依据的本体版本
   session_id TEXT,                            -- 关联的会话
   model TEXT,                                 -- 编查询用的模型（离线回退也记）
@@ -89,7 +93,7 @@ CREATE TABLE IF NOT EXISTS log_query (        -- 问数留痕：存请求与成�
 );
 CREATE TABLE IF NOT EXISTS log_action (       -- 动作留痕
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   version INTEGER,                            -- 动作依据的本体版本
   action TEXT NOT NULL,                       -- 动作名
   object_type TEXT NOT NULL,                  -- 类名
@@ -102,9 +106,14 @@ CREATE TABLE IF NOT EXISTS log_action (       -- 动作留痕
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS meta_seq (         -- 发号器：generate 的 sequence 片段按名取号
-  workspace_id INTEGER NOT NULL,
+  workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),
   name TEXT NOT NULL,                         -- 序列名（如 appt_no）；按空间分开，各自起号
   value INTEGER NOT NULL,                     -- 当前已发到几号
   PRIMARY KEY (workspace_id, name)
 );
+-- 空间维扫描的索引（UNIQUE/PK 左前缀已覆盖的不重复建）：SQLite 支持 IF NOT EXISTS，幂等由它兜
+CREATE INDEX IF NOT EXISTS idx_adj_decision_ws ON adj_decision (workspace_id);
+CREATE INDEX IF NOT EXISTS idx_ont_question_ws ON ont_question (workspace_id);
+CREATE INDEX IF NOT EXISTS idx_log_query_ws_time ON log_query (workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_log_action_ws_time ON log_action (workspace_id, created_at);
 `;

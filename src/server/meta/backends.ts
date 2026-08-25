@@ -25,6 +25,7 @@ export class SqliteBackend implements MetaBackend {
   private db: DatabaseSync;
   constructor(file: string) {
     this.db = new DatabaseSync(file);
+    this.db.exec("PRAGMA foreign_keys = ON"); // DDL 声明的 FK 靠这句生效（SQLite 默认不查）；父行先插由 wsId 兜，开启安全
     this.db.exec(SQLITE_DDL);
   }
 
