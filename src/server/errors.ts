@@ -182,8 +182,7 @@ export const MSG = {
   transitionNoNestedExpand: (relation: string) => `转化关系不支持嵌套展开：${relation}`,
   propertiesPropUnknown: (cls: string, p: string) => `properties 里的名字对不上配置：${cls}.${p}`,
   aggregateUnknown: (op: string) => `未知聚合：${op}`,
-  expandFilterConflict: (relation: string, k: string) => `展开 ${relation} 的目标侧过滤 ${k} 与配对字段冲突`,
-  filterConflictsPair: (link: string, k: string) => `目标侧过滤 ${k} 与关系 ${link} 的配对字段冲突`, // 兄弟文案参数同序（link 在前），防传反
+  filterConflictsPair: (link: string, k: string) => `目标侧过滤 ${k} 与关系 ${link} 的配对字段冲突`,
 
   // 基础设施 infra（连接生命周期、驱动注册表、工作空间、LLM 槽位）
   sqliteNeedsPath: "sqlite 连接必须给文件路径（db_name）",

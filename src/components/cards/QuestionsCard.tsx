@@ -48,7 +48,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
 
   /** 状态标签：未跑 / 待重跑（上次跑的版本落后于当前已发布）/ vN 结果。 */
   const tagOf = (q: QItem): { label: string; cls: string; hint?: string } => {
-    if (q.status === Q_STATUS.pending) return { label: "未跑", cls: "tag" };
+    if (q.status === Q_STATUS.pending) return { label: Q_STATUS.pending, cls: "tag" };
     if (q.version && curVer && q.version < curVer) {
       return { label: "待重跑", cls: "tag tag-warn", hint: `上次在 v${q.version} 跑，结果「${q.status}」；本体已到 v${curVer}` };
     }

@@ -39,9 +39,10 @@ export class AiSdkSlot implements LlmSlot {
       description: t.description,
       properties: Object.keys(t.properties),
       identity: t.identity,
-      relations: Object.values(config.link_types)
-        .filter((l) => l.from === name || l.to === name)
-        .map((l) => (l.from === name ? `${l.from} -[${Object.keys(config.link_types).find((k) => config.link_types[k] === l)}]-> ${l.to}` : `${l.from} <-[${l.inverse}]- ${l.to}`)),
+      relations: Object.entries(config.link_types)
+        .filter(([, l]) => l.from === name || l.to === name)
+        // 反向只在有 inverse 时给（与 views.readClass 同口径；没有反向名的关系从本类看没有出站名）
+        .flatMap(([linkName, l]) => (l.from === name ? [`${l.from} -[${linkName}]-> ${l.to}`] : l.inverse ? [`${l.from} <-[${l.inverse}]- ${l.to}`] : [])),
     }));
     const { output } = await this.gen({
       model: this.model,

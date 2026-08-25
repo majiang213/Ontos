@@ -365,7 +365,7 @@ async function projectLink(env: Env, p: Extract<Planned, { kind: "link" }>, req:
   const driver = env.driver;
   const out: ProjectionRecord[] = [];
   // 转化：插入该类里第 3 步没有行、又映射了识别字段的源；值取读到的个体属性，写回不再查一遍
-  const cls = mustCls(env.config, req.object);
+  const cls = p.cls; // 计划成品带类（planEffect 已钉死 cls≡reqCls），不再回 config 补
   const subject = p.subject;
   for (const [srcName, entry] of sourcesOf(cls)) {
     if (subject.rows[srcName] != null) continue; // 已有行的源不动

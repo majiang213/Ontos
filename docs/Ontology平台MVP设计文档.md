@@ -10,7 +10,7 @@
 > V2.3.1 变更：DDL 定为 MySQL 8 方言（AUTO_INCREMENT、MEDIUMTEXT、ENGINE/CHARSET 后缀、ON UPDATE CURRENT_TIMESTAMP），PG/SQLite 适配见方言注记。
 > V2.4 变更：裁决分级——合并类永远人定案，仅名称相似类可升级为机器定案、人抽检，升级节奏由裁决接受率决定（§2、§3 M3）。
 > V2.5 变更：工作空间 B 方案落地，元库表清单定稿为 9 张（onto_workspace、onto_version、conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）——onto_ontology 与 onto_draft 取消（当时草稿仍是进程内存态；本体锚点不再需要，版本链直接挂 workspace_id）。演示数据填充改到 `test` 空间（default 与新建空间一样空白起步，与是否配置 LLM Key 无关）。界面术语：「识别字段」改叫「唯一键」。
-> V2.6 变更（2026-08-24）：跟代码对账。工作副本落在 `onto_version` 的工作行（`version IS NULL` 的可变头，`canvas_json` 装本体+摆位+弯折+钉点），不再是进程内存态。源库方言增加 SQLite 文件。元库 DDL 按方言分文件（`src/server/meta/ddl/sqlite.ts` 与 `mysql.ts`），不做字符串替换。对外主入口是 MCP 九个工具（含 `apply_draft` 写工作副本）。告知：变更事件随动作结果返回，外发仍预留。验收问题集可对草稿试跑（不落记录）。
+> V2.6 变更（2026-08-24）：跟代码对账。工作副本落在 `onto_version` 的工作行（`version IS NULL` 的可变头，`canvas_json` 装本体+摆位+弯折+钉点），不再是进程内存态。源库方言增加 SQLite 文件。元库 DDL 按方言分文件（`src/server/meta/ddl/sqlite.ts` 与 `mysql.ts`），不做字符串替换。对外主入口是 MCP 九个工具（含 `edit_draft` 写工作副本）。告知：变更事件随动作结果返回，外发仍预留。验收问题集可对草稿试跑（不落记录）。
 
 ## 1. 产品定位
 
@@ -462,7 +462,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 **循环分三种，只禁一种。** 禁止的是模型自转的 ReAct 循环：建模没有即时反馈信号，数据库不会告诉模型建错了，模型自己判自己对错只会漂移；每次循环走的路径不同，标注库回归就没法跑；循环的中间产物没人读，裁决权也就丢了。要保留的是人驱动的再生成，以及确定性流水线里嵌多个模型槽位：表多了逐批产类，由代码做确定性合并，再产关系建议与动作草稿——下一步走什么由代码决定，停不停由人决定，模型只在槽位里填空。槽位再多也落在「写出配置」这一个用途里；模型的另一个用途是把自然语言编成查询请求（验收问题集跑批；没有自然语言 → 动作的槽），两个用途之外没有模型。真想要 agent 式探索，循环放在 Ontos 之外，由外部 Agent 驱动，Ontos 内部永远保持确定性。
 
-**入口两个，内核同一套**：画布点「生成对象」与 MCP 同一套名字——`propose_objects` 只建议，再 `apply_draft` `{ op: import_objects }` 落地。Claude Code 等外部 Agent 经 MCP 调九个工具（`query` / `run_action` / `propose_objects` / `propose_action` / `list_classes` / `read_class` / `search` / `list_tables` / `apply_draft`）。发布、裁决、连接、回滚仍是人的关卡，不做成 MCP 写工具。
+**入口两个，内核同一套**：画布点「生成对象」与 MCP 同一套名字——`propose_objects` 只建议，再 `edit_draft` `{ op: import_objects }` 落地。Claude Code 等外部 Agent 经 MCP 调九个工具（`query` / `run_action` / `propose_objects` / `propose_action` / `list_classes` / `read_class` / `search` / `list_tables` / `edit_draft`）。发布、裁决、连接、回滚仍是人的关卡，不做成 MCP 写工具。
 
 **持久化与即用即弃**：本体、映射、动作定义、`log_query`、`log_action` 持久化；每次执行编出的 SQL 即用即弃；业务行留在原库。
 

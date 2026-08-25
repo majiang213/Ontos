@@ -7,7 +7,8 @@ import type { Filter } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
 import { EngineReject, MSG } from "../../errors";
 import { resolveLiteral, type EvalContext } from "./expr";
-import { compare, isOpObject } from "./filterOp";
+import { compare } from "./filterOp";
+import { isOpObject } from "../../schema/spec/filterSpec";
 
 /** 操作数求值（异步：派生属性可能要查源）：字面量、ISO 日期串、日期表达式、{ property, from }、{ from: identity }。 */
 export async function resolveOperand(v: unknown, ctx: EvalContext): Promise<unknown> {

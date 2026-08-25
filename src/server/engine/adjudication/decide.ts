@@ -54,7 +54,7 @@ export async function decide(input: DecideInput, ws: string = DEFAULT_WS): Promi
       decided_by: input.decided_by ?? "画布操作者",
     });
   } catch {
-    recorded = false;
+    recorded = false; // 留痕失败不挡定案——裁决已进工作副本，记录缺失由返回值如实上报
   }
   return { ok: true, recorded };
 }

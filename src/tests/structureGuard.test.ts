@@ -1,6 +1,8 @@
 // 结构守门 —— 评审六轴里能机器化的两条，写成测试永不过期：
-// ① 用户可见错误文案唯一出处是 MSG（src/server/errors.ts），throw / error / note / warning / reason / zod message
-//    出现内联中文即红——不许拿魔法字串绕过单源。
+// ① 用户可见错误文案唯一出处是 MSG（src/server/errors.ts），throw / reject 阶段消息 / error / note / warning /
+//    zod message 出现内联中文即红——不许拿魔法字串绕过单源。
+//    （reason 通道不机守：裁决建议的 reason 是展示文案不是报错（llm/canned 的 PairAdvice），机守会误伤；
+//    报错向的 reason 已有实例收在 MSG.noWritableProps。）
 // ② 调用方向：schema 最底、meta 不碰 engine、infra 不上指 engine 其它包、draft 读路径纯函数层不 import 写路径、
 //    errors.ts 保持纯叶子（前端经 purityBoundary 引它）。值侧 import 才查；type-only 编译期擦除，放行。
 
@@ -102,7 +104,7 @@ const DIRECTION_RULES: { area: RegExp; forbidden: string[]; why: string }[] = [
 describe("结构守门", () => {
   const files = [...walk(join(SRC, "server")), ...walk(join(SRC, "app")), ...walk(join(SRC, "components"))].filter((f) => /\.tsx?$/.test(f));
 
-  it("① 错误文案唯一出处是 MSG：无内联中文魔法字串（throw / error / note / warning / reason / zod message）", () => {
+  it("① 错误文案唯一出处是 MSG：无内联中文魔法字串（throw / reject / error / note / warning / zod message）", () => {
     const offenders: string[] = [];
     for (const f of files) {
       if (COPY_HOMES.has(f)) continue; // 词表的家豁免——中文本该住这里

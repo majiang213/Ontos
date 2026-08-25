@@ -186,7 +186,7 @@ _UI 说法_：取数路径。
 | 表结构 | 「表结构」抽屉 | `/api/list_tables` | `resolveTableInfos` | `list_tables` |
 | 疑似重复 | 「疑似重复」 | `/api/list_candidates` | `listCandidates`（建议原语 `proposePairs`） | 无（关卡在人） |
 | 交集率 | 「算一算交集率」 | `/api/compute_overlap` | `computeOverlap`（底层算率 `overlapRate`） | 无（关卡在人） |
-| 裁决 | 「同一/部分重叠/阶段…」 | `/api/decide` | `decide` → `applyVerdict` | 无（关卡在人） |
+| 裁决 | 「同一/部分重叠/阶段…」 | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | 无（关卡在人） |
 | 发布 / 放弃 | 「发布 vN+1」「放弃」 | `/api/publish` | `publish` / `discard` | 无（关卡在人） |
 | 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，16 个 op（14 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`，没有独立 op） | `edit_draft`（吃同一批内容 op，不含界面状态） |
 | 问数 | 问题集「全量跑一遍」/「对草稿跑一遍」 | `/api/questions`（`?run=1`，可选 `&target=draft`）、`/api/query` | `nlToQuery` + `query` | `query`（入参已是结构化查询，Ontos 不编） |

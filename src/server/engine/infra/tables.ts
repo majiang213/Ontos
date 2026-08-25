@@ -38,6 +38,7 @@ export async function listTables(
       out.push({
         connection,
         tables: await Promise.all(
+          // 采样失败降级为空采样（不拖死整表的列定义——表结构是本体的原料，采样只是附属）
           tables.map(async (t) => (opts.sample ? { ...t, sample: await registry.sample(connection, t.name, opts.sample).catch(() => []) } : t))
         ),
       });

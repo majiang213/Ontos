@@ -1,7 +1,8 @@
 // 过滤运算符表：内存比较与下推编成 Condition 走同一张表。
 
 import { describe, expect, it } from "vitest";
-import { compare, isOpObject, pushCondition } from "../server/engine/query/filterOp";
+import { compare, pushCondition } from "../server/engine/query/filterOp";
+import { isOpObject } from "../server/schema/spec/filterSpec";
 import { treatsNullAsUntilNow } from "../server/schema/config";
 import { buildSelect } from "../server/engine/infra/driver";
 

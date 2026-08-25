@@ -120,7 +120,7 @@ async function expandItem(
     return [item.relation, (await transitionHolds(cls, ind, link, env, ctx)) ? [await project(cls, ind, item.properties, env, ctx)] : []];
   }
   const targetClsName = reversed ? link.from : link.to;
-  const merged = matchConds(cls, ind, link, reversed, item.filter, (k) => MSG.expandFilterConflict(item.relation, k));
+  const merged = matchConds(cls, ind, link, reversed, item.filter, (k) => MSG.filterConflictsPair(item.relation, k));
   if (!merged) return [item.relation, []]; // 配对值为空：关系不成立，没有目标——与 linkHolds 同语义
   const targetCls = mustCls(env.config, targetClsName);
   const sub = await selectIndividuals(env, targetClsName, {

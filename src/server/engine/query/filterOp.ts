@@ -1,13 +1,10 @@
 // 过滤运算符表 —— 内存比较与下推编成 Condition 的唯一出处。
 // SQL 文本仍由 driver 按 Condition 渲染（方言接缝）；「空=至今」的运算符名单在 schema/config（单源），这里只消费。
-// 运算符块判定 isOpObject 在 schema/spec/filterSpec（单源，此处再导出只是迁就既有消费方，不另写判定）。
+// 运算符块判定 isOpObject 在 schema/spec/filterSpec（单源），消费方直引，不经本文件中转。
 
 import { treatsExpectedNullAsUntilNow, treatsNullAsUntilNow } from "../../schema/config";
-import { isOpObject } from "../../schema/spec/filterSpec";
 import type { Condition, CondOp } from "../infra/driver";
 import { MSG } from "../../errors";
-
-export { isOpObject };
 
 const num = (v: unknown) => typeof v === "number";
 
