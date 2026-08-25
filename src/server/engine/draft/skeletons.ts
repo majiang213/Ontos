@@ -85,5 +85,5 @@ export function actionSkeletonFor(config: OntologyConfig, clsName: string): { na
   const skel = fieldsUpdateAction(clsName, cls);
   return skel
     ? { name: FIELDS_UPDATE_ACTION, action: skel }
-    : { name: FIELDS_UPDATE_ACTION, action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" };
+    : { name: FIELDS_UPDATE_ACTION, action: null, reason: MSG.noWritableProps };
 }

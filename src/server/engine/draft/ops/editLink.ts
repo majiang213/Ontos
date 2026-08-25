@@ -8,7 +8,7 @@ import { DraftReject, MSG } from "../../../errors";
 import { linkRefs } from "../refs";
 import { definedPinEnds, mergeEdgePins, renameEdgeState, setEdgePins } from "../canvasState";
 import type { DraftState } from "../canvasPack";
-import { mustType } from "./mustType";
+import { mustType } from "./subjectClass";
 
 type CreateLinkOp = Extract<DraftOp, { op: "create_link" }>;
 type DeleteLinkOp = Extract<DraftOp, { op: "delete_link" }>;

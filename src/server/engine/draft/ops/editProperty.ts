@@ -6,7 +6,7 @@ import { NAME_RE, type DraftOpInput as DraftOp } from "../../../schema/ops";
 import { DraftReject, MSG } from "../../../errors";
 import { referencesOf } from "../refs";
 import { FIELDS_UPDATE_ACTION, removeFieldsUpdateKeys, renameFieldsUpdateKey } from "../skeletons";
-import { mustType } from "./mustType";
+import { mustType } from "./subjectClass";
 
 type RemovePropertyOp = Extract<DraftOp, { op: "remove_property" }>;
 type UpdatePropertyOp = Extract<DraftOp, { op: "update_property" }>;

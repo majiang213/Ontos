@@ -4,6 +4,7 @@
 
 import type { ActionDef, OntologyConfig } from "../../server/schema/config";
 import { NAME_RE } from "../../server/schema/ops";
+import { MSG } from "../../server/errors";
 import { isFromOnly } from "../../server/schema/spec/valueSpec";
 import { formLinkOk, formPreOk, formValueKind, inFormSubset, walkEffectItems, walkEffectValues } from "../../server/schema/spec/actionSpec";
 import { walkFilter } from "../../server/schema/spec/filterSpec";
@@ -125,14 +126,14 @@ export function prefillEff(def: Pick<ActionDef, "effect"> | undefined): EffRow[]
 /** 拼 def（附录 B 形状）；缺必填项返回 { ok: false, error } 由表单显示。 */
 export function buildActionDef(input: { clsName: string; name: string; description: string; preRows: PreRow[]; effRows: EffRow[] }): { ok: true; def: Record<string, unknown> } | { ok: false; error: string } {
   const { clsName, name, description, preRows, effRows } = input;
-  if (!NAME_RE.test(name.trim())) return { ok: false, error: "名字必须是小写字母/数字/下划线，字母开头" };
+  if (!NAME_RE.test(name.trim())) return { ok: false, error: MSG.formNameBad };
   const pre: Record<string, unknown> = {};
   for (const r of preRows) {
     if (r.kind === "prop") {
-      if (!r.prop) return { ok: false, error: "前置里有一行没选字段" };
+      if (!r.prop) return { ok: false, error: MSG.formPreRowNoProp };
       pre[r.prop] = r.op === "eq" ? parseLiteral(r.value) : { ne: parseLiteral(r.value) };
     } else {
-      if (!r.link) return { ok: false, error: "前置里有一行没选关系" };
+      if (!r.link) return { ok: false, error: MSG.formPreRowNoLink };
       pre.$link = { ...((pre.$link as Record<string, unknown>) ?? {}), [r.link]: r.happened };
     }
   }
@@ -141,28 +142,28 @@ export function buildActionDef(input: { clsName: string; name: string; descripti
     if (r.kind === "update") {
       const properties: Record<string, unknown> = {};
       for (const p of r.rows) {
-        if (!p.prop) return { ok: false, error: "「把字段写成某值」里有一行没选字段" };
+        if (!p.prop) return { ok: false, error: MSG.formUpdateRowNoProp };
         properties[p.prop] = p.source === "request" ? { from: "request" } : parseLiteral(p.value);
       }
-      if (Object.keys(properties).length === 0) return { ok: false, error: "「把字段写成某值」至少选一行字段" };
+      if (Object.keys(properties).length === 0) return { ok: false, error: MSG.formUpdateNoProps };
       effect.push({ update: { object: clsName, identity: { from: "identity" }, properties } });
     } else if (r.kind === "link") {
-      if (!r.link) return { ok: false, error: "「转化」没选关系" };
+      if (!r.link) return { ok: false, error: MSG.formLinkNoLink };
       effect.push({ link: r.link });
     } else if (r.kind === "create") {
-      if (!r.object) return { ok: false, error: "「新生一个对象」没选对象" };
+      if (!r.object) return { ok: false, error: MSG.formCreateNoObject };
       const properties: Record<string, unknown> = {};
       for (const p of r.rows) {
-        if (!p.prop) return { ok: false, error: "「新生一个对象」里有一行没选字段" };
+        if (!p.prop) return { ok: false, error: MSG.formCreateRowNoProp };
         properties[p.prop] = p.source === "request" ? { from: "request" } : p.source === "identity" ? { from: "identity" } : parseLiteral(p.value);
       }
-      if (Object.keys(properties).length === 0) return { ok: false, error: "「新生一个对象」至少填一行字段" };
+      if (Object.keys(properties).length === 0) return { ok: false, error: MSG.formCreateNoProps };
       effect.push({ create: { object: r.object, properties } });
     } else {
       effect.push({ delete: { object: clsName, identity: { from: "identity" } } });
     }
   }
-  if (effect.length === 0) return { ok: false, error: "「做完会」至少要有一条" };
+  if (effect.length === 0) return { ok: false, error: MSG.formNoEffect };
   return {
     ok: true,
     def: {

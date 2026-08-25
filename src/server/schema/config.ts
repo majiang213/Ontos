@@ -3,6 +3,7 @@
 // 结构校验在这里做；语义校验（属性名、关系名对得上配置）在引擎执行时做，对不上就拒绝。
 
 import { z } from "zod";
+import { MSG } from "../errors";
 
 /* ---------- 过滤 ----------
    查询的 filter、动作的 pre、布尔派生、when 下的过滤是同一个对象。
@@ -79,7 +80,7 @@ export const effectItemSchema = z.union([
       object: z.string(),
       identity: valueSourceSchema.optional(),
       filter: filterSchema.optional(),
-      properties: z.record(z.string(), valueSourceSchema).refine((r) => Object.keys(r).length > 0, { message: "update.properties 不能为空（空 SET 不是合法 SQL）" }),
+      properties: z.record(z.string(), valueSourceSchema).refine((r) => Object.keys(r).length > 0, { message: MSG.updatePropsNoEmpty }),
     }),
   }),
   z.object({
@@ -141,7 +142,7 @@ export const linkTypeSchema = z
       })
       .optional(),
   })
-  .refine((l) => (l.match ? 1 : 0) + (l.transition ? 1 : 0) === 1, { message: "match 与 transition 必须且只能写一种" });
+  .refine((l) => (l.match ? 1 : 0) + (l.transition ? 1 : 0) === 1, { message: MSG.matchXorTransition });
 export type LinkType = z.infer<typeof linkTypeSchema>;
 
 /* ---------- 根 ---------- */

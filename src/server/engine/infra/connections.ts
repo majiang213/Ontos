@@ -80,12 +80,13 @@ export async function saveConnection(ws: string, rec: ConnectionRec, test?: bool
       if (tables.length === 0) {
         registry.unregister(next.name);
         if (previous) registerSaved(registry, previous);
-        return { ok: true, warning: "连上了，但库里没有表", tables, saved: false };
+        return { ok: true, warning: MSG.connectedNoTables, tables, saved: false };
       }
     } catch (e) {
       registry.unregister(next.name);
       if (previous) registerSaved(registry, previous);
-      throw new ConnectionReject(MSG.connectFailed(e instanceof Error ? e.message : String(e)));
+      // 驱动报错含主机/路径/服务端细节，不原样出网（与 listTables 的净化同一条纪律）；raw 错误吞掉由 catch 兜底
+      throw new ConnectionReject(MSG.connectFailed);
     }
   }
   await metaStore().saveConnection(ws, next);

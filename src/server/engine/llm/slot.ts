@@ -43,7 +43,7 @@ export function getSlot(): LlmSlot {
 }
 
 /** 「表结构 → 对象建议」的组合原语：按连接内省定位 + 槽位产草稿。REST 与 MCP 的 propose_objects 共用；
- *  notFound 产出的错误类型由调用方定（路由 DraftReject、MCP EngineReject）。 */
+ *  notFound 产出的错误类型由调用方定（REST 与 MCP 都传 EngineReject——路由按 422、MCP 按 -32000 映射）。 */
 export async function proposeObjectsFor(
   registry: DriverRegistry,
   tables: { connection: string; table: string }[],

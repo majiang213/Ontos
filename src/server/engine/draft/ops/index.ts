@@ -13,7 +13,7 @@ import { removeProperty, updateProperty } from "./editProperty";
 import { createLink, deleteLink, updateLink } from "./editLink";
 import { importObjects } from "./importObjects";
 import { replaceObject } from "./replaceObject";
-import { mustType } from "./mustType";
+import { mustType } from "./subjectClass";
 
 /** 解释一个 op：只改内存（state.draft 与界面状态三键）。落库、校验、rev、dirty 全由 editDraft 决定。 */
 export function applyOp(state: DraftState, input: DraftOp, published: OntologyConfig): void {
@@ -83,7 +83,7 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
     case "set_action": {
       // 单条 upsert：同名覆盖、不同名新增。def 已在 schema 层过 actionSchema；形状四查在 validateActionShapes
       const t = d.object_types[input.object];
-      if (!t) throw new DraftReject(MSG.classNotFoundImport(input.object));
+      if (!t) throw new DraftReject(MSG.classNotFoundReplace(input.object));
       t.actions ??= {};
       t.actions[input.name] = input.def;
       break;

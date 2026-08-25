@@ -6,6 +6,7 @@
 import type { ActionDef, OntologyConfig } from "../../schema/config";
 import type { ActionRequest } from "../../schema/request";
 import { resolveValue, type EvalContext } from "../query/expr";
+import { MSG } from "../../errors";
 import type { Planned, ProjectionRecord } from "./action";
 
 /** 变更事件的一条条目：谁被做了什么。能拿到 change_id 时补 change_id 与 line_id（change_id#序号）。 */
@@ -59,9 +60,7 @@ export function buildNotifications(
         changeId == null ? l : { ...l, change_id: String(changeId), line_id: `${changeId}#${i + 1}` }
       ),
       delivered: false,
-      note: anyFail
-        ? "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）"
-        : "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
+      note: anyFail ? MSG.notifyDeferredWithFailure : MSG.notifyDeferred,
     };
   });
 }

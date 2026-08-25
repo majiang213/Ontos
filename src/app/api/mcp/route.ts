@@ -80,10 +80,11 @@ export async function POST(req: Request) {
     const out = await tool.handler(ctx, args);
     return rpcOk(id, toolResult(out.payload, out.isError));
   } catch (e) {
-    if (e instanceof ZodError) return rpcErr(id, -32602, MSG.rpcBadParams);
+    if (e instanceof ZodError) return rpcErr(id, -32602, MSG.zodRequestShape); // 与 REST 同一文案（同一失败两种说法是协议瑕疵）
     if (e instanceof BadRequest) return rpcErr(id, -32602, e.message);
     if (e instanceof EngineReject) return rpcErr(id, -32000, e.message);
     if (e instanceof DraftReject) return rpcErr(id, -32000, e.message); // 与 EngineReject 同档（REST 侧是 422）
-    return rpcErr(id, -32603, e instanceof Error ? e.message : String(e));
+    // 兜底不透内部细节：驱动 SQL 报错含表名/主机/连接细节——REST 有生产闸（_shared），MCP 同一纪律
+    return rpcErr(id, -32603, process.env.NODE_ENV === "production" ? MSG.internalError : e instanceof Error ? e.message : String(e));
   }
 }
