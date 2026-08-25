@@ -26,10 +26,21 @@ export async function cleanupRuntime(tmp: string): Promise<void> {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-/** 重启运行态后取草稿链门面：每用例一份干净内存态（draft 的 Store 是运行态携带的单例，重启后 import 到的就是它）。 */
+/** 草稿链的测试门面：受理 + 当前两份 + 版本链三个模块合并成一份命名空间（s.editDraft / s.getRev / s.publish …）。
+ *  生产代码不走这种合并口——直插具体模块，依赖方向保持可见；测试要的是「整条链在手」。 */
+export async function draftEngine() {
+  return {
+    ...(await import("../server/engine/draft/editDraft")),
+    ...(await import("../server/engine/draft/current")),
+    ...(await import("../server/engine/draft/versions")),
+    ...(await import("../server/engine/draft/sameConfig")),
+  };
+}
+
+/** 重启运行态后取草稿链测试门面：每用例一份干净内存态（draft 的 Store 是运行态携带的单例，重启后 import 到的就是它）。 */
 export async function freshStore(tmp: string) {
   await restartRuntime(tmp);
-  return import("../server/engine/draft");
+  return draftEngine();
 }
 
 /** 当前运行态的元库门面（配合 freshStore 用：重启由 freshStore 管）。 */

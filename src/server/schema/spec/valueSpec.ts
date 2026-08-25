@@ -1,6 +1,6 @@
 // 取值来源的形状原语 —— 附录 B「{ from: X }」词表的唯一事实源。
 // 三档宽严不同的消费方共用这里的原语：运行期求值（expr.ts resolveValue）、
-// 草稿静态校验（validate.ts checkValueSource）、画布表单白名单（actionView.ts formCompatible）。
+// 草稿静态校验（validate 经 actionSpec.checkActionValue）、画布表单白名单（actionView.ts formCompatible）。
 
 /** from 的合法取值全集。 */
 export const FROM_KEYS = ["identity", "action", "object", "current", "request", "generated"] as const;

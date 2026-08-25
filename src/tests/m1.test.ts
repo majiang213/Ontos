@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupRuntime, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
 import { buildInsert, buildSelect, buildStatement, maskValue } from "../server/engine/infra/driver";
 import "../server/engine/infra/sqlDriver"; // 副作用导入：注册 PG 日期列的 type parser（1082/1114/1184）
 import { DriverRegistry } from "../server/engine/infra/registry";
@@ -136,14 +136,18 @@ describe("连接生命周期", () => {
 
   it("内置演示源不许覆盖；不在元库的删不了；已发布引用不能删", async () => {
     const { saveConnection, dropConnection } = await import("../server/engine/infra/connections");
+    const { connectionInUse } = await import("../server/engine/draft/refs");
+    const { getPublished } = await import("../server/engine/draft/current");
+    // dropConnection 的引用判定靠注入（infra 不上指 draft）：与路由同款接线
+    const drop = (ws: string, n: string) => dropConnection(ws, n, async (x) => connectionInUse((await getPublished(ws)).config, x));
     // 内置演示 fixture 只属于 test 空间
     await expect(saveConnection("test", { name: "device_sys", type: "mysql", host: "127.0.0.1", db_name: "x" })).rejects.toThrow(/内置演示源/);
-    await expect(dropConnection("test", "device_sys")).rejects.toThrow(/内置演示源不能删/);
-    await expect(dropConnection("test", "ghost")).rejects.toThrow(/连接不存在/);
+    await expect(drop("test", "device_sys")).rejects.toThrow(/内置演示源不能删/);
+    await expect(drop("test", "ghost")).rejects.toThrow(/连接不存在/);
 
     writeFileSync(join(tmp, "used.db"), "");
     await saveConnection("test", { name: "used_db", type: "sqlite", db_name: "used.db" }, false);
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
       objects: {
@@ -156,6 +160,6 @@ describe("连接生命周期", () => {
       },
     }, "test");
     await s.publish("test");
-    await expect(dropConnection("test", "used_db")).rejects.toThrow(/仍被已发布本体引用/);
+    await expect(drop("test", "used_db")).rejects.toThrow(/仍被已发布本体引用/);
   });
 });

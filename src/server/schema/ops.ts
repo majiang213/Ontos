@@ -102,7 +102,7 @@ const UI_STATE_OP_SCHEMAS = [saveLayoutOp, saveEdgeBendOp] as const;
 export const draftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS, ...UI_STATE_OP_SCHEMAS]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
 
-/** MCP edit_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉 save_* 三个界面状态 op（名单见 UI_STATE_OPS，Agent 不写摆位/弯折/钉点）。 */
+/** MCP edit_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉界面状态 op（名单见 UI_STATE_OPS 两条：摆位/弯折；钉点随建线/改接的 pins 键同车，不是独立 op）。 */
 export const mcpDraftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS]);
 
 /** edit_draft 返回的 names：类名、关系名或「类名.动作名」（不收字段名）。画布 toast/发布条不读它，读 GET 的 action_changes。 */

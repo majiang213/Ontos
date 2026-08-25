@@ -4,7 +4,7 @@
 // 串行化在 runAction 的每空间队列（runtime.actionTails），发号原子性在 meta/stores/seq。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupRuntime, meta, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, meta, setupRuntime } from "./helpers";
 
 const WS = "test";
 
@@ -25,7 +25,7 @@ describe("动作并发原子性", () => {
 
   it("并发重发同一 create（登记新设备）：先到的插入，后到的被前置拦（各源已有此序列号）", async () => {
     const { runAction } = await import("../server/engine/action/action");
-    const { getPublished } = await import("../server/engine/draft");
+    const { getPublished } = await draftEngine();
     const { getDriverRegistry } = await import("../server/engine/infra/connections");
     const m = await meta();
     const config = (await getPublished(WS)).config;

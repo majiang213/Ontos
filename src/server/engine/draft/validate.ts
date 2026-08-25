@@ -1,7 +1,7 @@
 // 配置的语义校验 —— 附录 B 里 zod 管不着的约束，发布与加载时各跑一遍。
 // 违反即抛错：identity 缺映射、派生属性进 fields、关系端点不存在、inform 指向未声明的出站等。
 
-import { type OntologyConfig } from "../../schema/config";
+import { sourceKeyProp, type OntologyConfig } from "../../schema/config";
 import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
 import { checkActionValue, walkEffectItems, walkEffectValues, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
 
@@ -27,7 +27,7 @@ export function validateSemantics(config: OntologyConfig): void {
     }
     const derivedProps = new Set(Object.entries(cls.properties).filter(([, d]) => d.derived).map(([p]) => p));
     for (const [srcName, entry] of Object.entries(cls.sources ?? {})) {
-      const keyProp = entry.key ?? cls.identity;
+      const keyProp = sourceKeyProp(cls, entry); // 对齐属性：条目 key 省略则用类 identity（schema/config 单源）
       if (!keyProp) {
         throw new Error(`配置不合法：${clsName}.${srcName} 没有认行依据（类无 identity，条目也无 key）`);
       }

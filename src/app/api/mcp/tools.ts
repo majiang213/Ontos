@@ -106,7 +106,7 @@ export const TOOLS: ToolDef[] = [
     space: true,
     handler: async (ctx, args) => {
       const config = await ctx.config(); // 只改变查找哪份配置，仍是一次出模板、不落地
-      // 骨架选择规则在 engine（adjudicate.actionSkeletonFor）：转化模板 / set_fields 骨架的构造点也都归 engine
+      // 骨架选择规则在 engine（draft/skeletons.actionSkeletonFor）：转化模板 / set_fields 骨架的构造点也都归 engine
       return { payload: actionSkeletonFor(config, String(args.object ?? "")) };
     },
   },
@@ -150,7 +150,7 @@ export const TOOLS: ToolDef[] = [
     description: "列出已连接库里的表和列（只读列定义，没有采样行，不保存连接）。入参：{ connection? }。不接受 space。",
     inputSchema: json(z.object({ connection: z.string().optional() })),
     handler: async (ctx, args) => {
-      // 只读列定义（不下发采样行）；逐连接降级在引擎原语里（infra/load.listTables，与 REST 同口径）
+      // 只读列定义（不下发采样行）；逐连接降级在引擎原语里（infra/tables.listTables，与 REST 同口径）
       const conn = args.connection !== undefined ? String(args.connection) : undefined;
       const sources = (await listTables(ctx.driver, { connection: conn })).map((s) =>
         s.error ? s : { connection: s.connection, tables: s.tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type, pk: c.pk })) })) }

@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { cleanupRuntime, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
 import { Verdict } from "../server/engine/adjudication/verdict";
 
 let tmp: string;
@@ -78,7 +78,7 @@ describe("错误分层：400 / 422 / 500", () => {
   });
 
   it("overlap：无源类 422（幻影 rate 不产）；同源对 422（不全列扫）", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源
     expect((await post("compute_overlap", JSON.stringify({ class_a: "equipment", class_b: "vendor" }), undefined, TEST)).status).toBe(422);
     // repair 与 assignment 都来自 device_sys：同源不算疑似重复
@@ -97,7 +97,7 @@ describe("错误分层：400 / 422 / 500", () => {
 
 describe("propose_objects：只建议不落地", () => {
   it("返回 object_types；工作副本没有新类", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     expect((await s.getDraft(TEST)).draft.object_types.po_item).toBeUndefined();
     const r = await post("propose_objects", JSON.stringify({ tables: [{ connection: "purchase_sys", table: "po_item" }] }), undefined, TEST);
     expect(r.status).toBe(200);
@@ -126,7 +126,7 @@ describe("查询留痕", () => {
 
 describe("GET /api/ontology：rev + ETag 监视器口径", () => {
   it("200 带 rev/ETag/no-store；If-None-Match 命中回 304（也带 no-store）；内容变后旧 ETag 失效", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const r1 = await get("ontology", undefined, TEST);
     expect(r1.status).toBe(200);
     expect(r1.data.rev).toBe(s.getRev(TEST));
@@ -147,7 +147,7 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
   });
 
   it("action_changes：未动过动作时三数组全空；新增/同名改内容/删除各就各位", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const r1 = await get("ontology", undefined, TEST);
     expect(r1.data.action_changes).toEqual({ added: [], overwritten: [], removed: [] }); // 种子有 convert 等动作，但没改就不算
     const def = { effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
@@ -170,7 +170,7 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
 
 describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   it("「同一」合并两个跨源类，留痕带证据；草稿可直接发布", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     // 造一对跨源候选：采购视角的 po_a × 设备视角的 po_b（不同名识别字段）
     await s.editDraft({ op: "import_objects", objects: {
       po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
@@ -196,7 +196,7 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   });
 
   it("裁决被校验闸回退时不留幻影记录", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({ op: "import_objects", objects: {
       po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, status: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", status: "sn" } } } },
       po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no" } } } },
@@ -210,7 +210,7 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   });
 
   it("「跳过」不动草稿但留痕", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const before = JSON.stringify((await s.getDraft(TEST)).draft);
     const r = await post("decide", JSON.stringify({ class_a: "equipment", class_b: "person", verdict: Verdict.Skip }), undefined, TEST);
     expect(r.status).toBe(200);

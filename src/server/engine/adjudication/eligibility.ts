@@ -1,5 +1,5 @@
 // 候选对资格 —— 「什么算疑似重复」的唯一出处（《ontos-article.md》§3.2）。
-// 只给 pairs.ts 流水线用：列表 / 交集率 / 定案共用同一套谓词，路由不再各自写闸。
+// 列表（candidates）/ 交集率（overlap）/ 定案（decide）共用同一套谓词，路由不再各自写闸。
 // 资格 = 两边有源 ∧ 无共同连接 ∧ 未定案；定案侧对同源对放行两个不动配置的结论（各自独立语义）。
 
 import type { ObjectType } from "../../schema/config";

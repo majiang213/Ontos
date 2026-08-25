@@ -59,6 +59,11 @@ export function removeFieldsUpdateKeys(clsName: string, cls: ObjectType, names: 
   }
 }
 
+/** 转化动作名的构造（唯一出处）：附录 B 保留字的命名规则，「阶段」裁决与骨架选择器都从这里取。 */
+export function conversionActionName(to: string | number): string {
+  return `convert_to_${to}`;
+}
+
 /** 转化动作骨架（唯一构造点）：前置 = 当前在早阶段 ∧ 还没转化过（$link false），效应 = 记一条转化关系。
  *  「阶段」裁决的产物与 MCP propose_action 的模板都走这里；附录 B 改骨架只动这一个函数。 */
 export function conversionAction(linkName: string, link: LinkType): ActionDef {
@@ -76,7 +81,7 @@ export function actionSkeletonFor(config: OntologyConfig, clsName: string): { na
   const cls = config.object_types[clsName];
   if (!cls) throw new EngineReject(`配置中没有类：${clsName}`);
   const transition = Object.entries(config.link_types).find(([, l]) => l.from === clsName && l.to === clsName && l.transition);
-  if (transition) return { name: `convert_to_${transition[1].transition!.to}`, action: conversionAction(transition[0], transition[1]) };
+  if (transition) return { name: conversionActionName(transition[1].transition!.to), action: conversionAction(transition[0], transition[1]) };
   const skel = fieldsUpdateAction(clsName, cls);
   return skel
     ? { name: FIELDS_UPDATE_ACTION, action: skel }

@@ -12,6 +12,15 @@ import { EngineReject } from "../../errors";
 import { IDENTITY_COL_RE } from "./identityHint";
 import type { LlmSlot } from "./slot";
 
+/** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
+ *  allowDate=false 给破格进属性的主键用（主键当识别字段时只分 number/string）。 */
+function columnPropType(rawType: string, allowDate: boolean): "string" | "number" | "date" {
+  const t = rawType.toUpperCase();
+  if (t.includes("INT")) return "number";
+  if (allowDate && (t.includes("DATE") || t.includes("TIME"))) return "date";
+  return "string";
+}
+
 export class CannedSlot implements LlmSlot {
   readonly name = "canned-离线回退";
   async nlToQuery(question: string, config: OntologyConfig, ws: string): Promise<QueryRequest> {
@@ -37,17 +46,14 @@ export class CannedSlot implements LlmSlot {
       const pkCol = table.columns.find((c) => c.pk);
       for (const col of table.columns) {
         if (col.pk) continue; // 表主键只定位行，不进属性——除非它就是识别字段（见下）
-        const t = col.type.toUpperCase(); // mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判
-        const type = t.includes("INT") ? "number" : t.includes("DATE") || t.includes("TIME") ? "date" : "string";
-        properties[col.name] = { type, ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
+        properties[col.name] = { type: columnPropType(col.type, true), ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
         fields[col.name] = col.name;
         if (!identity && IDENTITY_COL_RE.test(col.name)) identity = col.name; // 识别字段先猜编号列（规则单源 identityHint）
       }
       // 编号列猜不到、主键本身就是业务编号（如 person_no）时：主键当识别字段，破格进属性
       if (!identity && pkCol) {
         identity = pkCol.name;
-        const t = pkCol.type.toUpperCase();
-        properties[pkCol.name] = { type: t.includes("INT") ? "number" : "string", ...(pkCol.comment ? { description: pkCol.comment } : {}) };
+        properties[pkCol.name] = { type: columnPropType(pkCol.type, false), ...(pkCol.comment ? { description: pkCol.comment } : {}) };
         fields[pkCol.name] = pkCol.name;
       }
       // 跨连接同名表是裁决主场景：撞名带连接前缀，不静默覆盖

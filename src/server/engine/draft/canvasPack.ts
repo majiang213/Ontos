@@ -18,9 +18,9 @@ export interface DraftState {
   edgePins: Record<string, { source?: BorderPin; target?: BorderPin }>; // 线端点钉点（存同一列的 pins）；界面状态
 }
 
-/** 落库用的整包：config + 界面状态三键。edgeBends/edgePins 缺省补空（老内存态可能没这两个字段）。 */
+/** 落库用的整包：config + 界面状态三键。三键必有值——「老内存态缺键」的补丁只有一个落点（current.getDraft 的 ??=）。 */
 export function canvasSnapshot(state: DraftState): { config: OntologyConfig; layout: DraftState["layout"]; edgeBends: DraftState["edgeBends"]; edgePins: DraftState["edgePins"] } {
-  return { config: state.draft, layout: state.layout, edgeBends: state.edgeBends ?? {}, edgePins: state.edgePins ?? {} };
+  return { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins };
 }
 
 /* 画布包界面状态三键的浅校验（读回侧）：坏键当没有（按键降级），不拖死整包。config 键由调用方过 configSchema，坏了硬炸。 */

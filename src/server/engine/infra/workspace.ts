@@ -11,10 +11,11 @@ export const DEFAULT_WS = "default";
 
 /** 测试工作空间：演示模板与四个 fixture 连接只属于它。填充按空间名判断，与是否配置 LLM Key 无关。 */
 export const TEST_WS = "test";
-const NAME_RE = /^[a-z][a-z0-9_-]*$/;
+/** 空间名形状：比 schema/ops 的 NAME_RE 多许中划线（两种纪律，名字区分开，别混用）。 */
+const WS_NAME_RE = /^[a-z][a-z0-9_-]*$/;
 
 export function isWsName(name: string): boolean {
-  return NAME_RE.test(name);
+  return WS_NAME_RE.test(name);
 }
 
 /** 空间的 v1 种子：test 用演示模板；其余空间（含 default）空白起步（空本体）——切换空间要看得出是另一套。 */

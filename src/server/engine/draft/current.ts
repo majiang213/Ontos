@@ -61,7 +61,7 @@ export async function getDraft(ws: string = DEFAULT_WS): Promise<DraftState> {
     const { config, version } = await getPublished(ws);
     store.draft = await readWorkingCopy(ws, config, version);
   }
-  store.draft.edgeBends ??= {}; // 热更新前建的内存态没有这字段
+  store.draft.edgeBends ??= {}; // 「老内存态缺界面状态键」的补丁只在这一个落点（热更新前建的内存态没有这字段）
   store.draft.edgePins ??= {};
   return store.draft;
 }

@@ -4,6 +4,7 @@
 // 问数只投影结果树；动作经这些模块读个体。
 
 import type { LinkType, ObjectType, OntologyConfig } from "../../schema/config";
+import { sourceKeyProp } from "../../schema/config";
 import { resolveLink } from "../../schema/spec/filterSpec";
 import type { SourceDriver } from "../infra/driver";
 import { EngineReject } from "../../errors";
@@ -45,9 +46,9 @@ export function sourcesOf(cls: Cls): [string, NonNullable<ObjectType["sources"]>
   return Object.entries(cls.def.sources ?? {});
 }
 
-/** 该源用来对齐、认行的列：源条目的 key，省略则用类的 identity。 */
+/** 该源用来对齐、认行的列：对齐属性（sourceKeyProp，schema/config 单源）映射到的那列。 */
 export function keyColumn(cls: Cls, entry: { fields: Record<string, string>; key?: string }): string {
-  const keyProp = entry.key ?? cls.def.identity;
+  const keyProp = sourceKeyProp(cls.def, entry);
   if (!keyProp) throw new EngineReject("类没有 identity，源条目也没有 key");
   const col = entry.fields[keyProp];
   if (!col) throw new EngineReject(`源条目的 fields 里没有对齐属性 ${keyProp}`);

@@ -1,6 +1,6 @@
 // 验收问题集：GET 列表（带当前已发布版本，界面据此标「待重跑」）/ POST 新增 / DELETE 删除。
 // POST /api/questions?run=1 全量跑一遍；body 给 { id } 时只跑那一条；&target=draft 对当前草稿试跑，结果不落验收记录。
-// 失败分阶段记（编译失败/执行出错/答案不符），原因落 detail。跑批逻辑在 engine/questions。
+// 失败分阶段记（编译失败/执行出错/答案不符），原因落 detail。跑批逻辑在 engine/query/questions。
 
 import { z } from "zod";
 import { getPublished } from "@/server/engine/draft/current";

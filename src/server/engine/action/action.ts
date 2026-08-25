@@ -3,6 +3,7 @@
 // 跨库没有分布式事务：已成功的投影不回滚，失败条目进结果；补偿是重发同一动作。
 
 import type { ActionDef, EffectItem, OntologyConfig, ValueSource } from "../../schema/config";
+import { sourceKeyProp } from "../../schema/config";
 import type { ActionRequest } from "../../schema/request";
 import { dialectFor, toColumnValue, type SourceDriver } from "../infra/driver";
 import { assertFilterShapes } from "../query/compare";
@@ -340,9 +341,9 @@ async function projectCreate(env: Env, p: Extract<Planned, { kind: "create" }>, 
   return out;
 }
 
-/** create 幂等：对齐属性（源条目的 key，省略则是类的 identity）的值已有行就跳过——补偿重发不会重复插（§6.3）。 */
+/** create 幂等：对齐属性（sourceKeyProp，schema/config 单源）的值已有行就跳过——补偿重发不会重复插（§6.3）。 */
 async function alreadyInserted(env: Env, p: Extract<Planned, { kind: "create" }>, entry: SourceEntry, vals: Record<string, unknown>): Promise<boolean> {
-  const keyProp = entry.key ?? p.cls.def.identity;
+  const keyProp = sourceKeyProp(p.cls.def, entry);
   const idVal = keyProp ? vals[keyProp] : undefined;
   if (!keyProp || idVal === undefined || !entry.fields[keyProp]) return false;
   const keyCol = keyColumn(p.cls, entry);

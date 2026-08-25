@@ -18,6 +18,7 @@ import { effectSummary, formCompatible } from "./forms/actionView";
 import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/engine/draft/lineage";
+import { definedPinEnds } from "../server/engine/draft/canvasState";
 import type { PairAdvice } from "../server/engine/adjudication/verdict";
 import type { ObjectType } from "../server/schema/config";
 
@@ -464,9 +465,9 @@ export default function CanvasPage() {
               objects={ont?.object_types ?? {}}
               onCancel={() => setCard(null)}
               onSubmit={async (body) => {
-                // 钉点随建线同车（界面状态一把落库）：端点就是连的时候手选的位置
-                const pins = { ...(card.pins?.source ? { source: card.pins.source } : {}), ...(card.pins?.target ? { target: card.pins.target } : {}) };
-                const ok = await op(Object.keys(pins).length ? { ...body, pins } : body);
+                // 钉点随建线同车（界面状态一把落库）：端点就是连的时候手选的位置；「没给的端不进记录」用服务端同一原语
+                const pins = definedPinEnds(card.pins);
+                const ok = await op(pins ? { ...body, pins } : body);
                 if (ok) {
                   setCard(null);
                   showToast("关系已进草稿（发布后生效）");

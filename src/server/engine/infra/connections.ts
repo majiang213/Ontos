@@ -1,13 +1,13 @@
 // 连接注册与生命周期 —— 「连接从哪来、怎么活、怎么死」：驱动注册表（全部路由的唯一驱动入口）+
 // 保存（测过才落库、失败还回旧驱动）与删除（已发布引用不可删）。
 // 单例挂运行态：Next dev 下各路由包各有模块实例，挂全局才能保证即时生效。
+// 本文件在 infra 层，不上指 draft：「连接是否被已发布引用」由调用方注入（refs.connectionInUse 是纯函数）。
 
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ConnectionRec } from "../../meta/types";
 import { metaStore } from "../../meta/store";
 import { runtime } from "../../runtime";
-import { getPublished } from "../draft/current";
 import { SqliteFixtureDriver } from "./fixture";
 import { SqliteDriver } from "./sqliteDriver";
 import { DriverRegistry } from "./registry";
@@ -92,15 +92,13 @@ export async function saveConnection(ws: string, rec: ConnectionRec, test?: bool
   return { ok: true, saved: true };
 }
 
-/** 删除已保存的连接。内置演示源不在元库，删不了；已发布本体还引用着的也不能删。 */
-export async function dropConnection(ws: string, name: string): Promise<void> {
+/** 删除已保存的连接。内置演示源不在元库，删不了；已发布本体还引用着的也不能删——
+ *  引用判定由调用方注入（infra 不上指 draft；路由传 refs.connectionInUse ∘ getPublished）。 */
+export async function dropConnection(ws: string, name: string, isReferenced: (name: string) => Promise<boolean>): Promise<void> {
   if (!(await metaStore().listConnections(ws)).some((c) => c.name === name)) {
     throw new ConnectionReject(`连接不存在：${name}（内置演示源不能删）`);
   }
-  const inUse = Object.values((await getPublished(ws)).config.object_types).some((t) =>
-    Object.values(t.sources ?? {}).some((s) => s.connection === name)
-  );
-  if (inUse) throw new ConnectionReject(`连接 ${name} 仍被已发布本体引用，先改本体再删`);
+  if (await isReferenced(name)) throw new ConnectionReject(`连接 ${name} 仍被已发布本体引用，先改本体再删`);
   await metaStore().deleteConnection(ws, name);
   (await getDriverRegistry(ws)).unregister(name);
 }

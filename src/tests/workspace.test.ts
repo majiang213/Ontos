@@ -2,7 +2,7 @@
 // 互不干扰；台账路由的列表/新建/拒绝。每个用例在独立临时目录里跑，元库文件从无到有。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupRuntime, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
 import { Verdict } from "../server/engine/adjudication/verdict";
 
 let tmp: string;
@@ -16,7 +16,7 @@ afterEach(async () => {
 
 describe("空间隔离", () => {
   it("两个空间各自发布升级，互不干扰；新空间与 default 空白起步，演示模板与 fixture 只属于 test", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const meta = (await import("../server/meta/store")).metaStore();
     // default 建对象并发布 → v2
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, "default");
@@ -54,7 +54,7 @@ describe("空间隔离", () => {
   });
 
   it("摆位按空间分开存（onto_version 的工作行）", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({ op: "save_layout", positions: { equipment: { x: 1, y: 2 } } }, "default");
     expect((await s.getDraft("default")).layout.equipment).toEqual({ x: 1, y: 2 });
     expect((await s.getDraft("lab")).layout.equipment).toBeUndefined();

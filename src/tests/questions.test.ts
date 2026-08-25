@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../server/engine/query/questions";
 import type { LlmSlot } from "../server/engine/llm/slot";
-import { cleanupRuntime, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
 
 describe("期望结果写法", () => {
   it("解析：留空 / 纯数字 / 字段=值；不认识的写法返回 null", () => {
@@ -140,7 +140,7 @@ describe("验收问题集跑批（真路由）", () => {
 
   it("对草稿试跑：用草稿的配置，不落验收记录；已发布跑批不受影响", async () => {
     const meta = (await import("../server/meta/store")).metaStore();
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const { POST } = await import("../app/api/questions/route");
     await meta.addQuestion("test", "在役设备及其所属部门", "97"); // 种子恰有 97 台在役
     await meta.addQuestion("test", "有过保的设备吗", "1");

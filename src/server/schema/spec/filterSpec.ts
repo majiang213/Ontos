@@ -57,7 +57,7 @@ export function walkFilter(config: OntologyConfig | null, clsName: string, filte
 /* ---------- 操作数形状规则（过滤的取值位） ----------
    字面量（含日期表达式串）与「字面量数组」放过；运算符块逐运算符递归；
    { property } 组合的 from 只许 current/request；裸 { from } 只许 identity。
-   validate 的静态核对用这里；individual.resolveOperand 是同一套形状的运行期求值。 */
+   validate 的静态核对用这里；query/compare.resolveOperand 是同一套形状的运行期求值。 */
 
 export function checkOperand(v: unknown, where: string): void {
   if (Array.isArray(v)) {

@@ -1,8 +1,10 @@
 // 连接管理：GET 列表（剥掉密码与 options）/ POST 保存 / DELETE 删除。
-// 薄适配：形状校验 + 写闸 → load.saveConnection / dropConnection。
+// 薄适配：形状校验 + 写闸 → connections.saveConnection / dropConnection。
 
 import { z } from "zod";
 import { dropConnection, saveConnection } from "@/server/engine/infra/connections";
+import { connectionInUse } from "@/server/engine/draft/refs";
+import { getPublished } from "@/server/engine/draft/current";
 import { NAME_RE } from "@/server/schema/ops";
 import { metaStore } from "@/server/meta/store";
 import { bodyJson, requireWriteAuth, respond, wsOf } from "@/app/api/_shared";
@@ -45,7 +47,9 @@ export async function DELETE(req: Request) {
   if (denied) return denied;
   return respond(async () => {
     const { name } = z.object({ name: z.string().min(1) }).parse(await bodyJson(req));
-    await dropConnection(wsOf(req), name);
+    const ws = wsOf(req);
+    // 引用判定在引擎（refs.connectionInUse 纯函数）；infra/connections 不反向依赖 draft，由这里注入
+    await dropConnection(ws, name, async (n) => connectionInUse((await getPublished(ws)).config, n));
     return { ok: true };
   });
 }

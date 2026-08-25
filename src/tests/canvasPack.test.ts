@@ -35,13 +35,13 @@ describe("unpackCanvas（画布包读回降级）", () => {
 });
 
 describe("applyPack / canvasSnapshot", () => {
-  it("缺键用 fallback，有键覆盖 fallback；snapshot 给缺省键补空", () => {
+  it("缺键用 fallback，有键覆盖 fallback；snapshot 原样出（缺键补丁的唯一落点在 getDraft，不在编解码层）", () => {
     const state = { draft: {}, baseVersion: 1, dirty: false, layout: {}, edgeBends: {}, edgePins: {} } as unknown as DraftState;
     applyPack(state, { layout: { a: { x: 1, y: 2 } } }, { layout: { b: { x: 9, y: 9 } }, edgeBends: { l: { dx: 1, dy: 1 } }, edgePins: {} });
     expect(state.layout).toEqual({ a: { x: 1, y: 2 } }); // pack 有键，覆盖 fallback
     expect(state.edgeBends).toEqual({ l: { dx: 1, dy: 1 } }); // pack 缺键，用 fallback
-    const snap = canvasSnapshot({ draft: { c: 1 }, baseVersion: 1, dirty: false, layout: {} } as never);
-    expect(snap.edgeBends).toEqual({});
+    const snap = canvasSnapshot({ draft: { c: 1 }, baseVersion: 1, dirty: false, layout: {}, edgeBends: { l: { dx: 1, dy: 1 } }, edgePins: {} } as never);
+    expect(snap.edgeBends).toEqual({ l: { dx: 1, dy: 1 } }); // 原样出，不补不改
     expect(snap.edgePins).toEqual({});
   });
 });

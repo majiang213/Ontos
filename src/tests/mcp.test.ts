@@ -1,7 +1,7 @@
 // MCP 工具端点测试：JSON-RPC 信封、九个工具的形状与纪律（从 m4m6.test.ts 拆出）。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupRuntime, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
 
 describe("MCP 工具端点", () => {
   // 路由读运行态 cwd 下的已发布配置与元数据库——每用例一个临时目录 + 全新运行态，与仓库运行态隔离
@@ -103,7 +103,7 @@ describe("MCP 工具端点", () => {
   });
 
   it("space=draft 看见未发布类（带状态与 rev）；缺省看不见；query/propose_action 不受草稿影响", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", description: "供应商", kind: "thing" }, "test");
     // 缺省已发布：看不见 vendor
     const pub = await call("list_classes", {});
@@ -163,7 +163,7 @@ describe("MCP 工具端点", () => {
   });
 
   it("edit_draft 完整往返：读 rev → 写入 ok 且 rev+1 → 重放 stale base_rev 得 -32000 → query 仍读旧已发布", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const list = await call("list_classes", { space: "draft" });
     const rev = list.result.structuredContent.rev as number;
     expect(rev).toBe(s.getRev("test"));
@@ -221,7 +221,7 @@ describe("MCP 工具端点", () => {
   });
 
   it("set_action 经 edit_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     const def = { description: "改名", effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
     const r = await call("edit_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: s.getRev("test") });
     expect(r.error).toBeUndefined();

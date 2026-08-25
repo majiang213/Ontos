@@ -6,6 +6,11 @@ import type { OntologyConfig } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
 
+/** 连接是否被已发布本体引用（删连接前的拦截面）：任一类的任一源条目挂着它即算。 */
+export function connectionInUse(config: OntologyConfig, name: string): boolean {
+  return Object.values(config.object_types).some((t) => Object.values(t.sources ?? {}).some((s) => s.connection === name));
+}
+
 /** 删除属性前的引用扫描：源映射、关系配对、转化、公理、同类派生规则、动作（含跨类）。 */
 export function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[] {
   const refs: string[] = [];

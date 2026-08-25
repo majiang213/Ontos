@@ -8,7 +8,7 @@ import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
 import { dropClass } from "../draft/ops/editObject";
 import { mutateDraft } from "../draft/editDraft";
-import { conversionAction, removeFieldsUpdateKeys } from "../draft/skeletons";
+import { conversionAction, conversionActionName, removeFieldsUpdateKeys } from "../draft/skeletons";
 import { Verdict } from "./verdict";
 
 export type { Verdict } from "./verdict";
@@ -145,7 +145,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       // 撞名不静默覆盖：合并后已有 status 属性 / 同名关系 / 同名动作时让人先改名
       if (A.properties.status) throw new Error(`阶段裁决需要立派生属性 status，但 ${a} 上已有同名属性——先把它改名或删掉`);
       if (d.link_types[`${a}_to_${to}`]) throw new Error(`关系名 ${a}_to_${to} 已存在——换个阶段名再裁`);
-      if (A.actions?.[`convert_to_${to}`]) throw new Error(`动作名 convert_to_${to} 已存在——换个阶段名再裁`);
+      if (A.actions?.[conversionActionName(to)]) throw new Error(`动作名 ${conversionActionName(to)} 已存在——换个阶段名再裁`);
       A.properties.status = {
         type: "enum",
         values: [from, to],
@@ -163,7 +163,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
         transition: { property: "status", from, to },
       };
       A.actions = A.actions ?? {};
-      A.actions[`convert_to_${to}`] = conversionAction(`${a}_to_${to}`, d.link_types[`${a}_to_${to}`]);
+      A.actions[conversionActionName(to)] = conversionAction(`${a}_to_${to}`, d.link_types[`${a}_to_${to}`]);
       break;
     }
     case Verdict.Overlap: {

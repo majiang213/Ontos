@@ -19,6 +19,12 @@ export function treatsNullAsUntilNow(op: string): boolean {
   return op === "gt" || op === "gte";
 }
 
+/** 源条目的对齐属性（唯一出处）：条目 key 省略则用类的 identity。
+ *  消费方：individual.keyColumn（认行的列）、validate（fields 缺对齐属性的拦截）、action 的 create 幂等。 */
+export function sourceKeyProp(cls: ObjectType, entry: { key?: string }): string | undefined {
+  return entry.key ?? cls.identity;
+}
+
 export type Filter = Record<string, unknown>;
 export const filterSchema: z.ZodType<Filter> = z.record(z.string(), z.unknown());
 

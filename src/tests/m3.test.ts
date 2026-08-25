@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupRuntime, setupRuntime } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
 import { pickRule, normalizeWith, RULES } from "../server/engine/adjudication/normalize";
 import { overlapRate } from "../server/engine/adjudication/overlap";
 import { applyVerdict } from "../server/engine/adjudication/applyVerdict";
@@ -215,7 +215,7 @@ describe("裁决流水线", () => {
   });
 
   it("decide「同一」：合并两个跨源类，留痕带证据", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
       objects: {
@@ -243,7 +243,7 @@ describe("裁决流水线", () => {
   });
 
   it("decide：校验闸回退时不留幻影记录", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
       objects: {
@@ -258,7 +258,7 @@ describe("裁决流水线", () => {
   });
 
   it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
       objects: {
@@ -277,7 +277,7 @@ describe("裁决流水线", () => {
   });
 
   it("computeOverlap：无源类、同源对拒绝", async () => {
-    const s = await import("../server/engine/draft");
+    const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
     await expect(computeOverlap("default", "equipment", "vendor")).rejects.toThrow(EngineReject);
     await expect(computeOverlap("default", "repair", "assignment")).rejects.toThrow(EngineReject);
