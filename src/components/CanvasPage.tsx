@@ -50,9 +50,8 @@ export default function CanvasPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairs, setPairs] = useState<PairAdvice[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [publishing, setPublishing] = useState(false);
+  const [publishing, setPublishing] = useState(false); // 发布/放弃/回滚同一把闸（mutate 原语）
   const [generating, setGenerating] = useState(false);
-  const [rollbacking, setRollbacking] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // 对象编辑卡与表结构抽屉已各自成 module（cards/ObjectCard、cards/SchemaDrawer）。
   // 页面只留：开哪张卡、卡内表单状态（ObjectCard 经 onFormState 报上来，写进 formStateRef 供守卫读）。
@@ -152,28 +151,15 @@ export default function CanvasPage() {
     [op]
   );
 
-  const publish = async () => {
-    if (publishing) return; // 防连点：重复发布会产生空版本
+  /** 发布类动作的同一副骨架：防连点 +（可选）确认 + 本地写闸 + toast + 刷新。差异只剩请求、文案与收不收卡。 */
+  const mutate = async (run: () => Promise<string>, opts?: { confirm?: string; closeCard?: boolean }) => {
+    if (publishing) return; // 防连点：发布/放弃/回滚同一把闸（重复发布会产生空版本）
+    if (opts?.confirm && !window.confirm(opts.confirm)) return;
     setPublishing(true);
     try {
       await withLocalWrite(async () => {
-        const data = await apiPost<{ version: number }>("/api/publish");
-        showToast(`已发布 v${data.version}，问数与动作即刻生效`);
-        await refresh();
-      });
-    } finally {
-      setPublishing(false);
-    }
-  };
-  const discard = async () => {
-    if (publishing) return; // 与发布同一把闸，防连点
-    if (!window.confirm("放弃会连别人刚写的动作和你改的字段一起没。确定放弃？")) return;
-    setPublishing(true);
-    try {
-      await withLocalWrite(async () => {
-        await apiDel("/api/publish");
-        showToast("已放弃改动，回到已发布快照");
-        setCard(null);
+        showToast(await run());
+        if (opts?.closeCard) setCard(null);
         await refresh();
       });
     } finally {
@@ -181,21 +167,27 @@ export default function CanvasPage() {
     }
   };
 
+  const publish = () =>
+    mutate(async () => `已发布 v${(await apiPost<{ version: number }>("/api/publish")).version}，问数与动作即刻生效`);
+
+  const discard = () =>
+    mutate(
+      async () => {
+        await apiDel("/api/publish");
+        return "已放弃改动，回到已发布快照";
+      },
+      { confirm: "放弃会连别人刚写的动作和你改的字段一起没。确定放弃？", closeCard: true }
+    );
+
   /** 回到某版：内容覆盖到当前画布（未发布），版本列表在 VersionsCard 自取。 */
-  const rollback = async (version: number) => {
-    if (rollbacking) return;
-    setRollbacking(true);
-    try {
-      await withLocalWrite(async () => {
+  const rollback = (version: number) =>
+    mutate(
+      async () => {
         await apiPost("/api/versions", { version });
-        showToast(`已用 v${version} 覆盖当前画布（还没发布）`);
-        setCard(null);
-        await refresh();
-      });
-    } finally {
-      setRollbacking(false);
-    }
-  };
+        return `已用 v${version} 覆盖当前画布（还没发布）`;
+      },
+      { closeCard: true }
+    );
 
   // Esc 关一切浮卡。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉。
   // Esc：动作表单开着时不关整卡（表单的取消在 ObjectCard 内自闭环，含脏改动确认）；否则关浮卡 / 面板 / 抽屉
@@ -360,7 +352,7 @@ export default function CanvasPage() {
 
       {/* 版本历史卡：点某版把内容覆盖到当前画布（未发布）；列表自取数（cards/VersionsCard） */}
       {card?.kind === "versions" && (
-        <VersionsCard ont={ont} rollbacking={rollbacking} onRollback={(v) => void rollback(v)} onError={netErr} onClose={() => setCard(null)} />
+        <VersionsCard ont={ont} rollbacking={publishing} onRollback={(v) => void rollback(v)} onError={netErr} onClose={() => setCard(null)} />
       )}
 
       {/* 验收问题集卡 */}

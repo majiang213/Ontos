@@ -11,9 +11,9 @@ import { mustType } from "./mustType";
 type RemovePropertyOp = Extract<DraftOp, { op: "remove_property" }>;
 type UpdatePropertyOp = Extract<DraftOp, { op: "update_property" }>;
 
-/** set_fields 的键跟随、不当引用：拦截面里把它摘出去（别的引用照拦）。 */
+/** set_fields 的键跟随、不当引用：扫描时就按结构排除（exceptAction），别的引用照拦——不拿报错文案当判据。 */
 function blockingRefs(d: OntologyConfig, object: string, name: string): string[] {
-  return referencesOf(d, object, name).filter((r) => r !== `动作 ${object}.${FIELDS_UPDATE_ACTION}`);
+  return referencesOf(d, object, name, { exceptAction: FIELDS_UPDATE_ACTION });
 }
 
 export function removeProperty(d: OntologyConfig, input: RemovePropertyOp): void {

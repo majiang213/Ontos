@@ -1,6 +1,7 @@
 // 告知（inform）变更事件生成 —— 效应计划 + 投影结果进，变更事件数组出（《ontos-article.md》§6.5）。
 // 纯拼装：不查库、不外发（本期预留），随动作结果返回，不静默丢弃。
-// 抽出自 action.ts：事件形状可单测，不必跑完整动作执行。
+// 抽出自 action.ts：事件形状可单测，不必跑完整动作执行。计划（Planned）是成品——
+// createTarget 与 cls 都在计划时定死，本文件只读不求值，不理解「from: generated 不重复发号」这类取值约定。
 
 import type { ActionDef, OntologyConfig } from "../../schema/config";
 import type { ActionRequest } from "../../schema/request";
@@ -25,7 +26,7 @@ export interface NotificationRecord {
   note: string;
 }
 
-/** 变更事件按效应列表逐项生成条目。create 的 target 取解析出的识别值（from: generated 的不重复发号）。 */
+/** 变更事件按效应列表逐项生成条目。create 的 target 读计划的 createTarget（识别值在 planEffect 定死，这里不再求值）。 */
 export function buildNotifications(
   config: OntologyConfig,
   action: ActionDef,
@@ -46,15 +47,9 @@ export function buildNotifications(
     const changeId = idProp ? properties[idProp] : undefined;
     // 条目：效应逐项、项内每个目标个体各一条，带 op / object_class / target；能拿到 change_id 就补 change_id 与 line_id（change_id#序号）
     const lines: NotificationLine[] = plan.flatMap((p): NotificationLine[] => {
-      if (p.kind === "create") {
-        const idPropOfCls = p.cls.def.identity;
-        const spec = idPropOfCls ? p.propSpec[idPropOfCls] : undefined;
-        const resolvable = spec !== undefined && !(typeof spec === "object" && spec !== null && (spec as Record<string, unknown>).from === "generated");
-        const v = resolvable ? resolveValue(spec, idPropOfCls!, ctx) : null;
-        return [{ op: p.kind, object_class: p.cls.name, target: v == null ? null : String(v) }];
-      }
+      if (p.kind === "create") return [{ op: p.kind, object_class: p.cls.name, target: p.createTarget }]; // 识别值在计划时已定死（generated 为 null）
       const keys = p.kind === "link" ? [String(req.identity)] : p.targets.map((t) => t.key);
-      return keys.map((k) => ({ op: p.kind, object_class: p.kind === "link" ? req.object : p.cls.name, target: k }));
+      return keys.map((k) => ({ op: p.kind, object_class: p.cls.name, target: k })); // link 的 cls 也是计划带过来的成品
     });
     return {
       object: inf.object,

@@ -11,8 +11,10 @@ export function connectionInUse(config: OntologyConfig, name: string): boolean {
   return Object.values(config.object_types).some((t) => Object.values(t.sources ?? {}).some((s) => s.connection === name));
 }
 
-/** 删除属性前的引用扫描：源映射、关系配对、转化、公理、同类派生规则、动作（含跨类）。 */
-export function referencesOf(d: OntologyConfig, clsName: string, prop: string): string[] {
+/** 删除属性前的引用扫描：源映射、关系配对、转化、公理、同类派生规则、动作（含跨类）。
+ *  返回的是给人看的 trail 文案（报错消息用）；判定例外走结构参数 exceptAction——
+ *  「set_fields 的键跟随不算断链」这类例外在扫描层就是结构排除，谁也不许拿文案字串当判据。 */
+export function referencesOf(d: OntologyConfig, clsName: string, prop: string, opts?: { exceptAction?: string }): string[] {
   const refs: string[] = [];
   const cls = d.object_types[clsName];
   for (const [src, e] of Object.entries(cls.sources ?? {})) if (e.fields[prop]) refs.push(`源映射 ${src}`);
@@ -26,7 +28,7 @@ export function referencesOf(d: OntologyConfig, clsName: string, prop: string): 
   for (const [p, def] of Object.entries(cls.properties)) {
     if (p !== prop && def.derived && derivedFilterKeys(def.derived).includes(prop)) refs.push(`派生属性 ${p}`);
   }
-  refs.push(...actionRefs(d, clsName, prop));
+  refs.push(...actionRefs(d, clsName, prop, opts?.exceptAction));
   // 他类派生经 $link 落到本类的过滤键（键侧，跨类）
   for (const [hostName, hostCls] of Object.entries(d.object_types)) {
     if (hostName === clsName) continue;
@@ -159,11 +161,13 @@ function derivedFilterKeys(derived: unknown): string[] {
   return derivedConds(derived).flatMap((cond) => filterTopKeys(cond));
 }
 
-/** 动作里的引用：本类 pre 的键；任意效应指向本类时的属性键；$link 目标过滤落回本类的键。 */
-function actionRefs(d: OntologyConfig, clsName: string, prop: string): string[] {
+/** 动作里的引用：本类 pre 的键；任意效应指向本类时的属性键；$link 目标过滤落回本类的键。
+ *  exceptAction：本类上这个名字的动作整跳过（结构例外——set_fields 的键跟随、不算断链）。 */
+function actionRefs(d: OntologyConfig, clsName: string, prop: string, exceptAction?: string): string[] {
   const refs = new Set<string>();
   for (const [hostName, hostCls] of Object.entries(d.object_types)) {
     for (const [actName, act] of Object.entries(hostCls.actions ?? {})) {
+      if (hostName === clsName && actName === exceptAction) continue; // 结构例外，不靠文案识别
       const trail = `动作 ${hostName}.${actName}`;
       if (hostName === clsName && act.pre && filterTopKeys(act.pre).includes(prop)) refs.add(trail);
       collectNestedLinkRefs(d, act.pre, hostName, clsName, prop, trail, (t) => refs.add(t));

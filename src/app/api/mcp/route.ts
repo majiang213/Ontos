@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import { EngineReject } from "@/server/errors";
 import { DraftReject } from "@/server/errors";
-import { getDraft, getPublished } from "@/server/engine/draft/current";
+import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
 import { getDriverRegistry } from "@/server/engine/infra/connections";
 import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
 import { TOOLS, type ToolContext } from "./tools";
@@ -75,6 +75,7 @@ export async function POST(req: Request) {
       driver: await getDriverRegistry(ws),
       config: async () => (space === "draft" ? (await getDraft(ws)).draft : (await getPublished(ws)).config),
       published: async () => (await getPublished(ws)).config,
+      draftView: async () => ({ state: await getDraft(ws), rev: getRev(ws), published: (await getPublished(ws)).config }),
     };
     const out = await tool.handler(ctx, args);
     return rpcOk(id, toolResult(out.payload, out.isError));

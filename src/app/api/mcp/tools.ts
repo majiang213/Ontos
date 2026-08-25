@@ -15,11 +15,12 @@ import { draftClassesPayload, listClasses, readClass, readClassDraft, search } f
 import { listTables } from "@/server/engine/infra/tables";
 import type { DriverRegistry } from "@/server/engine/infra/registry";
 import { editDraft } from "@/server/engine/draft/editDraft";
-import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
+import { getRev } from "@/server/engine/draft/current";
+import type { DraftState } from "@/server/engine/draft/canvasPack";
 import { metaStore } from "@/server/meta/store";
 import { withActionLog, withQueryLog } from "@/server/engine/trail";
 
-/** 处理器上下文：空间、驱动、space 选择与取配置的两个入口。 */
+/** 处理器上下文：空间、驱动、space 选择与取配置的入口。工具层的依赖面就是这张表——handler 不绕过它直取 draft 包。 */
 export interface ToolContext {
   ws: string;
   driver: DriverRegistry;
@@ -28,6 +29,8 @@ export interface ToolContext {
   config(): Promise<OntologyConfig>;
   /** 已发布快照（query/run_action 只读它；草稿视图拿它算状态对照）。 */
   published(): Promise<OntologyConfig>;
+  /** 草稿视图整包：工作副本状态 + rev + 已发布（draft 分支三件套，config()/published() 盖不住它）。 */
+  draftView(): Promise<{ state: DraftState; rev: number; published: OntologyConfig }>;
 }
 
 export interface ToolResult {
@@ -117,9 +120,9 @@ export const TOOLS: ToolDef[] = [
     space: true,
     handler: async (ctx) => {
       if (ctx.space === "draft") {
-        const state = await getDraft(ctx.ws);
+        const { state, rev, published } = await ctx.draftView();
         // payload 形状在 engine（views.draftClassesPayload 纯函数）；这里只剩取数
-        return { payload: draftClassesPayload(state, await ctx.published(), getRev(ctx.ws)) };
+        return { payload: draftClassesPayload(state, published, rev) };
       }
       return { payload: { classes: listClasses(await ctx.published()) } };
     },
@@ -132,8 +135,8 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, args) => {
       const clsName = String(args.name ?? "");
       if (ctx.space === "draft") {
-        const state = await getDraft(ctx.ws);
-        return { payload: readClassDraft(state.draft, await ctx.published(), clsName) };
+        const { state, published } = await ctx.draftView();
+        return { payload: readClassDraft(state.draft, published, clsName) };
       }
       return { payload: readClass(await ctx.published(), clsName) };
     },

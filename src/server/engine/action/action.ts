@@ -112,7 +112,7 @@ async function runActionInner(
       for (const target of p.targets) {
         let v: unknown;
         try {
-          v = resolveValue(p.setSpec[axiom.property], axiom.property, { ...ctx, current: currentView(p.cls, target) });
+          v = resolveValue(p.setSpec[axiom.property], axiom.property, individualEvalCtx(env, p.cls, target, ctx));
         } catch (e) {
           return reject("axiom", err(e));
         }
@@ -153,24 +153,31 @@ async function runActionInner(
 
 /* ---------- 效应计划 ---------- */
 
-/** 效应计划：先解析出计划再投影（notify.ts 的变更事件生成也消费它）。 */
+/** 效应计划：先解析出计划再投影（notify.ts 的变更事件生成也消费它——消费的是成品，不再求值）。
+ *  create 带 createTarget（计划时定死的识别值；from: generated 发号留给投影，此处为 null）；
+ *  link 带 cls（notify 不再拿 req.object 补洞）。 */
 export type Planned =
   | { kind: "update"; cls: Cls; targets: Individual[]; setSpec: Record<string, ValueSource> }
-  | { kind: "create"; cls: Cls; propSpec: Record<string, ValueSource> }
+  | { kind: "create"; cls: Cls; propSpec: Record<string, ValueSource>; createTarget: string | null }
   | { kind: "delete"; cls: Cls; targets: Individual[] }
-  | { kind: "link"; linkName: string; subject: Individual };
+  | { kind: "link"; cls: Cls; linkName: string; subject: Individual };
 
 async function planEffect(env: Env, reqCls: Cls, item: EffectItem, subject: Individual, ctx: EvalContext): Promise<Planned> {
   if ("link" in item) {
     const link = env.config.link_types[item.link];
     if (!link?.transition) throw new Error(`link 只用于转化关系：${item.link}`);
     if (link.from !== reqCls.name || link.to !== reqCls.name) throw new Error(`转化关系 ${item.link} 不在 ${reqCls.name} 上`);
-    return { kind: "link", linkName: item.link, subject };
+    return { kind: "link", cls: reqCls, linkName: item.link, subject };
   }
   if ("create" in item) {
     const cls = mustCls(env.config, item.create.object);
     for (const prop of Object.keys(item.create.properties)) rejectIfDerived(cls, prop);
-    return { kind: "create", cls, propSpec: item.create.properties };
+    // 识别值能定就在计划时定（from: generated 的发号留给投影，不在计划时发）——notify 只读这个结论，不再理解取值约定
+    const idProp = cls.def.identity;
+    const idSpec = idProp ? item.create.properties[idProp] : undefined;
+    const fromGenerated = idSpec !== null && typeof idSpec === "object" && !Array.isArray(idSpec) && (idSpec as Record<string, unknown>).from === "generated";
+    const createTarget = idProp && idSpec !== undefined && !fromGenerated ? String(await Promise.resolve(resolveValue(idSpec, idProp, ctx))) : null;
+    return { kind: "create", cls, propSpec: item.create.properties, createTarget };
   }
   const op = "update" in item ? item.update : item.delete;
   const cls = mustCls(env.config, op.object);
@@ -201,6 +208,12 @@ function rejectIfDerived(cls: Cls, prop: string) {
   if (def.derived) throw new Error(`派生属性不能写入：${cls.name}.${prop}`);
 }
 
+/** 个体求值视图（唯一构造点）：current 读源列值、派生属性按需现算。
+ *  公理校验与投影求值共用这一处——两处各建视图时缺过 currentDerived，同一属性在两阶段读出不一致的值。 */
+function individualEvalCtx(env: Env, cls: Cls, target: Individual, ctx: EvalContext): EvalContext {
+  return { ...ctx, current: currentView(cls, target), currentDerived: (prop) => evalDerived(cls, target, prop, env, ctx) };
+}
+
 /* ---------- 写回：表在哪、插还是改，按效应和 sources 推出 ----------
    project 只做分派；四种写回各一个函数。两层分清：「哪些源能承接这次变化」（承接规则）
    与「这一行怎么插/改、方言怎么归一」（单源写入细节）——后者收在各函数内部的小函数里。 */
@@ -227,11 +240,7 @@ async function projectUpdate(env: Env, p: Extract<Planned, { kind: "update" }>, 
   for (const target of p.targets) {
     let setVals: Record<string, unknown>;
     try {
-      const evalCtx: EvalContext = {
-        ...ctx,
-        current: currentView(p.cls, target),
-        currentDerived: (prop) => evalDerived(p.cls, target, prop, env, ctx),
-      };
+      const evalCtx = individualEvalCtx(env, p.cls, target, ctx);
       setVals = Object.fromEntries(
         Object.entries(p.setSpec).map(([prop, spec]) => [prop, resolveValue(spec, prop, evalCtx)])
       );
@@ -359,7 +368,7 @@ async function projectLink(env: Env, p: Extract<Planned, { kind: "link" }>, req:
   const subject = p.subject;
   for (const [srcName, entry] of sourcesOf(cls)) {
     if (subject.rows[srcName] != null) continue; // 已有行的源不动
-    const idProp = cls.def.identity;
+    const idProp = sourceKeyProp(cls.def, entry); // 对齐属性随源条目（部分重叠的上位对象有显式 key），不绕过单源
     if (!idProp || !entry.fields[idProp]) continue;
     try {
       const row: Record<string, unknown> = {};

@@ -1,6 +1,6 @@
 // 变更事件生成（buildNotifications）直测：不跑完整动作执行，直接钉事件形状。
 // 钉的点：change_id 合成规则（identity 已填用之；没填按声明顺序 | 拼接）、条目的 op/object_class/target、
-// create 的 from: generated 不重复发号、link 的 target 是请求识别值、投影失败进 note。
+// create 只读计划的 createTarget（识别值在 planEffect 定死，执行链覆盖）、link 的 target 是请求识别值、投影失败进 note。
 
 import { describe, expect, it } from "vitest";
 import { buildNotifications } from "../server/engine/action/notify";
@@ -81,10 +81,10 @@ describe("buildNotifications（变更事件形状）", () => {
     expect(n.lines).toEqual([{ op: "delete", object_class: "equipment", target: "SN-1" }]);
   });
 
-  it("create：target 取解析出的识别值；from: generated 不重复发号（target null）", () => {
+  it("create：target 只读计划的 createTarget（generated 的 null 是计划时就定好的结论）", () => {
     const plan: Planned[] = [
-      { kind: "create", cls: cls("warranty_card"), propSpec: { serial_no: "WC-9" } },
-      { kind: "create", cls: cls("warranty_card"), propSpec: { serial_no: { from: "generated" } } },
+      { kind: "create", cls: cls("warranty_card"), propSpec: { serial_no: "WC-9" }, createTarget: "WC-9" },
+      { kind: "create", cls: cls("warranty_card"), propSpec: { serial_no: { from: "generated" } }, createTarget: null },
     ];
     const [n] = buildNotifications(config, action({ action_name: { from: "action" } }), plan, req, ctx, okProj);
     expect(n.lines.map((l) => [l.op, l.object_class, l.target])).toEqual([
@@ -93,8 +93,8 @@ describe("buildNotifications（变更事件形状）", () => {
     ]);
   });
 
-  it("link：object_class 是请求点名的类，target 是请求识别值；投影失败进 note", () => {
-    const plan: Planned[] = [{ kind: "link", linkName: "converted", subject: ind("SN-1") }];
+  it("link：object_class 取计划带的类，target 是请求识别值；投影失败进 note", () => {
+    const plan: Planned[] = [{ kind: "link", cls: cls("equipment"), linkName: "converted", subject: ind("SN-1") }];
     const [n] = buildNotifications(config, action({ action_name: { from: "action" } }), plan, req, ctx, [
       { source: "-", table: "-", op: "update", ok: false, error: "x" },
     ]);
