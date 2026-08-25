@@ -63,10 +63,10 @@ async function runActionInner(
   req: ActionRequest,
   opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number> }
 ): Promise<ActionResult> {
-  if (!config.object_types[req.object]) return reject("pre", `配置中没有类：${req.object}`);
+  if (!config.object_types[req.object]) return reject("pre", MSG.classNotInConfig(req.object));
   const cls = mustCls(config, req.object);
   const action: ActionDef | undefined = cls.def.actions?.[req.action];
-  if (!action) return reject("pre", `${req.object} 上没有动作：${req.action}`);
+  if (!action) return reject("pre", MSG.actionNotOnClass(req.object, req.action));
 
   const env = createEnv(config, driver);
   const ctx: EvalContext = {
@@ -91,7 +91,7 @@ async function runActionInner(
     } catch (e) {
       return reject("pre", e instanceof Error ? e.message : String(e));
     }
-    if (!preOk) return reject("pre", "前置不满足");
+    if (!preOk) return reject("pre", MSG.preNotSatisfied);
   }
 
   // 第 6 步：按效应确定存在上的变化（先解析出计划，不急着投影）
@@ -118,7 +118,7 @@ async function runActionInner(
           return reject("axiom", err(e));
         }
         if (seen.has(target.key) && seen.get(target.key) !== v) {
-          return reject("axiom", `违反公理 ${axiomName}：${axiom.property} 被赋两个值`);
+          return reject("axiom", MSG.axiomConflict(axiomName, axiom.property));
         }
         seen.set(target.key, v);
       }
@@ -132,7 +132,7 @@ async function runActionInner(
     try {
       const recs = await project(env, p, req, ctx);
       if (recs.length === 0) {
-        projections.push({ source: "-", table: "-", op, ok: false, error: "没有来源能承接这次变化（字段没映射，或源库里没这行）" });
+        projections.push({ source: "-", table: "-", op, ok: false, error: MSG.noSourceCarriesChange });
       } else {
         projections.push(...recs);
       }
@@ -246,7 +246,7 @@ async function projectUpdate(env: Env, p: Extract<Planned, { kind: "update" }>, 
         Object.entries(p.setSpec).map(([prop, spec]) => [prop, resolveValue(spec, prop, evalCtx)])
       );
     } catch (e) {
-      out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 取值失败：${err(e)}` });
+      out.push({ source: "-", table: "-", op: "update", ok: false, error: MSG.targetValueFailed(target.key, err(e)) });
       continue;
     }
     let handled = 0;
@@ -257,7 +257,7 @@ async function projectUpdate(env: Env, p: Extract<Planned, { kind: "update" }>, 
       out.push(await updateOneSource(env, p, srcName, entry, row!, setVals, changed));
     }
     if (handled === 0) {
-      out.push({ source: "-", table: "-", op: "update", ok: false, error: `个体 ${target.key} 没有来源能承接这次变化（字段没映射，或源库里没这行）` });
+      out.push({ source: "-", table: "-", op: "update", ok: false, error: MSG.targetNoSourceCarries(target.key) });
     }
   }
   return out;
@@ -287,8 +287,8 @@ async function updateOneSource(
     if (n > 0) return { source: srcName, table: entry.table, op: "update", ok: true };
     const already = await rereadMatchesTarget(env, entry, keyCol, row[keyCol], changed, set);
     return already
-      ? { source: srcName, table: entry.table, op: "update", ok: true, note: "已是目标值，没重复写" }
-      : { source: srcName, table: entry.table, op: "update", ok: false, error: "条件更新未命中（行可能已被并发改动）" };
+      ? { source: srcName, table: entry.table, op: "update", ok: true, note: MSG.noteAlreadyTarget }
+      : { source: srcName, table: entry.table, op: "update", ok: false, error: MSG.updateNoHit };
   } catch (e) {
     return { source: srcName, table: entry.table, op: "update", ok: false, error: err(e) };
   }
@@ -334,7 +334,7 @@ async function projectCreate(env: Env, p: Extract<Planned, { kind: "create" }>, 
   for (const [srcName, entry] of targets) {
     try {
       if (await alreadyInserted(env, p, entry, vals)) {
-        out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: "已有这行，没重复插" });
+        out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: MSG.noteAlreadyInserted });
         continue;
       }
       const row: Record<string, unknown> = {};

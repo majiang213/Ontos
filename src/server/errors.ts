@@ -115,6 +115,15 @@ export const MSG = {
   effectPropUnknown: (cls: string, prop: string) => `效应里的名字对不上配置：${cls}.${prop}`,
   derivedNoWrite: (cls: string, prop: string) => `派生属性不能写入：${cls}.${prop}`,
   noSourceCarries: (cls: string) => `没有源能承接 ${cls} 的全部所赋属性`,
+  actionNotOnClass: (object: string, action: string) => `${object} 上没有动作：${action}`,
+  preNotSatisfied: "前置不满足",
+  axiomConflict: (name: string, prop: string) => `违反公理 ${name}：${prop} 被赋两个值`,
+  noSourceCarriesChange: "没有来源能承接这次变化（字段没映射，或源库里没这行）",
+  targetNoSourceCarries: (key: string) => `个体 ${key} 没有来源能承接这次变化（字段没映射，或源库里没这行）`,
+  targetValueFailed: (key: string, detail: string) => `个体 ${key} 取值失败：${detail}`,
+  updateNoHit: "条件更新未命中（行可能已被并发改动）",
+  noteAlreadyTarget: "已是目标值，没重复写",
+  noteAlreadyInserted: "已有这行，没重复插",
 
   // 裁决（adjudication：资格闸与定案应用；applyVerdict 的 Error 会被 mutateDraft 包装成用户可见拒绝）
   classPairNotFound: (a: string, b: string) => `类不存在：${a} 或 ${b}`,
@@ -191,6 +200,8 @@ export const MSG = {
   cannedWsOnly: "离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   cannedScriptOnly: "离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   openaiModelMissing: "OPENAI_MODEL 未设置：接真模型必须显式指定模型名",
+  noSuchConnection: "没有这个连接",
+  connectionReadFailed: "连接失败或读取表结构失败",
 
   // 元库（meta/stores：工作副本行读回）
   workingPackBadJson: "工作副本读不回来：不是合法 JSON",
@@ -204,5 +215,14 @@ export const MSG = {
   zodConfigShape: "配置结构不合法",
   connectionNameBad: "连接名必须是小写字母/数字/下划线",
   pairSelfOverlap: "自己和自己不算疑似重复",
+  internalError: "内部错误",
+  unauthorizedWrite: "未授权：写操作需要有效的令牌",
+  rpcBadRequest: "不是合法请求：需要 { method, params?, id? }",
+  rpcUnknownMethod: (method: string) => `未知方法：${method}`,
+  rpcMissingToolName: "tools/call 缺 params.name",
+  rpcUnknownTool: (name: string) => `未知工具：${name}`,
+  rpcNoSpace: "这个工具不接受 space",
+  rpcSpaceValues: "space 只认 published 或 draft",
+  rpcBadParams: "入参形状不合法",
   pairSelfDecide: "class_a 与 class_b 不能是同一个类",
 } as const;

@@ -20,7 +20,7 @@ export async function bodyJson(req: Request): Promise<unknown> {
 /** 统一的 500 形状：固定文案；detail（内部错误细节）只在非生产环境给，生产不透。 */
 export function internalError(e: unknown): NextResponse {
   const detail = e instanceof Error ? e.message : String(e);
-  return NextResponse.json({ error: "内部错误", ...(process.env.NODE_ENV === "production" ? {} : { detail }) }, { status: 500 });
+  return NextResponse.json({ error: MSG.internalError, ...(process.env.NODE_ENV === "production" ? {} : { detail }) }, { status: 500 });
 }
 
 /**
@@ -61,5 +61,5 @@ export function requireWriteAuth(req: Request): NextResponse | null {
   if (!token) return null;
   const got = req.headers.get("authorization");
   if (got === `Bearer ${token}`) return null;
-  return NextResponse.json({ error: "未授权：写操作需要有效的令牌" }, { status: 401 });
+  return NextResponse.json({ error: MSG.unauthorizedWrite }, { status: 401 });
 }

@@ -29,7 +29,7 @@ export async function listTables(
   opts: { connection?: string; sample?: number } = {}
 ): Promise<{ connection: string; tables: (TableInfo & { sample?: Record<string, unknown>[] })[]; error?: string }[]> {
   if (opts.connection !== undefined && !registry.has(opts.connection)) {
-    return [{ connection: opts.connection, tables: [], error: "没有这个连接" }];
+    return [{ connection: opts.connection, tables: [], error: MSG.noSuchConnection }];
   }
   const out: { connection: string; tables: (TableInfo & { sample?: Record<string, unknown>[] })[]; error?: string }[] = [];
   for (const connection of opts.connection ? [opts.connection] : registry.connectionNames()) {
@@ -42,7 +42,7 @@ export async function listTables(
         ),
       });
     } catch {
-      out.push({ connection, tables: [], error: "连接失败或读取表结构失败" });
+      out.push({ connection, tables: [], error: MSG.connectionReadFailed });
     }
   }
   return out;

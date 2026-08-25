@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import { EngineReject } from "@/server/errors";
-import { DraftReject } from "@/server/errors";
+import { DraftReject, MSG } from "@/server/errors";
 import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
 import { getDriverRegistry } from "@/server/engine/infra/connections";
 import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
@@ -37,10 +37,10 @@ export async function POST(req: Request) {
     try {
       raw = await req.json();
     } catch {
-      return rpcErr(null, -32700, "请求体不是合法 JSON");
+      return rpcErr(null, -32700, MSG.bodyNotJson);
     }
     const parsed = requestSchema.safeParse(raw);
-    if (!parsed.success) return rpcErr(null, -32600, "不是合法请求：需要 { method, params?, id? }");
+    if (!parsed.success) return rpcErr(null, -32600, MSG.rpcBadRequest);
     const body = parsed.data;
     id = body.id ?? null;
 
@@ -50,24 +50,24 @@ export async function POST(req: Request) {
     // JSON-RPC 通知不应有响应（Streamable HTTP：202 空体）
     if (body.method.startsWith("notifications/")) return new NextResponse(null, { status: 202 });
     if (body.method === "tools/list") return rpcOk(id, { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
-    if (body.method !== "tools/call") return rpcErr(id, -32601, `未知方法：${body.method}`);
+    if (body.method !== "tools/call") return rpcErr(id, -32601, MSG.rpcUnknownMethod(body.method));
 
     const name = body.params?.name as string | undefined;
-    if (!name) return rpcErr(id, -32602, "tools/call 缺 params.name");
+    if (!name) return rpcErr(id, -32602, MSG.rpcMissingToolName);
     const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
     const ws = wsOf(req);
     const tool = TOOLS.find((t) => t.name === name);
-    if (!tool) return rpcErr(id, -32601, `未知工具：${name}`);
-    if ("space" in args && !tool.space) return rpcErr(id, -32602, "这个工具不接受 space"); // 不能假装查了草稿却返回已发布世界
+    if (!tool) return rpcErr(id, -32601, MSG.rpcUnknownTool(name));
+    if ("space" in args && !tool.space) return rpcErr(id, -32602, MSG.rpcNoSpace); // 不能假装查了草稿却返回已发布世界
     let space: "published" | "draft" = "published";
     if (tool.space) {
       const sp = spaceSchema.safeParse(args.space);
-      if (!sp.success) return rpcErr(id, -32602, "space 只认 published 或 draft");
+      if (!sp.success) return rpcErr(id, -32602, MSG.rpcSpaceValues);
       space = sp.data ?? "published";
     }
     if (tool.auth) {
       const denied = requireWriteAuth(req);
-      if (denied) return rpcErr(id, -32001, "未授权：写操作需要有效的令牌");
+      if (denied) return rpcErr(id, -32001, MSG.unauthorizedWrite);
     }
     const ctx: ToolContext = {
       ws,
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     const out = await tool.handler(ctx, args);
     return rpcOk(id, toolResult(out.payload, out.isError));
   } catch (e) {
-    if (e instanceof ZodError) return rpcErr(id, -32602, "入参形状不合法");
+    if (e instanceof ZodError) return rpcErr(id, -32602, MSG.rpcBadParams);
     if (e instanceof BadRequest) return rpcErr(id, -32602, e.message);
     if (e instanceof EngineReject) return rpcErr(id, -32000, e.message);
     if (e instanceof DraftReject) return rpcErr(id, -32000, e.message); // 与 EngineReject 同档（REST 侧是 422）
