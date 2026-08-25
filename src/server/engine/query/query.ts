@@ -13,6 +13,12 @@ import { mustCls, mustLink, propValue, type Cls, type Env, type Individual } fro
 
 const DEFAULT_LIMIT = 200; // 查询治理：请求不写 limit 时的兜底上限
 
+/** 聚合指标的产出列名（唯一出处）：count:* → "count"，avg:price → "avg_price"。
+ *  order 合法集与聚合产出必须用同一命名，改规则只许改这里。 */
+function metricColumn(op: string, field: string): string {
+  return field === "*" ? op : `${op}_${field}`;
+}
+
 /* ---------- 查询树求值 ---------- */
 
 export interface QueryResult {
@@ -83,7 +89,7 @@ export async function query(config: OntologyConfig, driver: SourceDriver, req: Q
           ...req.aggregate.group_by,
           ...req.aggregate.metrics.map((m) => {
             const [op, f] = Object.entries(m)[0];
-            return f === "*" ? op : `${op}_${f}`;
+            return metricColumn(op, f);
           }),
         ])
       : new Set(req.properties ?? Object.keys(cls.def.properties)); // 按未返回的属性排序等于按 undefined 排，拒绝
@@ -176,7 +182,7 @@ async function aggregate(cls: Cls, individuals: Individual[], agg: NonNullable<Q
       for (const m of members) all.push((await viewOf(m))[field]);
       const vals = all.filter((v): v is number => typeof v === "number");
       if (op !== "count") dropped += all.length - vals.length;
-      const name = field === "*" ? op : `${op}_${field}`;
+      const name = metricColumn(op, field);
       if (op === "count") row[name] = field === "*" ? members.length : all.filter((v) => v != null).length; // count:"*" 数行，count:"字段" 数非空值（同 SQL）
       else if (op === "avg") row[name] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
       else if (op === "sum") row[name] = vals.reduce((a, b) => a + b, 0);

@@ -17,6 +17,12 @@ export async function bodyJson(req: Request): Promise<unknown> {
   }
 }
 
+/** 「生产不透内部错误细节」的唯一出处：生产给固定文案，明细只在非生产环境给。
+ *  REST（internalError）与 MCP（route 的 -32603）同调这一处，不各写一遍闸。 */
+export function internalErrorMessage(e: unknown): string {
+  return process.env.NODE_ENV === "production" ? MSG.internalError : e instanceof Error ? e.message : String(e);
+}
+
 /** 统一的 500 形状：固定文案；detail（内部错误细节）只在非生产环境给，生产不透。 */
 export function internalError(e: unknown): NextResponse {
   const detail = e instanceof Error ? e.message : String(e);

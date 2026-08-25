@@ -29,7 +29,7 @@ function sourceView(cls: Cls, ind: Individual, src: string): Record<string, unkn
   return out;
 }
 
-export async function whenRuleHits(cls: Cls, ind: Individual, rule: WhenRule, env: Env, ctx: EvalContext): Promise<boolean> {
+async function whenRuleHits(cls: Cls, ind: Individual, rule: WhenRule, env: Env, ctx: EvalContext): Promise<boolean> {
   for (const [src, cond] of Object.entries(rule.when)) {
     if (!(await whenKeyHolds(cls, ind, src, cond as boolean | Filter, env, ctx))) return false;
   }

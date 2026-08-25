@@ -63,7 +63,8 @@ export class VersionChainStore extends ConcernStore {
     }
   }
 
-  /** upsert 工作行：version IS NULL 不进 UNIQUE 约束，「每空间恰一行」的纪律收在这一处。 */
+  /** upsert 工作行：version IS NULL 不进 UNIQUE 约束——「每空间恰一行」的保证者不在本函数
+   *  （SELECT 后 INSERT 拦不住并发双行），是上游的每空间写队列（runtime tails，editDraft/versions 都经它串行）。 */
   async setWorkingPack(ws: string, pack: unknown): Promise<void> {
     const id = await this.wsId(ws);
     const existing = await this.backend.get(`SELECT id FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);

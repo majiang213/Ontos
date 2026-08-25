@@ -11,7 +11,7 @@ type ImportObjectsOp = Extract<DraftOp, { op: "import_objects" }>;
 export function importObjects(d: OntologyConfig, input: ImportObjectsOp): void {
   const staged: [string, OntologyConfig["object_types"][string]][] = [];
   for (const [name, raw] of Object.entries(input.objects)) {
-    if (!NAME_RE.test(name)) throw new DraftReject(MSG.classNameBadOn(name));
+    if (!NAME_RE.test(name)) throw new DraftReject(MSG.classNameBad(name));
     if (d.object_types[name]) throw new DraftReject(MSG.classExists(name));
     staged.push([name, draftObjectSchema.parse(raw)]); // 逐类过结构校验；草稿路径剥掉 actions/axioms（动作只走 set_action）
   }

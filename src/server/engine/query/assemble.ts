@@ -58,7 +58,7 @@ export function createEnv(config: OntologyConfig, driver: SourceDriver): Env {
         if (targetFilter !== undefined) throw new EngineReject(MSG.transitionNoTargetFilter(linkName));
         return transitionHolds(cls, ind, link, env, ctx);
       }
-      const merged = matchConds(cls, ind, link, reversed, targetFilter as Filter | undefined, (k) => MSG.filterConflictsPair(k, linkName));
+      const merged = matchConds(cls, ind, link, reversed, targetFilter as Filter | undefined, (k) => MSG.filterConflictsPair(linkName, k));
       if (!merged) return false;
       const targetClsName = reversed ? link.from : link.to;
       return (await selectIndividuals(env, targetClsName, { filter: merged, ctx })).length > 0;

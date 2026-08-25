@@ -20,6 +20,11 @@ export function treatsNullAsUntilNow(op: string): boolean {
   return op === "gt" || op === "gte";
 }
 
+/** 「空=至今」expected 为空侧（与 treatsNullAsUntilNow 同一条语义的两半）：比较目标为空时这些运算符成立。 */
+export function treatsExpectedNullAsUntilNow(op: string): boolean {
+  return op === "lt" || op === "lte";
+}
+
 /** 源条目的对齐属性（唯一出处）：条目 key 省略则用类的 identity。
  *  消费方：individual.keyColumn（认行的列）、validate（fields 缺对齐属性的拦截）、action 的 create 幂等。 */
 export function sourceKeyProp(cls: ObjectType, entry: { key?: string }): string | undefined {

@@ -30,8 +30,7 @@ export const MSG = {
   // 草稿编辑 op（draft/ops、editDraft、versions、canvasPack）
   classNotFound: (name: string) => `类不存在：${name}`,
   classExists: (name: string) => `类已存在：${name}`,
-  classNameBad: "类名必须是小写字母/数字/下划线，字母开头",
-  classNameBadOn: (name: string) => `类名必须是小写字母/数字/下划线，字母开头：${name}`,
+  classNameBad: (name: string) => `类名必须是小写字母/数字/下划线，字母开头：${name}`,
   classNotFoundReplace: (name: string) => `类不存在：${name}，新建请用 import_objects`,
   propNameBad: "属性名必须是小写字母/数字/下划线，字母开头",
   propExists: (name: string) => `属性已存在：${name}`,
@@ -183,7 +182,7 @@ export const MSG = {
   propertiesPropUnknown: (cls: string, p: string) => `properties 里的名字对不上配置：${cls}.${p}`,
   aggregateUnknown: (op: string) => `未知聚合：${op}`,
   expandFilterConflict: (relation: string, k: string) => `展开 ${relation} 的目标侧过滤 ${k} 与配对字段冲突`,
-  filterConflictsPair: (k: string, link: string) => `目标侧过滤 ${k} 与关系 ${link} 的配对字段冲突`,
+  filterConflictsPair: (link: string, k: string) => `目标侧过滤 ${k} 与关系 ${link} 的配对字段冲突`, // 兄弟文案参数同序（link 在前），防传反
 
   // 基础设施 infra（连接生命周期、驱动注册表、工作空间、LLM 槽位）
   sqliteNeedsPath: "sqlite 连接必须给文件路径（db_name）",
@@ -197,8 +196,7 @@ export const MSG = {
   connectionUnregistered: (connection: string) => `未注册的连接：${connection}`,
   introspectUnsupported: (connection: string) => `连接 ${connection} 不支持内省`,
   sampleUnsupported: (connection: string) => `连接 ${connection} 不支持采样`,
-  wsNameBad: (ws: string) => `空间名不合法：${ws}`,
-  wsNameBadFull: (name: string) => `空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`,
+  wsNameBad: (name: string) => `空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`,
   wsExists: (name: string) => `空间已存在：${name}`,
   cannedWsOnly: "离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   cannedScriptOnly: "离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",

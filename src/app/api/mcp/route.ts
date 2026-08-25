@@ -9,7 +9,7 @@ import { EngineReject } from "@/server/errors";
 import { DraftReject, MSG } from "@/server/errors";
 import { getDraft, getPublished, getRev } from "@/server/engine/draft/current";
 import { getDriverRegistry } from "@/server/engine/infra/connections";
-import { BadRequest, requireWriteAuth, wsOf } from "@/app/api/_shared";
+import { BadRequest, internalErrorMessage, requireWriteAuth, wsOf } from "@/app/api/_shared";
 import { TOOLS, type ToolContext } from "./tools";
 
 const rpcOk = (id: unknown, result: unknown) => NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result });
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
     if (e instanceof BadRequest) return rpcErr(id, -32602, e.message);
     if (e instanceof EngineReject) return rpcErr(id, -32000, e.message);
     if (e instanceof DraftReject) return rpcErr(id, -32000, e.message); // 与 EngineReject 同档（REST 侧是 422）
-    // 兜底不透内部细节：驱动 SQL 报错含表名/主机/连接细节——REST 有生产闸（_shared），MCP 同一纪律
-    return rpcErr(id, -32603, process.env.NODE_ENV === "production" ? MSG.internalError : e instanceof Error ? e.message : String(e));
+    // 兜底不透内部细节：驱动 SQL 报错含表名/主机/连接细节——闸与 REST 同一处（_shared.internalErrorMessage）
+    return rpcErr(id, -32603, internalErrorMessage(e));
   }
 }

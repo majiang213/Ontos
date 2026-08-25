@@ -8,6 +8,7 @@ import Bezel from "./Bezel";
 import { ActionForm } from "../forms/ActionForm";
 import { FieldForm, Section } from "./FieldForm";
 import { effectSummary, formCompatible } from "../forms/actionView";
+import { MSG } from "../../server/errors";
 import type { ObjectType } from "../../server/schema/config";
 
 export type ActionFormState = { mode: "create" } | { mode: "edit"; name: string } | null;
@@ -152,7 +153,7 @@ export default function ObjectCard({
                   <button className="chip" style={{ fontSize: 11 }} title="编辑这个字段" onClick={() => setFieldForm({ mode: "edit", name: p })}>编辑</button>
                   <button
                     className="x-btn"
-                    title={sel.identity === p ? "唯一键不能直接删，先在上方换一个" : "删除字段"}
+                    title={sel.identity === p ? MSG.propIdentityNoDelete : "删除字段"}
                     onClick={() => void op({ op: "remove_property", object: name, name: p })}
                   >
                     ✕

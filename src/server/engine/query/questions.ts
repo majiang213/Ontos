@@ -8,6 +8,7 @@ import { query } from "./query";
 import { getSlot, type LlmSlot } from "../llm/slot";
 import { getDriverRegistry } from "../infra/connections";
 import { getDraft, getPublished } from "../draft/current";
+import { Q_STATUS, type QuestionStatus } from "./questionStatus";
 import { metaStore } from "../../meta/store";
 
 /** 期望结果的合法写法：留空（能查出就算过）/ 纯数字（比对行数）/ 字段=值（至少一行对上）。 */
@@ -41,7 +42,7 @@ export function checkExpected(raw: string | undefined, rows: Record<string, unkn
 export interface QuestionRunResult {
   id: number;
   question: string;
-  status: string;
+  status: QuestionStatus;
   detail: string;
 }
 
@@ -56,7 +57,7 @@ export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: L
   const targets = opts.onlyId === undefined ? all : all.filter((q) => q.id === opts.onlyId);
   const results: QuestionRunResult[] = [];
   for (const q of targets) {
-    let status = "通过";
+    let status: QuestionStatus = Q_STATUS.pass;
     let detail = "";
     try {
       const parsed = await slot.nlToQuery(q.question, config, ws);
@@ -64,15 +65,15 @@ export async function runQuestions(ws: string, opts: { onlyId?: number; slot?: L
         const { rows } = await query(config, registry, parsed);
         const bad = checkExpected(q.expected, rows);
         if (bad) {
-          status = "答案不符";
+          status = Q_STATUS.wrong;
           detail = bad;
         }
       } catch (e) {
-        status = "执行出错";
+        status = Q_STATUS.error;
         detail = e instanceof Error ? e.message : String(e);
       }
     } catch (e) {
-      status = "编译失败";
+      status = Q_STATUS.compileFail;
       detail = e instanceof Error ? e.message : String(e);
     }
     if (!draft) await metaStore().setQuestionStatus(ws, q.id, status, version ?? undefined, detail || undefined); // 试跑不碰验收记录

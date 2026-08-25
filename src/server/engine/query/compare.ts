@@ -1,5 +1,7 @@
 // 行级比较 —— 操作数求值与条件核对，纯叶子（不依赖 individual：不碰个体、不查配置）。
 // 过滤形状校验（assertFilterShapes）也在这：查询与动作入口各跑一次，下推与内存共用同一把尺。
+// 「一条过滤成不成立」的地图（四层各一段，读哪层开哪个）：形状校验在本文件；个体/派生核对在 evaluate.ts；
+// 运算符语义（含「空=至今」）在 filterOp.ts；字面量与日期/数字表达式在 expr.ts。下推编成另有一条链（assemble → filterOp.pushCondition）。
 
 import type { Filter } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";

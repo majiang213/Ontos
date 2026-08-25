@@ -37,7 +37,7 @@ export function ensureWorkspace(ws: string): Promise<number> {
 
 /** 新建空间（空白起步：空本体、无连接，从连接数据源开始玩）。 */
 export async function createWorkspace(name: string): Promise<void> {
-  if (!isWsName(name)) throw new WsReject(MSG.wsNameBadFull(name));
+  if (!isWsName(name)) throw new WsReject(MSG.wsNameBad(name));
   if ((await metaStore().listWorkspaces()).includes(name)) throw new WsReject(MSG.wsExists(name));
   await metaStore().ensureWorkspace(name, seedYamlFor(name));
 }

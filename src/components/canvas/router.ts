@@ -211,7 +211,7 @@ function quad(p0: Pt, c: Pt, p1: Pt, t: number): Pt {
 }
 
 /** 采样点列按弧长的中点（标签/捏点的落位），以及中点处的单位切向（标签沿法线让开线身用）。 */
-export function polylineMid(pts: Pt[]): Pt {
+function polylineMid(pts: Pt[]): Pt {
   return polylineMidDir(pts).mid;
 }
 
@@ -283,17 +283,14 @@ function roundedTier(pts: Pt[]): SmoothSeg {
   return { d, samples };
 }
 
-/** 折线 → 平滑曲线。三档：流动曲线（拐角扫大弧）→ 圆角折线 → 原折线；逐档采样验障（与路由同口径外扩），碰节点就降档。 */
-export function smoothPath(pts: Pt[], obstacles: RouteRect[]): { d: string; mid: Pt; dir: Pt } {
-  const inflated = obstacles.map((r) => ({ x: r.x - INFLATE, y: r.y - INFLATE, w: r.w + INFLATE * 2, h: r.h + INFLATE * 2 }));
+/** 折线 → 平滑曲线。三档：流动曲线（拐角扫大弧）→ 圆角折线 → 原折线；逐档采样验障（外扩与免检同 clearOf 一处），碰节点就降档。 */
+function smoothPath(pts: Pt[], obstacles: RouteRect[]): { d: string; mid: Pt; dir: Pt } {
+  const inflated = inflateOf(obstacles);
   const first = pts[0];
   const last = pts[pts.length - 1];
-  // 端点桩区（STUB+8）免检：端点本就在自家节点的外扩区里，不算穿
-  const nearEnd = (p: Pt) => Math.hypot(p.x - first.x, p.y - first.y) < STUB + 8 || Math.hypot(p.x - last.x, p.y - last.y) < STUB + 8;
-  const clear = (samples: Pt[]) => !samples.some((p) => !nearEnd(p) && inflated.some((r) => p.x > r.x && p.x < r.x + r.w && p.y > r.y && p.y < r.y + r.h));
   for (const tier of [flowTier, roundedTier]) {
     const { d, samples } = tier(pts);
-    if (clear(samples)) return { d: `M ${pts[0].x},${pts[0].y} ${d}`, ...polylineMidDir(samples) };
+    if (clearOf(samples, inflated, first, last)) return { d: `M ${pts[0].x},${pts[0].y} ${d}`, ...polylineMidDir(samples) };
   }
   const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x},${p.y}`).join(" "); // 路由出来的折线本身必通
   return { d, ...polylineMidDir(pts) };
@@ -303,7 +300,7 @@ export function smoothPath(pts: Pt[], obstacles: RouteRect[]): { d: string; mid:
 export function routeOrthogonal(from: RouteEnd, to: RouteEnd, obstacles: RouteRect[], waypoint?: Pt | null): Pt[] {
   const s = stubOf(from);
   const t = stubOf(to);
-  const inflated = obstacles.map((r) => ({ x: r.x - INFLATE, y: r.y - INFLATE, w: r.w + INFLATE * 2, h: r.h + INFLATE * 2 }));
+  const inflated = inflateOf(obstacles);
   const pts = [s, t, ...(waypoint ? [waypoint] : [])];
   const xs = pts.map((p) => p.x).concat(inflated.map((r) => r.x), inflated.map((r) => r.x + r.w));
   const ys = pts.map((p) => p.y).concat(inflated.map((r) => r.y), inflated.map((r) => r.y + r.h));

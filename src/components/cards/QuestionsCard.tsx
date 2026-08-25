@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiDel, apiGet, apiPost } from "../wsClient";
+import { Q_STATUS } from "../../server/engine/query/questionStatus";
 import Bezel from "./Bezel";
 
 interface QItem {
@@ -47,11 +48,11 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
 
   /** 状态标签：未跑 / 待重跑（上次跑的版本落后于当前已发布）/ vN 结果。 */
   const tagOf = (q: QItem): { label: string; cls: string; hint?: string } => {
-    if (q.status === "未跑") return { label: "未跑", cls: "tag" };
+    if (q.status === Q_STATUS.pending) return { label: "未跑", cls: "tag" };
     if (q.version && curVer && q.version < curVer) {
       return { label: "待重跑", cls: "tag tag-warn", hint: `上次在 v${q.version} 跑，结果「${q.status}」；本体已到 v${curVer}` };
     }
-    return { label: `v${q.version} ${q.status}`, cls: `tag ${q.status === "通过" ? "tag-ok" : "tag-warn"}` };
+    return { label: `v${q.version} ${q.status}`, cls: `tag ${q.status === Q_STATUS.pass ? "tag-ok" : "tag-warn"}` };
   };
 
   const runOne = async (id: number) => {
@@ -60,7 +61,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
     try {
       const data = await apiPost<{ results?: { status: string; detail: string }[]; version: number }>("/api/questions?run=1", { id });
       const r = data.results?.[0];
-      showToast(r && r.status !== "通过" ? `${r.status}：${r.detail}` : `这条通过（v${data.version}）`);
+      showToast(r && r.status !== Q_STATUS.pass ? `${r.status}：${r.detail}` : `这条通过（v${data.version}）`);
       await load();
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -99,7 +100,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
                     {d ? (
                       d.detail ? (
                         <button
-                          className={`tag ${d.status === "通过" ? "tag-ok" : "tag-warn"}`}
+                          className={`tag ${d.status === Q_STATUS.pass ? "tag-ok" : "tag-warn"}`}
                           style={{ border: 0, cursor: "pointer", font: "inherit" }}
                           title="草稿试跑结果，不落验收记录；点一下看原因"
                           onClick={() => setDraftOpenId(draftOpenId === q.id ? null : q.id)}
@@ -107,7 +108,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
                           草稿 {d.status}
                         </button>
                       ) : (
-                        <span className={`tag ${d.status === "通过" ? "tag-ok" : "tag-warn"}`} title="草稿试跑结果，不落验收记录">
+                        <span className={`tag ${d.status === Q_STATUS.pass ? "tag-ok" : "tag-warn"}`} title="草稿试跑结果，不落验收记录">
                           草稿 {d.status}
                         </span>
                       )
@@ -181,7 +182,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
                 setRunning(true);
                 try {
                   const data = await apiPost<{ results?: { status: string }[]; version: number }>("/api/questions?run=1");
-                  const failed = (data.results ?? []).filter((x) => x.status !== "通过");
+                  const failed = (data.results ?? []).filter((x) => x.status !== Q_STATUS.pass);
                   showToast(failed.length ? `${failed.length} 条失败——回画布改对象或来源映射，再跑一遍` : `全部通过（v${data.version}）`);
                   await load();
                 } catch (e) {
@@ -205,7 +206,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
                   const data = await apiPost<{ results?: { id: number; status: string; detail: string }[]; version: number | null }>("/api/questions?run=1&target=draft");
                   const rs = data.results ?? [];
                   setDraftRun(Object.fromEntries(rs.map((r) => [r.id, { status: r.status, detail: r.detail }])));
-                  const failed = rs.filter((x) => x.status !== "通过");
+                  const failed = rs.filter((x) => x.status !== Q_STATUS.pass);
                   showToast(failed.length ? `草稿试跑：${failed.length} 条失败——改完草稿再试跑` : "草稿试跑全部通过（验收记录未动）");
                 } catch (e) {
                   showToast(e instanceof Error ? e.message : String(e));

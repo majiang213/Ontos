@@ -17,7 +17,7 @@ export function resolveLink(config: OntologyConfig, clsName: string, name: strin
 }
 
 /** 关系名 → 目标类；未解析返回 null（报不报错由调用方定）。 */
-export function linkTarget(config: OntologyConfig, clsName: string, name: string): string | null {
+function linkTarget(config: OntologyConfig, clsName: string, name: string): string | null {
   const r = resolveLink(config, clsName, name);
   return r ? (r.reversed ? r.link.from : r.link.to) : null;
 }
@@ -55,6 +55,14 @@ export function walkFilter(config: OntologyConfig | null, clsName: string, filte
   }
 }
 
+/** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。判定的唯一出处——
+ *  静态核对（本文件 checkOperand）与运行期/下推（engine/query/filterOp 等）都从这里取。 */
+export function isOpObject(v: unknown): v is Record<string, unknown> {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v);
+  return keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k));
+}
+
 /* ---------- 操作数形状规则（过滤的取值位） ----------
    字面量（含日期表达式串）与「字面量数组」放过；运算符块逐运算符递归；
    { property } 组合的 from 只许 current/request；裸 { from } 只许 identity。
@@ -69,17 +77,18 @@ export function checkOperand(v: unknown, where: string): void {
   }
   if (v === null || typeof v !== "object") return; // 字面量
   const rec = v as Record<string, unknown>;
-  const keys = Object.keys(rec);
-  if (keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k))) {
-    for (const k of keys) checkOperand(rec[k], where); // 运算符块：每个运算符的值还是操作数
+  if (isOpObject(rec)) {
+    for (const k of Object.keys(rec)) checkOperand(rec[k], where); // 运算符块：每个运算符的值还是操作数
     return;
   }
-  if (typeof rec.property === "string") {
-    const from = rec.from === undefined ? "current" : rec.from;
+  // 注：isOpObject 的类型谓词会把此处 rec 窄化，下文按原始未知形状取键，不走窄化
+  const { property, from: rawFrom } = rec as { property?: unknown; from?: unknown };
+  if (typeof property === "string") {
+    const from = rawFrom === undefined ? "current" : rawFrom;
     if (from !== "current" && from !== "request") throw new Error(MSG.cfgValueFromBad(where, JSON.stringify(v)));
     return; // 效应过滤逐个体求值，current 合法
   }
-  if (rec.from === "identity") return;
+  if (rawFrom === "identity") return;
   throw new Error(MSG.cfgValueUnknown(where, JSON.stringify(v)));
 }
 

@@ -20,13 +20,12 @@ interface BendData {
   commitReconnect?: (name: string, from: string, to: string, movedEnd: "source" | "target") => void;
 }
 
-export default function FloatingEdge({ id, source, target, label, style, markerEnd, interactionWidth, data }: EdgeProps) {
+/** 外壳：只判早退（缺节点 / 自环）。普通边在 NormalEdge——Hooks 不能写在条件 return 之后，
+ *  同名边先删后建换成转化关系、或节点查找瞬缺时，Hook 数对不上 React 直接崩。 */
+export default function FloatingEdge(props: EdgeProps) {
+  const { id, source, target, label, style, markerEnd, interactionWidth } = props;
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
-  const rf = useReactFlow();
-  const store = useStoreApi();
-  const [dragBend, setDragBend] = useState<Bend | null>(null); // 拖着的时候用本地态，松手才入库
-  const dragRef = useRef<{ startX: number; startY: number; base: Bend; zoom: number } | null>(null);
   if (!sourceNode || !targetNode) return null;
 
   // 自环：节点上方一个小半环（不提供弯折）
@@ -48,7 +47,17 @@ export default function FloatingEdge({ id, source, target, label, style, markerE
       </>
     );
   }
+  return <NormalEdge {...props} sourceNode={sourceNode} targetNode={targetNode} />;
+}
 
+type InternalNodeT = NonNullable<ReturnType<typeof useInternalNode>>;
+
+/** 普通边（非自环）：Hooks 全部无条件——本组件只在节点齐、非自环时挂载。 */
+function NormalEdge({ id, source, target, label, style, markerEnd, interactionWidth, data, sourceNode, targetNode }: EdgeProps & { sourceNode: InternalNodeT; targetNode: InternalNodeT }) {
+  const rf = useReactFlow();
+  const store = useStoreApi();
+  const [dragBend, setDragBend] = useState<Bend | null>(null); // 拖着的时候用本地态，松手才入库
+  const dragRef = useRef<{ startX: number; startY: number; base: Bend; zoom: number } | null>(null);
   const d = (data ?? {}) as BendData;
   const bend: Bend = dragBend ?? d.bend ?? { dx: 0, dy: 0 };
   const bent = Boolean(dragBend) || Boolean(d.bend && (d.bend.dx !== 0 || d.bend.dy !== 0));

@@ -1,16 +1,13 @@
 // 过滤运算符表 —— 内存比较与下推编成 Condition 的唯一出处。
 // SQL 文本仍由 driver 按 Condition 渲染（方言接缝）；「空=至今」的运算符名单在 schema/config（单源），这里只消费。
+// 运算符块判定 isOpObject 在 schema/spec/filterSpec（单源，此处再导出只是迁就既有消费方，不另写判定）。
 
-import { FILTER_OPS, treatsNullAsUntilNow } from "../../schema/config";
+import { treatsExpectedNullAsUntilNow, treatsNullAsUntilNow } from "../../schema/config";
+import { isOpObject } from "../../schema/spec/filterSpec";
 import type { Condition, CondOp } from "../infra/driver";
 import { MSG } from "../../errors";
 
-/** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。 */
-export function isOpObject(v: unknown): v is Record<string, unknown> {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
-  const keys = Object.keys(v);
-  return keys.length > 0 && keys.every((k) => (FILTER_OPS as readonly string[]).includes(k));
-}
+export { isOpObject };
 
 const num = (v: unknown) => typeof v === "number";
 
@@ -25,7 +22,7 @@ export function compare(actual: unknown, op: string, expected: unknown, dateLike
     return false;
   }
   if (expected === null) {
-    if (dateLike && (op === "lt" || op === "lte")) return true;
+    if (dateLike && treatsExpectedNullAsUntilNow(op)) return true; // expected 侧与 actual 侧同一条「空=至今」，名单同出处
     if (treatsNullAsUntilNow(op)) return false;
     if (op === "ne") return true;
     return false;

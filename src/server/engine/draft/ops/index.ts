@@ -20,7 +20,7 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
   const d = state.draft;
   switch (input.op) {
     case "create_object": {
-      if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.classNameBad);
+      if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.classNameBad(input.name));
       if (d.object_types[input.name]) throw new DraftReject(MSG.classExists(input.name));
       d.object_types[input.name] = { kind: input.kind, description: input.description, properties: {} }; // 无源对象进 manual 桶
       break;
