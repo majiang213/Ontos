@@ -4,6 +4,8 @@ node_modules/
 .DS_Store
 *.log
 .idea/
+.env
+.env*.local
 src/server/config/ontos-meta.db
 src/server/config/canvas-layout.json
 src/server/config/versions/
