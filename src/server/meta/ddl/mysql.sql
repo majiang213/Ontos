@@ -1,18 +1,17 @@
-// 元库 DDL（MySQL 方言）——建库单源：一种数据库一个文件（sqlite.ts 同构手写，不做字符串替换派生）。
-// 旧库不重建：启动时按 information_schema 判列缺失，跑本文件末尾的 ALTER 迁移（backends.ts 调用）。
-// 注释纪律：注释只写一次，在 COMMENT 子句里（源码可读 + 进 information_schema 元数据，工具可查）；
-// sqlite.ts 没有 COMMENT 语法，同一份文本在那边是行内 -- 注释——两边对齐维护，sqlite 是源、本文件是投影。
-// 与 sqlite.ts 的方言差异（全部刻意，改之前先读这段）：
-// ① 自增列型 BIGINT AUTO_INCREMENT；② 浮点型 DOUBLE；
-// ③ 时间列 DATETIME DEFAULT CURRENT_TIMESTAMP（MySQL 不许 TEXT 挂这个时间默认值，错误 1067）；
-// ④ 进索引/主键/UNIQUE 的列用 VARCHAR(191)（MySQL 不许 TEXT 列无前缀长度进索引，错误 1170）；
-// ⑤ 索引内联进表定义（MySQL 没有 CREATE INDEX IF NOT EXISTS；SQLite 侧是独立语句）；
-// ⑥ COMMENT 子句是本文件的注释载体（SQLite 无此语法）；
-// ⑦ 每表 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4（中文字段在非 utf8mb4 库上乱码）；
-// 另：TEXT 的默认值只许表达式形态 DEFAULT ('...')（8.0.13+），字面量形态 MySQL 拒收（错误 1101）。
-// 多语句发包靠 MysqlBackend 建池开 multipleStatements（backends.ts）——九个 CREATE TABLE 一次下发。
+-- 元库 DDL（MySQL 方言）——建库单源：一种数据库一个文件（sqlite.sql / pg.sql 同构手写，不做字符串替换派生）。
+-- 开发期不做老库迁移：结构变了删库重建；启动只跑本文件的 CREATE TABLE IF NOT EXISTS（datasource.ts 读文件下发）。
+-- 注释纪律：注释只写一次，在 COMMENT 子句里（源码可读 + 进 information_schema 元数据，工具可查）；
+-- sqlite.sql 没有 COMMENT 语法，同一份文本在那边是行内 -- 注释、在 pg.sql 是 COMMENT ON——三边对齐维护，sqlite 是源、本文件是投影。
+-- 与 sqlite.sql 的方言差异（全部刻意，改之前先读这段）：
+-- ① 自增列型 BIGINT AUTO_INCREMENT；② 浮点型 DOUBLE；
+-- ③ 时间列 DATETIME DEFAULT CURRENT_TIMESTAMP（MySQL 不许 TEXT 挂这个时间默认值，错误 1067）；
+-- ④ 进索引/主键/UNIQUE 的列用 VARCHAR(191)（MySQL 不许 TEXT 列无前缀长度进索引，错误 1170）；
+-- ⑤ 索引内联进表定义（MySQL 没有 CREATE INDEX IF NOT EXISTS；SQLite 侧是独立语句）；
+-- ⑥ COMMENT 子句是本文件的注释载体（SQLite 无此语法）；
+-- ⑦ 每表 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4（中文字段在非 utf8mb4 库上乱码）；
+-- 另：TEXT 的默认值只许表达式形态 DEFAULT ('...')（8.0.13+），字面量形态 MySQL 拒收（错误 1101）。
+-- 多语句发包靠 MysqlDatasource 建池开 multipleStatements（datasource.ts）——八个 CREATE TABLE 一次下发。
 
-export const MYSQL_DDL = `
 CREATE TABLE IF NOT EXISTS onto_workspace (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '空间 id',
   name VARCHAR(191) NOT NULL UNIQUE COMMENT '空间名（小写字母/数字/中划线/下划线）',
@@ -126,12 +125,3 @@ CREATE TABLE IF NOT EXISTS log_action (
   INDEX idx_log_action_ws_time (workspace_id, created_at),
   FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='动作留痕';
-`;
-
-/* ---------- 旧库迁移（无状态化：工作行补 rev / draft_key 两列 + 唯一索引；meta_seq 计数器表随雪花发号废弃） ----------
- * 新库由 MYSQL_DDL 直接建好，这里只补老库；幂等靠调用方按 information_schema 判列缺失再执行
- * （MySQL 的 ADD COLUMN / CREATE INDEX 都没有 IF NOT EXISTS）。 */
-export const MYSQL_ALTER_REV = `ALTER TABLE onto_version ADD COLUMN rev INT NOT NULL DEFAULT 0`;
-export const MYSQL_ALTER_DRAFT_KEY = `ALTER TABLE onto_version ADD COLUMN draft_key BIGINT GENERATED ALWAYS AS (CASE WHEN version IS NULL THEN workspace_id END) VIRTUAL`;
-export const MYSQL_INDEX_DRAFT_KEY = `CREATE UNIQUE INDEX uq_draft_key ON onto_version (draft_key)`;
-export const MYSQL_DROP_SEQ = `DROP TABLE IF EXISTS meta_seq`;

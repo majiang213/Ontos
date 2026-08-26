@@ -3,7 +3,7 @@
 // clock / uuid / 雪花号等注入源。globalThis 只挂这一个键：Next dev 下各路由包各有模块实例，挂全局才共享同一份；
 // 测试 installRuntime(makeRuntime({ cwd: tmp })) 整套换掉——不再 chdir，也不再逐个 reset。
 // 多实例语义：已发布快照与工作副本全部读库（onto_version），写走 rev CAS——同一份元库下任意多个实例行为一致；
-// 多实例部署要求 ONTOS_META_DSN=mysql://（SQLite 单文件保留本地开发/单实例/全部测试）。
+// 多实例部署要求 ONTOS_META_DSN=mysql:// 或 postgres://（SQLite 单文件保留本地开发/单实例/全部测试）。
 // engineEnv() 是引擎依赖的组装点（边界经它显式下传）：clock / uuid / snowflake 默认真实实现、
 // 测试经 makeRuntime 覆盖注入（含固定 instanceId 钉死雪花）；LLM 槽位选择（离线回退 / 真模型）也收在这里。
 

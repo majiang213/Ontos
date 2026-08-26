@@ -6,7 +6,7 @@ import { MSG } from "../../errors";
 export class VersionChainStore extends ConcernStore {
   async latestVersion(workspace: string, seedYaml: string): Promise<{ version: number; yaml: string }> {
     const id = await this.wsId(workspace);
-    const row = await this.backend.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version DESC LIMIT 1`, [id]);
+    const row = await this.datasource.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version DESC LIMIT 1`, [id]);
     if (row) return { version: row.version as number, yaml: row.yaml as string };
     // 被元数据写抢注的空间：种子补成 v1。并发首访各插一行撞 UNIQUE(workspace_id, version)——
     // insert-ignore 让败者无害（与 wsId/ensureWorkspace 同一条纪律，基座 runInsertIgnore）
@@ -16,7 +16,7 @@ export class VersionChainStore extends ConcernStore {
 
   async insertVersion(workspace: string, version: number, yaml: string, origin: "publish", canvas?: unknown): Promise<void> {
     const id = await this.wsId(workspace);
-    await this.backend.run(
+    await this.datasource.run(
       `INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, origin) VALUES (?, ?, ?, ?, ?)`,
       [id, version, yaml, canvas == null ? null : JSON.stringify(canvas), origin]
     );
@@ -24,13 +24,13 @@ export class VersionChainStore extends ConcernStore {
 
   async listVersions(workspace: string): Promise<{ version: number; createdAt: string; origin: string }[]> {
     const id = await this.wsId(workspace);
-    const rows = await this.backend.all(`SELECT version, origin, created_at FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version`, [id]);
+    const rows = await this.datasource.all(`SELECT version, origin, created_at FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version`, [id]);
     return rows.map((r) => ({ version: r.version as number, origin: String(r.origin), createdAt: String(r.created_at) }));
   }
 
   async versionYaml(workspace: string, version: number): Promise<string | undefined> {
     const id = await this.wsId(workspace);
-    const row = await this.backend.get(`SELECT yaml FROM onto_version WHERE workspace_id = ? AND version = ?`, [id, version]);
+    const row = await this.datasource.get(`SELECT yaml FROM onto_version WHERE workspace_id = ? AND version = ?`, [id, version]);
     return row?.yaml as string | undefined;
   }
 
@@ -39,7 +39,7 @@ export class VersionChainStore extends ConcernStore {
    *  历史版本的界面状态丢了能活，当前工作副本读不回来不能活；降级留服务端诊断一行。 */
   async versionCanvas(workspace: string, version: number): Promise<unknown | undefined> {
     const id = await this.wsId(workspace);
-    const row = await this.backend.get(`SELECT canvas_json FROM onto_version WHERE workspace_id = ? AND version = ?`, [id, version]);
+    const row = await this.datasource.get(`SELECT canvas_json FROM onto_version WHERE workspace_id = ? AND version = ?`, [id, version]);
     const raw = row?.canvas_json;
     if (typeof raw !== "string" || !raw.length) return undefined;
     try {
@@ -54,7 +54,7 @@ export class VersionChainStore extends ConcernStore {
    *  坏 JSON 硬炸（当前工作副本读不回来不能活）——与 versionCanvas 的历史行降级不对称是刻意的。 */
   async getDraftPack(workspace: string): Promise<{ pack: unknown; rev: number } | undefined> {
     const id = await this.wsId(workspace);
-    const row = await this.backend.get(`SELECT canvas_json, rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
+    const row = await this.datasource.get(`SELECT canvas_json, rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
     if (!row) return undefined;
     const raw = row.canvas_json;
     if (typeof raw !== "string" || !raw.length) throw new Error(MSG.workingPackBadJson);
@@ -73,22 +73,22 @@ export class VersionChainStore extends ConcernStore {
     const id = await this.wsId(workspace);
     const json = JSON.stringify(pack);
     const step = bump ? 1 : 0;
-    const updated = await this.backend.run(
+    const updated = await this.datasource.run(
       `UPDATE onto_version SET canvas_json = ?, rev = rev + ? WHERE workspace_id = ? AND version IS NULL AND rev = ?`,
       [json, step, id, expectedRev]
     );
     if (updated > 0) return expectedRev + step;
-    const row = await this.backend.get(`SELECT rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
+    const row = await this.datasource.get(`SELECT rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
     if (!row) {
       try {
-        await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, rev, origin) VALUES (?, NULL, '', ?, ?, 'publish')`, [id, json, expectedRev]);
+        await this.datasource.run(`INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, rev, origin) VALUES (?, NULL, '', ?, ?, 'publish')`, [id, json, expectedRev]);
         return expectedRev;
       } catch (e) {
-        const rival = await this.backend.get(`SELECT rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
+        const rival = await this.datasource.get(`SELECT rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
         if (!rival) throw e; // 不是并发首存撞唯一：真实写错误，原样上抛（不套用草稿冲突文案）
         if ((rival.rev as number) !== expectedRev) return null; // 对方首存后又写入：冲突
         // 对方首存成功且 rev 未动：补写我们的包。补写也是 CAS（带 rev 条件）——重读到补写之间对方再写，宁可判冲突也不覆盖
-        const patched = await this.backend.run(
+        const patched = await this.datasource.run(
           `UPDATE onto_version SET canvas_json = ?, rev = rev + ? WHERE workspace_id = ? AND version IS NULL AND rev = ?`,
           [json, step, id, expectedRev]
         );

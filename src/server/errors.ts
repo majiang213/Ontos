@@ -223,8 +223,12 @@ export const MSG = {
   noSuchConnection: "没有这个连接",
   connectionReadFailed: "连接失败或读取表结构失败",
 
-  // 元库（meta/stores：工作副本行读回）
+  // 元库（meta/stores：工作副本行读回；meta/datasource：DSN 选方言）
   workingPackBadJson: "工作副本读不回来：不是合法 JSON",
+  metaDsnUnknown: (scheme: string) =>
+    scheme
+      ? `ONTOS_META_DSN 只认 mysql:// 与 postgres://（或 postgresql://），不认 ${scheme}`
+      : "ONTOS_META_DSN 只认 mysql:// 与 postgres://（或 postgresql://）",
 
   // 路由（app/api：请求体、zod 形状标签、respond 第二参、refine 消息）
   bodyNotJson: "请求体不是合法 JSON",

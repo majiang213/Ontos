@@ -1,12 +1,10 @@
-// 元库 DDL（SQLite 方言）——建库单源：一种数据库一个文件（mysql.ts 同构手写，不做字符串替换派生）。
-// 旧库不重建：启动时按 PRAGMA table_xinfo 判列缺失（table_info 对 VIRTUAL 生成列隐身，会误判新库缺列），
-// 跑本文件末尾的 ALTER 迁移（backends.ts 调用）。
-// 注释纪律：SQLite 没有 COMMENT 语法，行内 -- 注释是唯一的注释载体（mysql.ts 的 COMMENT 子句是这份文本的投影，两边对齐维护）。
-// 与 mysql.ts 的方言差异四处：① 自增列型 INTEGER AUTOINCREMENT；② 浮点型 REAL；③ 时间列 TEXT DEFAULT (datetime('now'))；
-// ④ 索引单独成句（CREATE INDEX IF NOT EXISTS；MySQL 无此语法，索引内联进表定义）。
-// 外键两方言都声明：本侧靠 SqliteBackend 打开时的 PRAGMA foreign_keys = ON 生效（backends.ts），MySQL 侧天生生效。
+-- 元库 DDL（SQLite 方言）——建库单源：一种数据库一个文件（mysql.sql / pg.sql 同构手写，不做字符串替换派生）。
+-- 开发期不做老库迁移：结构变了删库重建；启动只跑本文件的 CREATE TABLE IF NOT EXISTS（datasource.ts 读文件下发）。
+-- 注释纪律：SQLite 没有 COMMENT 语法，行内 -- 注释是唯一的注释载体（mysql.sql 的 COMMENT 子句、pg.sql 的 COMMENT ON 是这份文本的投影，三边对齐维护）。
+-- 与 mysql.sql 的方言差异四处：① 自增列型 INTEGER AUTOINCREMENT；② 浮点型 REAL；③ 时间列 TEXT DEFAULT (datetime('now'))；
+-- ④ 索引单独成句（CREATE INDEX IF NOT EXISTS；MySQL 无此语法，索引内联进表定义）。
+-- 外键三方言都声明：本侧靠 SqliteDatasource 打开时的 PRAGMA foreign_keys = ON 生效（datasource.ts），MySQL / PG 侧天生生效。
 
-export const SQLITE_DDL = `
 CREATE TABLE IF NOT EXISTS onto_workspace (   -- 工作空间注册表：一个空间一行，只登记身份（画布内容全在 onto_version 的工作行）
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,                  -- 空间名（小写字母/数字/中划线/下划线）
@@ -23,7 +21,7 @@ CREATE TABLE IF NOT EXISTS onto_version (     -- 版本链 + 工作行：编号�
   note TEXT,                                  -- 发布说明
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   rev INTEGER NOT NULL DEFAULT 0,             -- 工作行的草稿修订号（编号行恒 0，不读它）：CAS 冲突检测与 ETag 的源
-  draft_key INTEGER GENERATED ALWAYS AS (CASE WHEN version IS NULL THEN workspace_id END) VIRTUAL, -- 工作行唯一锚（编号行为 NULL 不参与；VIRTUAL 是 SQLite ALTER ADD COLUMN 唯一允许的生成列种类）
+  draft_key INTEGER GENERATED ALWAYS AS (CASE WHEN version IS NULL THEN workspace_id END) VIRTUAL, -- 工作行唯一锚（编号行为 NULL 不参与）
   UNIQUE (workspace_id, version),             -- 编号行不重复；工作行靠 NULL 不参与约束
   UNIQUE (draft_key)                          -- 「每空间恰一行」的 DB 级保证（替代写队列）
 );
@@ -114,12 +112,3 @@ CREATE INDEX IF NOT EXISTS idx_adj_decision_ws ON adj_decision (workspace_id);
 CREATE INDEX IF NOT EXISTS idx_ont_question_ws ON ont_question (workspace_id);
 CREATE INDEX IF NOT EXISTS idx_log_query_ws_time ON log_query (workspace_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_log_action_ws_time ON log_action (workspace_id, created_at);
-`;
-
-/* ---------- 旧库迁移（无状态化：工作行补 rev / draft_key 两列 + 唯一索引；meta_seq 计数器表随雪花发号废弃） ----------
- * 新库由 SQLITE_DDL 直接建好，这里只补老库；幂等靠调用方按 PRAGMA table_info 判列缺失再执行
- * （SQLite 的 ADD COLUMN 没有 IF NOT EXISTS；两条 ALTER 各自判列，互不依赖）。 */
-export const SQLITE_ALTER_REV = `ALTER TABLE onto_version ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`;
-export const SQLITE_ALTER_DRAFT_KEY = `ALTER TABLE onto_version ADD COLUMN draft_key INTEGER GENERATED ALWAYS AS (CASE WHEN version IS NULL THEN workspace_id END) VIRTUAL`;
-export const SQLITE_INDEX_DRAFT_KEY = `CREATE UNIQUE INDEX IF NOT EXISTS uq_draft_key ON onto_version (draft_key)`;
-export const SQLITE_DROP_SEQ = `DROP TABLE IF EXISTS meta_seq`;

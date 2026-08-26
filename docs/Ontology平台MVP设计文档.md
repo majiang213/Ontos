@@ -260,7 +260,7 @@ link_types:
 | `adj_` | 裁决 | adj_decision、adj_overlap |
 | `log_` | 留痕 | log_query、log_action |
 
-> 下面这份 DDL 是工作空间 B 方案前的形态，仅作历史记录。B 方案落地后：ontology_id 外键全部换成 workspace_id；onto_ontology 与 onto_draft 取消；onto_question 改名 ont_question；adj_overlap 的 computed_at 即 created_at；二级索引本期未建（代码里只有唯一约束）。**现行表结构以 §6「工作空间」节与 `src/server/meta/ddl/` 为准**（SQLite / MySQL 各一份，不做字符串替换派生）。
+> 下面这份 DDL 是工作空间 B 方案前的形态，仅作历史记录。B 方案落地后：ontology_id 外键全部换成 workspace_id；onto_ontology 与 onto_draft 取消；onto_question 改名 ont_question；adj_overlap 的 computed_at 即 created_at；二级索引本期未建（代码里只有唯一约束）。**现行表结构以 §6「工作空间」节与 `src/server/meta/ddl/` 为准**（SQLite / MySQL / PostgreSQL 各一份，不做字符串替换派生）。
 
 ```sql
 -- 接入
@@ -427,7 +427,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 - **本体配置、版本链与画布状态同表入库**：`onto_version` 按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`。**工作副本是版本链上 `version IS NULL` 的工作行**：编辑画布、拖摆位、弯折、钉点都写它的 `canvas_json`；发布把工作行复制成编号行；点某个历史版本 = 用那一行覆盖工作行，不插入新行；要让问数也变成这版，再点发布。画布状态不再另有家——旧的 `onto_workspace.layout` / `draft_json` 两列已废。**草稿修订号 `rev` 持久化在工作行**：每次内容写与界面状态写都 CAS（`UPDATE … WHERE rev = ?`，0 行 = 冲突；冲突时 MCP 路径 422「草稿已变」、画布路径自动重读重试一次，后写叠加应用）；「每空间恰一行」由生成列 `draft_key` 的唯一索引兜底，不靠进程内纪律。重启不复位、跨实例一致。
 - **其余 6 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action）全部带 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。发号没有计数器表（`meta_seq` 已随雪花发号删除）。
-- **后端可换、实例可平铺**：共享元库是一个接口（`MetaBackend`）。离线开发默认单文件后端（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL，DDL 见 `src/server/meta/ddl/mysql.ts`。服务本身无状态（无进程内写队列与内存快照缓存），同一份元库下任意多实例行为一致；多实例部署 = MySQL 元库 + 每实例分配 `ONTOS_INSTANCE_ID`（雪花号实例位，不分配则随机派生）。PG 作元库后端本期未接。
+- **元库可换、实例可平铺**：共享元库是一个接口（`MetaDatasource`）。离线开发默认单文件 SQLite（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL（DDL 见 `src/server/meta/ddl/mysql.sql`），`postgres://…` / `postgresql://…` 即换 PostgreSQL（DDL 见 `src/server/meta/ddl/pg.sql`）。开发期不做老库迁移：表结构变了删库重建，启动只跑 CREATE TABLE IF NOT EXISTS。服务本身无状态（无进程内写队列与内存快照缓存），同一份元库下任意多实例行为一致；多实例部署 = MySQL 或 PG 元库 + 每实例分配 `ONTOS_INSTANCE_ID`（雪花号实例位，不分配则随机派生）。
 - **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `test` 的 `onto_version` v1 行，此后不再被读；`default` 与新建空间一样空白起步（v1 是空本体），演示 fixture 连接也只注入 `test`——切换空间要看得出是另一套。
 
 **语义。** 默认空间 `default`（空白起步），测试空间 `test`（首次访问时若注册表里没有，自动建行并把演示模板插成 v1，常驻空间列表；演示数据按空间名填充，与是否配置 LLM Key 无关）。新建空间同一条路（`ensureWorkspace`），但种子是空本体：空画布、无连接，从连接数据源开始玩。所有接口（除 `/api/workspaces` 全局注册表外）走路径段 `/api/<空间名>/…`；已发布快照与工作副本读库（无内存缓存），驱动注册表按空间名键控（实例本地缓存，连接新增/删除在其它实例的最长延迟 = 实例生命周期），元数据按 `workspace_id` 过滤（持久态），两层互不串。演示 fixture 是实例本地态：各实例各自播种，多实例下对 `test` 空间的写会分叉（演示空间不承诺多实例一致）。

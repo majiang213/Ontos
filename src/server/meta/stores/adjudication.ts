@@ -6,7 +6,7 @@ import { ConcernStore } from "./base";
 export class AdjudicationStore extends ConcernStore {
   async recordDecision(workspace: string, d: DecisionRec): Promise<void> {
     const id = await this.wsId(workspace);
-    await this.backend.run(
+    await this.datasource.run(
       `INSERT INTO adj_decision (workspace_id, version, class_a, class_b, source_a, source_b, llm_advice, rate, evidence, verdict, decided_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, d.version ?? null, d.class_a, d.class_b, d.source_a, d.source_b, d.llm_advice ?? null, d.rate ?? null, d.evidence ? JSON.stringify(d.evidence) : null, d.verdict, d.decided_by]
@@ -15,20 +15,20 @@ export class AdjudicationStore extends ConcernStore {
 
   async listDecisions(workspace: string): Promise<(DecisionRec & { id: number; created_at: string })[]> {
     const id = await this.wsId(workspace);
-    const rows = await this.backend.all(`SELECT * FROM adj_decision WHERE workspace_id = ? ORDER BY id DESC`, [id]);
+    const rows = await this.datasource.all(`SELECT * FROM adj_decision WHERE workspace_id = ? ORDER BY id DESC`, [id]);
     return rows.map((r) => ({ ...r, evidence: r.evidence ? JSON.parse(String(r.evidence)) : undefined })) as never[];
   }
 
   /** 发布时回填：把还没绑版本的裁决挂上这个版本。 */
   async backfillDecisionVersions(workspace: string, version: number): Promise<void> {
     const id = await this.wsId(workspace);
-    await this.backend.run(`UPDATE adj_decision SET version = ? WHERE workspace_id = ? AND version IS NULL`, [version, id]);
+    await this.datasource.run(`UPDATE adj_decision SET version = ? WHERE workspace_id = ? AND version IS NULL`, [version, id]);
   }
 
   /** 放弃草稿时：未绑版本的裁决标成 -1（已放弃），不再随下一次发布回填。 */
   async abandonPendingDecisions(workspace: string): Promise<void> {
     const id = await this.wsId(workspace);
-    await this.backend.run(`UPDATE adj_decision SET version = -1 WHERE workspace_id = ? AND version IS NULL`, [id]);
+    await this.datasource.run(`UPDATE adj_decision SET version = -1 WHERE workspace_id = ? AND version IS NULL`, [id]);
   }
 
   /** 交集按对更新（同一对重复计算只留最新计数——由 UNIQUE(workspace_id, class_a, class_b) 兜底，方言 upsert 原子写；
@@ -36,8 +36,8 @@ export class AdjudicationStore extends ConcernStore {
   async recordOverlap(workspace: string, o: OverlapRec): Promise<void> {
     const id = await this.wsId(workspace);
     const vals = [id, o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate];
-    await this.backend.run(
-      this.backend.dialect === "mysql"
+    await this.datasource.run(
+      this.datasource.dialect === "mysql"
         ? `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE norm_rule = VALUES(norm_rule), count_a = VALUES(count_a), count_b = VALUES(count_b), count_hit = VALUES(count_hit), rate = VALUES(rate)`
         : `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -48,6 +48,6 @@ export class AdjudicationStore extends ConcernStore {
 
   async listOverlaps(workspace: string): Promise<(OverlapRec & { id: number; created_at: string })[]> {
     const id = await this.wsId(workspace);
-    return (await this.backend.all(`SELECT * FROM adj_overlap WHERE workspace_id = ? ORDER BY id DESC`, [id])) as never[];
+    return (await this.datasource.all(`SELECT * FROM adj_overlap WHERE workspace_id = ? ORDER BY id DESC`, [id])) as never[];
   }
 }

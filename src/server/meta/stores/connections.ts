@@ -8,16 +8,17 @@ export class ConnectionsStore extends ConcernStore {
     const id = await this.wsId(workspace);
     const cols = `(workspace_id, name, type, host, port, db_name, ro_user, ro_pass, rw_user, rw_pass, options)`;
     const vals = [id, c.name, c.type, c.host ?? null, c.port ?? null, c.db_name ?? null, c.ro_user ?? null, c.ro_pass ?? null, c.rw_user ?? null, c.rw_pass ?? null, c.options ? JSON.stringify(c.options) : null];
+    const stamp = this.datasource.dialect === "sqlite" ? "datetime('now')" : "CURRENT_TIMESTAMP";
     const upsert =
-      this.backend.dialect === "mysql"
+      this.datasource.dialect === "mysql"
         ? `ON DUPLICATE KEY UPDATE type=VALUES(type), host=VALUES(host), port=VALUES(port), db_name=VALUES(db_name), ro_user=VALUES(ro_user), ro_pass=VALUES(ro_pass), rw_user=VALUES(rw_user), rw_pass=VALUES(rw_pass), options=VALUES(options), updated_at=CURRENT_TIMESTAMP`
-        : `ON CONFLICT(workspace_id, name) DO UPDATE SET type=excluded.type, host=excluded.host, port=excluded.port, db_name=excluded.db_name, ro_user=excluded.ro_user, ro_pass=excluded.ro_pass, rw_user=excluded.rw_user, rw_pass=excluded.rw_pass, options=excluded.options, updated_at=datetime('now')`;
-    await this.backend.run(`INSERT INTO conn_source ${cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ${upsert}`, vals);
+        : `ON CONFLICT(workspace_id, name) DO UPDATE SET type=excluded.type, host=excluded.host, port=excluded.port, db_name=excluded.db_name, ro_user=excluded.ro_user, ro_pass=excluded.ro_pass, rw_user=excluded.rw_user, rw_pass=excluded.rw_pass, options=excluded.options, updated_at=${stamp}`;
+    await this.datasource.run(`INSERT INTO conn_source ${cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ${upsert}`, vals);
   }
 
   async listConnections(workspace: string): Promise<ConnectionRec[]> {
     const id = await this.wsId(workspace);
-    const rows = await this.backend.all(`SELECT * FROM conn_source WHERE workspace_id = ? ORDER BY name`, [id]);
+    const rows = await this.datasource.all(`SELECT * FROM conn_source WHERE workspace_id = ? ORDER BY name`, [id]);
     return rows.map((r) => ({
       name: r.name as string,
       type: r.type as ConnectionRec["type"],
@@ -34,6 +35,6 @@ export class ConnectionsStore extends ConcernStore {
 
   async deleteConnection(workspace: string, name: string): Promise<void> {
     const id = await this.wsId(workspace);
-    await this.backend.run(`DELETE FROM conn_source WHERE workspace_id = ? AND name = ?`, [id, name]);
+    await this.datasource.run(`DELETE FROM conn_source WHERE workspace_id = ? AND name = ?`, [id, name]);
   }
 }

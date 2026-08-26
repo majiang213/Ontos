@@ -1,10 +1,10 @@
 // 平台元数据库门面 —— MetaStore：按关切分簇的窄入口，方法委托给 stores/ 下的关切 store。
-// 存储模型与后端可换（SQLite 单文件 / MySQL）见 ./backends；记录类型见 ./types。
+// 存储模型与数据库可换（SQLite 单文件 / MySQL / PG）见 ./datasource；记录类型见 ./types。
 // workspace_id 的过滤纪律收在各关切 store 的基座（stores/base.ts）：方法第一个参数就是空间名，调用方不碰 SQL。
 
 import { join } from "node:path";
 import { runtime } from "../runtime";
-import { MysqlBackend, SqliteBackend, type MetaBackend } from "./backends";
+import { openMetaDatasource, SqliteDatasource, type MetaDatasource } from "./datasource";
 import { AdjudicationStore } from "./stores/adjudication";
 import { ConnectionsStore } from "./stores/connections";
 import { LogsStore } from "./stores/logs";
@@ -21,17 +21,17 @@ export class MetaStore {
   private questions: QuestionsStore;
   private logs: LogsStore;
 
-  constructor(private backend: MetaBackend) {
-    this.workspaces = new WorkspacesStore(backend);
-    this.versions = new VersionChainStore(backend);
-    this.conns = new ConnectionsStore(backend);
-    this.adjudication = new AdjudicationStore(backend);
-    this.questions = new QuestionsStore(backend);
-    this.logs = new LogsStore(backend);
+  constructor(private datasource: MetaDatasource) {
+    this.workspaces = new WorkspacesStore(datasource);
+    this.versions = new VersionChainStore(datasource);
+    this.conns = new ConnectionsStore(datasource);
+    this.adjudication = new AdjudicationStore(datasource);
+    this.questions = new QuestionsStore(datasource);
+    this.logs = new LogsStore(datasource);
   }
 
   async close() {
-    await this.backend.close();
+    await this.datasource.close();
   }
 
   /* 工作空间（注册表） */
@@ -127,14 +127,14 @@ export class MetaStore {
 
 /* ---------- 单例（挂在 Runtime 上；一个共享后端，不按空间分实例） ---------- */
 
-/** 共享元库入口。ONTOS_META_DSN=mysql://… 走 MySQL，否则离线单文件 SQLite（路径取运行态的 cwd）。 */
+/** 共享元库入口。不设 DSN = 离线单文件 SQLite；mysql:// 走 MySQL；postgres:// / postgresql:// 走 PG（路径取运行态的 cwd）。 */
 export function metaStore(): MetaStore {
   const rt = runtime();
-  rt.meta ??= new MetaStore(rt.metaDsn ? new MysqlBackend(rt.metaDsn) : new SqliteBackend(join(rt.cwd, "src/server/config/ontos-meta.db")));
+  rt.meta ??= new MetaStore(openMetaDatasource(rt.metaDsn, join(rt.cwd, "src/server/config/ontos-meta.db")));
   return rt.meta;
 }
 
 /** 测试用：独立临时库（SQLite 后端）。 */
 export function freshMetaStore(path: string): MetaStore {
-  return new MetaStore(new SqliteBackend(path));
+  return new MetaStore(new SqliteDatasource(path));
 }
