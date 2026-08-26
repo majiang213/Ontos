@@ -116,6 +116,40 @@ describe("propose_objects：只建议不落地", () => {
     expect(r.status).toBe(422);
     expect(r.data.error).toMatch(/表不存在/);
   });
+
+  it("跨次生成撞名：草稿已有 customer 时改成 crm_sys_customer 再交还，落地不 422；不占用仍用表名", async () => {
+    const s = await draftEngine();
+    // 挂一个带 customer 表的连接（走查第三波的情形：上一波已生成销售客户 customer）
+    const { getDriverRegistry } = await import("../server/infra/connections");
+    const { SqliteDriver } = await import("../server/infra/sqliteDriver");
+    const d = new SqliteDriver();
+    d.register("crm_sys").exec(`CREATE TABLE customer (cust_no TEXT PRIMARY KEY, name TEXT)`);
+    (await getDriverRegistry(TEST)).register("crm_sys", d);
+    await s.editDraft(
+      { op: "import_objects", objects: { customer: { kind: "thing", identity: "cust_no", properties: { cust_no: { type: "string" } } } } },
+      TEST
+    );
+    const r = await post("propose_objects", JSON.stringify({ tables: [{ connection: "crm_sys", table: "customer" }] }), undefined, TEST);
+    expect(r.status).toBe(200);
+    expect(r.data.object_types.customer).toBeUndefined();
+    expect(r.data.object_types.crm_sys_customer).toBeTruthy(); // 硬闸改名后的键
+    const imp = await post("edit_draft", JSON.stringify({ op: "import_objects", objects: r.data.object_types }), undefined, TEST);
+    expect(imp.status).toBe(200); // 落地不撞「类已存在」
+    expect((await s.getDraft(TEST)).draft.object_types.crm_sys_customer).toBeDefined();
+    // 不占用的表仍用表名，不乱加前缀
+    const r2 = await post("propose_objects", JSON.stringify({ tables: [{ connection: "purchase_sys", table: "po_item" }] }), undefined, TEST);
+    expect(r2.data.object_types.po_item).toBeTruthy();
+    expect(r2.data.object_types.purchase_sys_po_item).toBeUndefined();
+    // import_objects 本身不静默改名：直接撞已有类名仍整批 422（MCP 直接 apply 的路径保持这个语义）
+    const direct = await post(
+      "edit_draft",
+      JSON.stringify({ op: "import_objects", objects: { customer: { kind: "thing", identity: "x", properties: { x: { type: "string" } } } } }),
+      undefined,
+      TEST
+    );
+    expect(direct.status).toBe(422);
+    expect(direct.data.error).toMatch(/类已存在/);
+  });
 });
 
 describe("查询留痕", () => {

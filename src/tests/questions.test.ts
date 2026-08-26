@@ -1,7 +1,10 @@
 // 验收问题集引擎层测试：期望写法解析/比对（纯函数）+ 失败分阶段（假槽位注入，真跑 runQuestions）。
+// 三波对错板（questionPacks）的数字口径也钉在这里。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../server/features/acceptance/questions";
+import { QUESTION_PACKS } from "../server/features/acceptance/questionPacks";
+import type { QueryRequest } from "../server/schema/request";
 import type { LlmSlot } from "../server/infra/llm/slot";
 import { cleanupRuntime, draftEngine, setupRuntime, testEnv, unwrap } from "./helpers";
 
@@ -19,13 +22,43 @@ describe("期望结果写法", () => {
 
   it("比对：行数、字段=值（数字值按字符串比）、不符给白话原因", () => {
     const rows = [{ status: "在途", n: 3 }, { status: "在役", n: 4 }];
-    expect(checkExpected(undefined, rows)).toBeNull(); // 留空：能查出就算过
-    expect(checkExpected("2", rows)).toBeNull();
-    expect(checkExpected("3", rows)).toBe("期望 3 行，实得 2 行");
-    expect(checkExpected("status=在途", rows)).toBeNull();
-    expect(checkExpected("n=3", rows)).toBeNull(); // 数字 3 对得上字符串 "3"
-    expect(checkExpected("status=报废", rows)).toContain("没有一行的「status」等于「报废」");
-    expect(checkExpected("乱写的", rows)).toBe(EXPECTED_HINT);
+    const list: QueryRequest = { object: "equipment" }; // 列表查询（无聚合、无 limit）
+    expect(checkExpected(undefined, rows, list)).toBeNull(); // 留空：能查出就算过
+    expect(checkExpected("2", rows, list)).toBeNull();
+    expect(checkExpected("3", rows, list)).toBe("期望 3 行，实得 2 行");
+    expect(checkExpected("status=在途", rows, list)).toBeNull();
+    expect(checkExpected("n=3", rows, list)).toBeNull(); // 数字 3 对得上字符串 "3"
+    expect(checkExpected("status=报废", rows, list)).toContain("没有一行的「status」等于「报废」");
+    expect(checkExpected("乱写的", rows, list)).toBe(EXPECTED_HINT);
+  });
+
+  it("比对带上查询：聚合比合计（引擎产出列名），列表比行数，过小 limit 不算对", () => {
+    const aggRows = [{ dept: "D01", count: 60 }, { dept: "D02", count: 37 }];
+    const countStar: QueryRequest = { object: "equipment", aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } };
+    expect(checkExpected("97", aggRows, countStar)).toBeNull(); // 合计 60+37
+    expect(checkExpected("96", aggRows, countStar)).toBe("期望合计 96，实得 97");
+    // count:"status" 的产出列是 count_status（引擎列名，不是运算符名）
+    const countStatus: QueryRequest = { object: "equipment", aggregate: { group_by: ["dept"], metrics: [{ count: "status" }] } };
+    expect(checkExpected("7", [{ count_status: 3 }, { count_status: 4 }], countStatus)).toBeNull();
+    expect(checkExpected("8", [{ count_status: 3 }, { count_status: 4 }], countStatus)).toBe("期望合计 8，实得 7");
+    // 列表：显式 limit 比期望小 = 截断，不能拿截断后的行数比
+    const list: QueryRequest = { object: "equipment", limit: 5 };
+    expect(checkExpected("10", Array.from({ length: 5 }, () => ({})), list)).toContain("截断 limit=5");
+    expect(checkExpected("5", Array.from({ length: 5 }, () => ({})), { object: "equipment" })).toBeNull(); // 没带 limit 照比行数
+  });
+});
+
+describe("三波对错板（questionPacks 唯一出处）", () => {
+  it("四包期望数字按走查设计钉死：100/81/1/15；50/50/1/1/1；60/30/40/40；101/80/1/0", () => {
+    expect(QUESTION_PACKS.map((p) => p.name)).toEqual(["第一波", "第二波", "第三波", "验收后"]);
+    expect(QUESTION_PACKS.map((p) => p.questions.map((q) => q.expected))).toEqual([
+      ["100", "81", "1", "15"],
+      ["50", "50", "1", "1", "1"],
+      ["60", "30", "40", "40"],
+      ["101", "80", "1", "0"],
+    ]);
+    // 题面是白话：连接名/表名不进观众看见的问句（判定靠画布上的来源标签）
+    for (const p of QUESTION_PACKS) for (const q of p.questions) expect(q.question).not.toMatch(/_sys\.|\bselect\b/i);
   });
 });
 
@@ -66,6 +99,42 @@ describe("跑批失败分阶段（假槽位）", () => {
     expect(stored.find((q) => q.id === q1.id)?.detail).toContain("模型没输出合法 JSON");
     expect(stored.find((q) => q.id === q2.id)?.status).toBe("执行出错");
     expect(stored.every((q) => q.version === 1)).toBe(true); // 版本一并落上
+  });
+});
+
+describe("跑批比对口径（假槽位，真引擎）", () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = await setupRuntime("ontos-qagg-");
+  });
+  afterEach(async () => {
+    await cleanupRuntime(tmp);
+  });
+
+  const slotReturning = (queryReq: QueryRequest): LlmSlot => ({
+    name: "fake-测试",
+    nlToQuery: async () => queryReq,
+    proposeObjects: async () => ({}),
+    proposePairs: async () => [],
+  });
+
+  it("聚合题比合计：count:* 按部门分组的行合计对期望；实得不符给「期望合计」白话", async () => {
+    const meta = (await import("../server/meta/store")).metaStore();
+    await meta.addQuestion("test", "在役设备按部门合计", "97"); // 种子恰有 97 台在役
+    await meta.addQuestion("test", "在役设备按部门合计（故意错）", "96");
+    const agg: QueryRequest = { object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } };
+    const r = unwrap(await runQuestions(testEnv(), "test", { slot: slotReturning(agg) }));
+    expect(r.results[0].status).toBe("通过"); // 分组 8 行，count 列合计 97
+    expect(r.results[1].status).toBe("答案不符");
+    expect(r.results[1].detail).toBe("期望合计 96，实得 97");
+  });
+
+  it("列表题带了比期望小的显式 limit：记答案不符，不当通过", async () => {
+    const meta = (await import("../server/meta/store")).metaStore();
+    await meta.addQuestion("test", "还有多少在途设备", "81");
+    const r = unwrap(await runQuestions(testEnv(), "test", { slot: slotReturning({ object: "equipment", filter: { status: "in_transit" }, properties: ["name"], limit: 5 }) }));
+    expect(r.results[0].status).toBe("答案不符");
+    expect(r.results[0].detail).toContain("截断 limit=5");
   });
 });
 

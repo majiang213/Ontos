@@ -219,6 +219,7 @@ export const MSG = {
   // 基础设施 infra（连接生命周期、驱动注册表、工作空间、LLM 槽位）
   sqliteNeedsPath: "sqlite 连接必须给文件路径（db_name）",
   sqliteFileMissing: (p: string) => `sqlite 文件不存在：${p}`,
+  sidecarCommentsUnreadable: (p: string) => `注释文件读不出：${p}.comments.json——修好或删掉这个文件再保存`,
   sqlNeedsHost: "mysql/pg 连接必须给 host 与 db_name",
   demoSourceName: (name: string) => `${name} 是内置演示源，换个名字`,
   connectFailed: "连不上：请检查地址、端口、账号与库名（驱动原始报错含连接细节，不原样出网）",
@@ -257,6 +258,11 @@ export const MSG = {
   metricSingleKey: "每条聚合只写一个键",
   metricDuplicate: "聚合指标不能重复",
   orderSingleKey: "order 只支持单键",
+  // 验收跑批的 detail 通道（features/acceptance/questions 的 checkExpected 白话原因）
+  expectRowsMismatch: (n: number, got: number) => `期望 ${n} 行，实得 ${got} 行`,
+  expectTotalMismatch: (n: number, got: number) => `期望合计 ${n}，实得 ${got}`,
+  expectTruncated: (limit: number, n: number) => `查询带了截断 limit=${limit}，不能和期望 ${n} 比`,
+  expectFieldMiss: (field: string, value: string, got: number) => `没有一行的「${field}」等于「${value}」（实查 ${got} 行）`,
   internalError: "内部错误",
   unauthorizedWrite: "未授权：写操作需要有效的令牌",
 

@@ -10,7 +10,7 @@ import { TEST_WORKSPACE } from "../../infra/workspace";
 import { Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { EngineReject, MSG } from "../../errors";
 import { IDENTITY_COL_RE } from "./identityHint";
-import type { LlmSlot } from "./slot";
+import { prefixedTableName, type LlmSlot } from "./slot";
 
 /** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
  *  allowDate=false 给破格进属性的主键用（主键当识别字段时只分 number/string）。 */
@@ -37,8 +37,9 @@ export class CannedSlot implements LlmSlot {
     return queryRequestSchema.parse(hit.query);
   }
 
-  async proposeObjects(tables: { connection: string; table: TableInfo }[]): Promise<Record<string, ObjectType>> {
+  async proposeObjects(tables: { connection: string; table: TableInfo }[], occupied: string[] = []): Promise<Record<string, ObjectType>> {
     const out: Record<string, ObjectType> = {};
+    const taken = new Set(occupied); // 草稿里已有的类名：撞名带连接前缀，不静默覆盖（跨次生成撞名与本次撞名同一规则）
     for (const { connection, table } of tables) {
       const properties: Record<string, ObjectType["properties"][string]> = {};
       const fields: Record<string, string> = {};
@@ -56,8 +57,10 @@ export class CannedSlot implements LlmSlot {
         properties[pkCol.name] = { type: columnPropType(pkCol.type, false), ...(pkCol.comment ? { description: pkCol.comment } : {}) };
         fields[pkCol.name] = pkCol.name;
       }
-      // 跨连接同名表是裁决主场景：撞名带连接前缀，不静默覆盖
-      const clsName = out[table.name] ? `${connection}_${table.name}` : table.name;
+      // 撞名带连接前缀（本次已产出或草稿已占用都算撞）：跨连接同名表是裁决主场景，不静默覆盖
+      // 前缀规则与落地前硬闸同一出处（slot.prefixedTableName）；仍撞的 _2 升级由硬闸（disambiguateClassNames）兜底
+      const clsName = out[table.name] || taken.has(table.name) ? prefixedTableName(connection, table.name) : table.name;
+      taken.add(clsName);
       // 还是猜不到识别字段：不挂 sources 进 manual 桶（有源无 identity 过不了发布闸），人到编辑卡拉列设置
       out[clsName] = identity
         ? {

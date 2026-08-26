@@ -68,11 +68,52 @@ describe("set_fields：导入自动生成与级联", () => {
     expect((await s.publish(WORKSPACE)).code).toBe(200);
   });
 
-  it("源映射的引用仍然拦改名与删除（豁免的只有 set_fields）", async () => {
+  it("源对照不再单独拦改名与删除：fields 键跟着换/摘（画布没有拉列入口，对照补不回来）", async () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "import_objects", objects: { dev_map: mkCls("sn", ["note"], "cmap") } }, WORKSPACE); // note 进了 fields
-    await expectRejected(s.editDraft({ op: "update_property", object: "dev_map", name: "note", new_name: "remark" }, WORKSPACE), /仍被引用/);
-    await expectRejected(s.editDraft({ op: "remove_property", object: "dev_map", name: "note" }, WORKSPACE), /仍被引用/);
+    // 改名：只有源对照引用 → 成功，fields 旧键换新键（属性 remark 仍对照列 note），set_fields 同走
+    await s.editDraft({ op: "update_property", object: "dev_map", name: "note", new_name: "remark" }, WORKSPACE);
+    let dev = (await s.getDraft(WORKSPACE)).draft.object_types.dev_map;
+    expect(dev.properties.note).toBeUndefined();
+    expect(dev.properties.remark).toBeDefined();
+    expect(dev.sources!.cmap.fields).toEqual({ sn: "sn", remark: "note" });
+    expect(updatePropsOf(dev)).toEqual({ remark: { from: "request" } });
+    // 删除：只剩源对照引用 → 成功，fields 摘掉该键
+    await s.editDraft({ op: "remove_property", object: "dev_map", name: "remark" }, WORKSPACE);
+    dev = (await s.getDraft(WORKSPACE)).draft.object_types.dev_map;
+    expect(dev.properties.remark).toBeUndefined();
+    expect(dev.sources!.cmap.fields).toEqual({ sn: "sn" });
+    expect(dev.actions).toBeUndefined(); // set_fields 摘空整条撤
+    expect((await s.publish(WORKSPACE)).code).toBe(200);
+  });
+
+  it("改名时源条目 key 指向旧名也跟着走（对齐属性换名，认行依据不断）", async () => {
+    const s = await freshStore(tmp);
+    const withKey = mkCls("sn", ["note"], "ckey") as Record<string, any>;
+    withKey.sources.ckey.key = "note"; // 该源条目用 note 当认行依据（覆盖类级 identity）
+    await s.editDraft({ op: "import_objects", objects: { dev_key: withKey } }, WORKSPACE);
+    await s.editDraft({ op: "update_property", object: "dev_key", name: "note", new_name: "remark" }, WORKSPACE);
+    const dk = (await s.getDraft(WORKSPACE)).draft.object_types.dev_key;
+    expect(dk.sources!.ckey.key).toBe("remark");
+    expect(dk.sources!.ckey.fields.remark).toBe("note");
+    expect((await s.publish(WORKSPACE)).code).toBe(200);
+  });
+
+  it("被派生引用的字段改名与删除仍被拒；拒完 fields 仍是旧键（不留半截摘对照）", async () => {
+    const s = await freshStore(tmp);
+    // note 进 fields，同时被派生 status 的 when 规则引用（公理/动作引用同一闸，见 editDraft.test 的 mark 用例）
+    await s.editDraft(
+      { op: "import_objects", objects: { dev_ref: mkCls("sn", ["note"], "cref", { extraProps: { status: { type: "string", derived: [{ when: { cref: { note: "x" } }, value: "active" }] } } }) } },
+      WORKSPACE
+    );
+    await expectRejected(s.editDraft({ op: "update_property", object: "dev_ref", name: "note", new_name: "remark" }, WORKSPACE), /仍被引用/);
+    let dev = (await s.getDraft(WORKSPACE)).draft.object_types.dev_ref;
+    expect(dev.properties.note).toBeDefined();
+    expect(dev.sources!.cref.fields.note).toBe("note"); // 先改写的 fields 不许留下半截
+    await expectRejected(s.editDraft({ op: "remove_property", object: "dev_ref", name: "note" }, WORKSPACE), /仍被引用/);
+    dev = (await s.getDraft(WORKSPACE)).draft.object_types.dev_ref;
+    expect(dev.properties.note).toBeDefined();
+    expect(dev.sources!.cref.fields.note).toBe("note");
   });
 
   it("部分重叠：公共属性挪到上位对象，两类的 set_fields 摘键", async () => {

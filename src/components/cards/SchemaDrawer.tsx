@@ -1,4 +1,5 @@
-// 表结构抽屉：只看列定义（REST 会带回 3 行脱敏采样，本抽屉不画）；勾选表 → 生成对象直接上画布并收起。表永远是原料，不上画布。
+// 表结构抽屉：列定义 + REST 已带回的 3 行脱敏采样（值已是 maskValue 之后的，不再二次脱敏；空数组写「没有行」）；
+// 勾选表 → 生成对象直接上画布并收起。表永远是原料，不上画布；采样只给人看，不进生成 prompt。
 "use client";
 
 import { useState } from "react";
@@ -72,6 +73,20 @@ export default function SchemaDrawer({
                       <span style={{ color: "var(--ink-3)" }}>{columnTarget(s.connection, t.name, c.name)}</span>
                     </div>
                   ))}
+                  {/* 脱敏采样（最多 3 行，REST 已带过）：空表写「没有行」；连接 error / 没给 sample 不画这块 */}
+                  {t.sample ? (
+                    <div style={{ marginTop: 6, borderTop: "1px dashed var(--hairline)", paddingTop: 5, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.8 }}>
+                      {t.sample.length === 0
+                        ? "没有行"
+                        : t.sample.map((row, i) => (
+                            <div key={i} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={JSON.stringify(row)}>
+                              {Object.entries(row)
+                                .map(([k, v]) => `${k}: ${v == null ? "空" : String(v)}`)
+                                .join(" · ")}
+                            </div>
+                          ))}
+                    </div>
+                  ) : null}
                 </Bezel>
               );
             })}

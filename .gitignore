@@ -9,3 +9,4 @@ node_modules/
 src/server/config/ontos-meta.db
 src/server/config/canvas-layout.json
 src/server/config/versions/
+.ontos-demo/

@@ -12,7 +12,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 ## 接入
 
 <!-- BEGIN SHARED: mcp-access -->
-- 端点：`POST <host>/api/<空间名>/mcp`（演示场景一律用 `/api/test/mcp`）。
+- 端点：`POST <host>/api/<空间名>/mcp`（`<空间名>` 填当前工作空间名：内置演示模板空间是 `test`；三波走查用的是你自己新建的空间名，不要照抄 `test`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
 <!-- END SHARED: mcp-access -->
 

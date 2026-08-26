@@ -5,6 +5,8 @@
 // 路由只做解析与错误阶梯，跑批逻辑收在这里（薄路由）。
 
 import { query } from "../query/query";
+import { metricColumn } from "../query/assemble";
+import type { QueryRequest } from "../../schema/request";
 import type { LlmSlot } from "../../infra/llm/slot";
 import type { EngineEnv } from "../env";
 import { getDraft, getPublished } from "../ontology/current";
@@ -30,13 +32,27 @@ export function parseExpected(raw?: string | null): Expected | null {
   return null;
 }
 
-/** 对期望：符合返回 null；不符返回白话原因（落 detail）。比较只在内存里做，结果集不落库。 */
-export function checkExpected(raw: string | undefined, rows: Record<string, unknown>[]): string | null {
+/** 对期望：符合返回 null；不符返回白话原因（落 detail）。比较只在内存里做，结果集不落库。
+ *  纯数字期望比对口径（要能当对错板）：聚合查询比合计——加总引擎产出列（count:* → count、count:status → count_status，
+ *  列名规则单源在 assemble.metricColumn，不拿运算符名去 rows 里取）；列表查询比行数；
+ *  显式 limit 比期望小 = 截断了，不能算对。queryReq 是编出来的结构化查询本体，比对口径按它分路。 */
+export function checkExpected(raw: string | undefined, rows: Record<string, unknown>[], queryReq: QueryRequest): string | null {
   const e = parseExpected(raw);
   if (e === null) return EXPECTED_HINT;
   if (e.kind === "any") return null;
-  if (e.kind === "rows") return rows.length === e.n ? null : `期望 ${e.n} 行，实得 ${rows.length} 行`;
-  return rows.some((r) => String(r[e.field] ?? "").trim() === e.value) ? null : `没有一行的「${e.field}」等于「${e.value}」（实查 ${rows.length} 行）`;
+  if (e.kind === "rows") {
+    if (queryReq?.aggregate) {
+      const metric = queryReq.aggregate.metrics[0] as Record<string, string> | undefined;
+      if (!metric) return null; // 形状闸在 schema 层，这里防御
+      const [op, field] = Object.entries(metric)[0];
+      const key = metricColumn(op, field);
+      const total = rows.reduce((s, r) => s + Number(r[key] ?? 0), 0);
+      return total === e.n ? null : MSG.expectTotalMismatch(e.n, total);
+    }
+    if (queryReq?.limit != null && queryReq.limit < e.n) return MSG.expectTruncated(queryReq.limit, e.n);
+    return rows.length === e.n ? null : MSG.expectRowsMismatch(e.n, rows.length);
+  }
+  return rows.some((r) => String(r[e.field] ?? "").trim() === e.value) ? null : MSG.expectFieldMiss(e.field, e.value, rows.length);
 }
 
 export interface QuestionRunResult {
@@ -67,7 +83,7 @@ export async function runQuestions(env: EngineEnv, workspace: string, opts: { on
           status = Q_STATUS.error;
           detail = r.message;
         } else {
-          const bad = checkExpected(q.expected, r.value.rows);
+          const bad = checkExpected(q.expected, r.value.rows, parsed); // 比对带上查询：聚合比合计、过小 limit 不算对
           if (bad) {
             status = Q_STATUS.wrong;
             detail = bad;

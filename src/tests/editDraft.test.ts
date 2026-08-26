@@ -107,8 +107,11 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getDraft(WORKSPACE)).draft.object_types.equipment.properties.name.description).toBeUndefined();
     // 不存在被拒
     await expectRejected(s.editDraft({ op: "update_property", object: "equipment", name: "ghost", description: "x" }, WORKSPACE), "字段不存在");
-    // equipment.name 被源映射引用 → 改名被拒
+    // equipment.name 被 register 动作的效应引用 → 改名仍被拒（源对照已跟随改写也不放行），且拒完 fields 仍是旧键
     await expectRejected(s.editDraft({ op: "update_property", object: "equipment", name: "name", new_name: "dev_name" }, WORKSPACE), /仍被引用/);
+    const eqAfter = (await s.getDraft(WORKSPACE)).draft.object_types.equipment;
+    expect(eqAfter.properties.name).toBeDefined();
+    expect(eqAfter.sources!.device.fields.name).toBe("name"); // 不留半截改写
     // 手工对象的字段改名成功 + 唯一键指针跟随
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE);
     await s.editDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WORKSPACE);
@@ -259,9 +262,12 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(false);
   });
 
-  it("删被引用的属性被拒，并报出引用处", async () => {
+  it("删被引用的属性被拒，并报出引用处；拒完 fields 仍是旧键", async () => {
     const s = await freshStore(tmp);
     await expectRejected(s.editDraft({ op: "remove_property", object: "equipment", name: "mark" }, WORKSPACE), "仍被引用");
+    const eq = (await s.getDraft(WORKSPACE)).draft.object_types.equipment;
+    expect(eq.properties.mark).toBeDefined();
+    expect(eq.sources!.device.fields.mark).toBe("status"); // 对照不半截摘
   });
 
   it("手动连线：建关系、删关系；重名与配对字段不存在被拒；被引用的关系删不掉", async () => {

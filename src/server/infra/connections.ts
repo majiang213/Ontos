@@ -10,6 +10,7 @@ import { metaStore } from "../meta/store";
 import { runtime } from "../runtime";
 import { SqliteFixtureDriver } from "./fixture";
 import { SqliteDriver } from "./sqliteDriver";
+import { readSidecarComments } from "./demoSystems";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
 import { ConnectionReject, MSG, toResult, type Result } from "../errors";
@@ -47,7 +48,8 @@ export function registerSaved(registry: DriverRegistry, rec: ConnectionRec): voi
       console.warn(`[ontos] 连接 ${rec.name} 的 sqlite 文件不存在，跳过注册：${p}`);
       return;
     }
-    // 用户接入的 sqlite 文件库：裸 SqliteDriver——生产路径不背演示机器（种子/注释/剧本在 fixture 子类）
+    // 用户接入的 sqlite 文件库：裸 SqliteDriver——演示种子数据在 fixture 子类，不背进生产路径；
+    // 列注释不是演示专属：registerFile 会按 sidecar / 文件名回退载入（sqliteDriver.ts）
     const d = new SqliteDriver();
     d.registerFile(rec.name, p);
     registry.register(rec.name, d);
@@ -75,9 +77,17 @@ export async function saveConnection(workspace: string, rec: ConnectionRec, test
       throw new ConnectionReject(MSG.demoSourceName(next.name));
     }
     registerSaved(registry, next);
+    // sidecar 严校验（表单路径，落库之前）：注释文件存在但读不出 → 拒，卸掉刚注册的驱动、不落库。
+    // 水合路径（registerFile）对同一情形只警告不加注释——第一次接入坏注释挡在表单，进程重启不会被一份坏 JSON 拖死。
+    if (next.type === "sqlite" && next.db_name && readSidecarComments(next.db_name).kind === "corrupt") {
+      registry.unregister(next.name);
+      if (previous) registerSaved(registry, previous);
+      throw new ConnectionReject(MSG.sidecarCommentsUnreadable(next.db_name), "bad_request");
+    }
+    let tables: TableInfo[] | undefined;
     if (test) {
       try {
-        const tables = await registry.introspect(next.name);
+        tables = await registry.introspect(next.name);
         if (tables.length === 0) {
           registry.unregister(next.name);
           if (previous) registerSaved(registry, previous);
@@ -91,7 +101,7 @@ export async function saveConnection(workspace: string, rec: ConnectionRec, test
       }
     }
     await metaStore().saveConnection(workspace, next);
-    return { ok: true as const, saved: true };
+    return { ok: true as const, saved: true, ...(tables ? { tables } : {}) }; // 表单 toast「读到 N 张表」吃这份
   }, (v) => (v.saved ? MSG.resultConnectionSaved : MSG.connectedNoTables));
 }
 

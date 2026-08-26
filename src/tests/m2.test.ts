@@ -58,13 +58,17 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     const { getSlot } = await import("../server/runtime"); // 槽位选择收在组合根，引擎不自查
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_MODEL;
-    expect(getSlot().name).toBe("canned-离线回退");
-    process.env.OPENAI_API_KEY = "test-key";
-    expect(() => getSlot()).toThrow(/OPENAI_MODEL/);
-    process.env.OPENAI_MODEL = "test-model";
-    expect(getSlot().name).toContain("ai-sdk:");
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_MODEL;
+    try {
+      expect(getSlot().name).toBe("canned-离线回退");
+      process.env.OPENAI_API_KEY = "test-key";
+      expect(() => getSlot()).toThrow(/OPENAI_MODEL/);
+      process.env.OPENAI_MODEL = "test-model";
+      expect(getSlot().name).toContain("ai-sdk:");
+    } finally {
+      // 自清假 key（setup.offline 的 afterEach 是兜底，不靠它）
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.OPENAI_MODEL;
+    }
   });
 
   it("罐头问数只服务 test 空间：别的空间即使有 equipment 类也拒（不静默编成演示查询）", async () => {
@@ -79,6 +83,61 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     const { CannedSlot } = await import("../server/infra/llm/canned");
     const slot = new CannedSlot();
     await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never, "test")).rejects.toThrow(/离线回退只覆盖演示剧本/);
+  });
+});
+
+describe("撞名消解与 prompt 枚举（PR3）", () => {
+  it("disambiguateClassNames：撞占用改 {connection}_{table}，仍撞补 _2，不占用不动；无源类退 _2", async () => {
+    const { disambiguateClassNames } = await import("../server/infra/llm/slot");
+    const obj = {
+      kind: "thing",
+      identity: "cust_no",
+      properties: { cust_no: { type: "string" } },
+      sources: { s: { connection: "crm_sys", table: "customer", fields: { cust_no: "cust_no" } } },
+    } as never;
+    expect(Object.keys(disambiguateClassNames({ customer: obj }, ["customer"]))).toEqual(["crm_sys_customer"]);
+    expect(Object.keys(disambiguateClassNames({ customer: obj }, ["customer", "crm_sys_customer"]))).toEqual(["crm_sys_customer_2"]);
+    expect(Object.keys(disambiguateClassNames({ customer: obj }, []))).toEqual(["customer"]);
+    const bare = { kind: "thing", properties: {} } as never; // 模型产的无源类：没有第一条源可取名
+    expect(Object.keys(disambiguateClassNames({ customer: bare }, ["customer"]))).toEqual(["customer_2"]);
+  });
+
+  it("nlToQuery 的 prompt 带属性类型与枚举 values（过滤值按 values 编，不写中文）", async () => {
+    const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
+    const fakeModel = { modelId: "test-model" } as never;
+    let seen = "";
+    const slot = new AiSdkSlot(fakeModel, (async (args: { prompt: string }) => {
+      seen = args.prompt;
+      return { output: { object: "equipment" } };
+    }) as never);
+    await slot.nlToQuery("在役设备", config, "test");
+    expect(seen).toContain('"type"');
+    expect(seen).toContain('"values"');
+    expect(seen).toContain("in_service"); // equipment.status 的枚举值进了 prompt
+  });
+
+  it("AiSdkSlot 失败落盘：原始产出写临时目录，OPENAI_API_KEY 字面值打码", async () => {
+    const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const fakeModel = { modelId: "test-model" } as never;
+    process.env.OPENAI_API_KEY = "sk-testsecret";
+    try {
+      const slot = new AiSdkSlot(fakeModel, (async () => {
+        throw new Error("401 invalid key sk-testsecret"); // 上游报错把 key 带回来的情形
+      }) as never);
+      await expect(slot.nlToQuery("x", config, "test")).rejects.toThrow(/401/);
+      const dir = join(tmpdir(), "ontos-llm-fail");
+      const files = readdirSync(dir).filter((f) => f.includes("nlToQuery"));
+      expect(files.length).toBeGreaterThan(0);
+      const text = readFileSync(join(dir, files[files.length - 1]), "utf8");
+      expect(text).toContain("nlToQuery");
+      expect(text).not.toContain("sk-testsecret"); // 密钥打码
+      expect(text).toContain("***");
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
   });
 });
 
@@ -146,6 +205,15 @@ describe("LLM 槽位离线回退", () => {
     expect(draft.meter.properties.meter_no.description).toBe("表编号"); // 主键是业务编号时破格进属性，注释跟上
     expect(draft.meter.properties.reading.description).toBe("读数");
     expect(draft.meter.properties.note.description).toBeUndefined();
+  });
+
+  it("逆向建模：occupied 已占用的类名撞名带连接前缀（跨次生成），不占用仍用表名", async () => {
+    const table = { name: "customer", columns: [{ name: "cust_no", type: "TEXT", pk: true }] };
+    const hit = await slot.proposeObjects([{ connection: "crm_sys", table }], ["customer"]);
+    expect(hit.customer).toBeUndefined();
+    expect(hit.crm_sys_customer?.identity).toBe("cust_no");
+    const free = await slot.proposeObjects([{ connection: "crm_sys", table }]);
+    expect(free.customer).toBeTruthy(); // 不占用：不乱加前缀
   });
 
   it("候选对建议：跨源且字段重合才成对，同源不成对", async () => {

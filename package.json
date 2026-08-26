@@ -7,7 +7,8 @@
     "dev": "next dev -p 6688",
     "build": "next build",
     "start": "next start -p 6688",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:seed": "node --experimental-strip-types --no-warnings scripts/demo-seed.ts"
   },
   "dependencies": {
     "@ai-sdk/xai": "^4.0.40",

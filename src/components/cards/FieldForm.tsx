@@ -50,7 +50,7 @@ export function FieldForm({
       style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}
     >
       <label style={labelStyle}>
-        字段名（小写字母/数字/下划线；被引用的字段改不了名）
+        字段名（小写字母/数字/下划线；改名会把来源对照一起换过来；被关系、公理、派生字段或动作引用着的改不了名）
         <input className="ctl" value={name} onChange={(e) => setName(e.target.value)} />
       </label>
       <label style={labelStyle}>

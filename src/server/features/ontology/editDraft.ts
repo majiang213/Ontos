@@ -9,7 +9,7 @@ import type { EngineEnv } from "../env";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 import { applyOp } from "./ops";
 import { persistWorkingCopy, type DraftState } from "./canvasPack";
-import { commitDraft, validateDraftOrThrow } from "./commit";
+import { commitDraft, validateDraftOrThrow, validateFull } from "./commit";
 import { getDraft, getPublished, getRev } from "./current";
 
 /** 受理一条 op：改工作副本，一次只改一步。base_rev 只在 MCP 信封出现（REST 画布不传）。
@@ -32,9 +32,16 @@ export async function editDraft(env: EngineEnv, input: DraftOp, workspace: strin
         continue; // 被并发写推进：重读重试
       }
       const backup = structuredClone(state.draft);
-      applyOp(state, input, published);
-      // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在字段的坏草稿不能攒到发布一刻才炸）
-      validateDraftOrThrow(state, backup);
+      // op 解释与落定校验同一个 try：editProperty 这类 op 会先改写跟随键（fields/key）再扫引用，
+      // 拦截或校验失败时任何抛出都整份回退——不留「源上已是新键、properties 仍是旧名」的半截草稿。
+      try {
+        applyOp(state, input, published);
+        // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在字段的坏草稿不能攒到发布一刻才炸）
+        validateFull(state.draft);
+      } catch (e) {
+        state.draft = backup;
+        throw e instanceof DraftReject ? e : new DraftReject(e instanceof Error ? e.message : String(e));
+      }
       const saved = await commitDraft(env, workspace, state, expectedRev, true);
       if (saved) return state;
       if (attempt === maxAttempts) throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));

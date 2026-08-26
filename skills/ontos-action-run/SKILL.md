@@ -13,7 +13,7 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 ## 接入
 
 <!-- BEGIN SHARED: mcp-access -->
-- 端点：`POST <host>/api/<空间名>/mcp`（演示场景一律用 `/api/test/mcp`）。
+- 端点：`POST <host>/api/<空间名>/mcp`（`<空间名>` 填当前工作空间名：内置演示模板空间是 `test`；三波走查用的是你自己新建的空间名，不要照抄 `test`）。
 - 协议：JSON-RPC 2.0。会话开始 `initialize` 一次；`tools/list` 列工具；`tools/call` 调工具。`notifications/*` 不发响应（202）。
 <!-- END SHARED: mcp-access -->
 - 鉴权：`run_action` 是写操作——服务端设了 `ONTOS_TOKEN` 时，请求头必须带 `Authorization: Bearer <token>`，未授权返回错误码 `-32001`。`read_class` / `query` 只读放开。
@@ -43,7 +43,7 @@ Ontos 的写入**只能走已发布动作**——没有自由写接口。动作�
 
 ## 方法论（三步）：先查前置 → 执行 → 复查
 
-1. **发现**：`read_class` 看目标类的动作与前置（`pre` 里的 `$request` 块列出参数名和约束，如 `dept: { object: "department" }` 表示 `request.dept` 必须能认到一个已存在的部门个体）。**先用 `query` 确认目标个体存在与当前状态**——前置不满足就直接告诉用户，不要发动作。例如对在途（`in_transit`）设备发 `transfer` 会得到 `isError: true, stage: "pre"`；此时正确做法是改用 `convert`（验收入库，前置正好是 `in_transit`），完成后再谈调拨。
+1. **发现**：`read_class` 看目标类的动作与前置（`pre` 里的 `$request` 块列出参数名和约束，如 `dept: { object: "department" }` 表示 `request.dept` 必须能认到一个已存在的部门个体）。**先用 `query` 确认目标个体存在与当前状态**——前置不满足就直接告诉用户，不要发动作。例如对在途（`in_transit`）设备发 `transfer` 会得到 `isError: true, stage: "pre"`；此时正确做法是改用转化动作——阶段裁决立的动作名是 `convert_to_<晚阶段>`（如 `convert_to_in_service`，验收入库，前置正好是 `in_transit`），完成后再谈调拨。注意：附录 C 模板里的 `convert` 只属于 `test` 演示空间；动作名一律以 `read_class` 在你这个空间读到的为准。
 2. **执行**：`run_action { action, object, identity, request? }`。前置不满足 = 业务失败：先查目标个体当前状态，确认哪条前置不满足，该修正修正、该放弃放弃——**不要原样重发**。
 3. **复查**：执行成功后，用 `query` 查同一 `identity`，把最新状态展示给用户。**部分失败不回滚**——`structuredContent.projections` 是逐源表的投影成败清单（`source.table op ok/error`），有失败项时把明细如实报告给用户，补偿手段（修正后重发同一动作或人工修库）由人决定。
 

@@ -1,4 +1,6 @@
 // 疑似重复面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。失败留在面板里可重试。
+// 「对调两端」：同一留下乘号前的类、阶段的晚源看乘号后的类——模型给反了人在这里对调（POST 的 class_a/class_b 跟着换）；
+// 已算的交集率按类名对齐条数，对齐不上就清掉让人再算（不换标题糊弄）。
 "use client";
 
 import { useRef, useState } from "react";
@@ -6,8 +8,27 @@ import type { PairAdvice } from "../../server/schema/verdict";
 import { VERDICTS, VERDICT_LABELS, Verdict } from "../../server/schema/verdict";
 import { apiPost } from "../workspaceClient";
 
+/** 交集率响应（/api/compute_overlap）：count_a 跟着请求里的 class_a。 */
+interface OverlapResp {
+  class_a: string;
+  class_b: string;
+  rate: number;
+  count_a: number;
+  count_b: number;
+  count_hit: number;
+  norm_rule?: string;
+}
+
+/** 把交集率响应按类名对齐到给定顺序：对得上换条数归属，对不上返回 null（类名对不上 = 让别人重算）。 */
+function alignRate(r: OverlapResp, order: [string, string]): OverlapResp | null {
+  if (r.class_a === order[0] && r.class_b === order[1]) return r;
+  if (r.class_a === order[1] && r.class_b === order[0]) return { ...r, class_a: order[0], class_b: order[1], count_a: r.count_b, count_b: r.count_a };
+  return null;
+}
+
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
-  const [rate, setRate] = useState<{ rate: number; count_a: number; count_b: number; count_hit: number; norm_rule?: string } | null>(null);
+  const [order, setOrder] = useState<[string, string]>([pair.class_a, pair.class_b]); // 当前乘号两端（对调只改这里）
+  const [rate, setRate] = useState<OverlapResp | null>(null); // 存的是按当前 order 对齐后的结果
   const [stage, setStage] = useState({ from: "", to: "" });
   const [busy, setBusy] = useState(false);
   const [rateBusy, setRateBusy] = useState(false);
@@ -19,8 +40,8 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
     setError(null);
     try {
       const data = await apiPost<{ recorded?: boolean }>("/api/decide", {
-        class_a: pair.class_a,
-        class_b: pair.class_b,
+        class_a: order[0],
+        class_b: order[1],
         verdict,
         stage_names: verdict === Verdict.Stage && stage.from && stage.to ? stage : undefined,
         llm_advice: `${VERDICT_LABELS[pair.tendency]}：${pair.reason}`,
@@ -28,9 +49,9 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
       });
       onDone(
         verdict === Verdict.Stage
-          ? `已裁决 ${pair.class_a} × ${pair.class_b}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+          ? `已裁决 ${order[0]} × ${order[1]}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
           : verdict === Verdict.Same || verdict === Verdict.Overlap
-            ? `已裁决 ${pair.class_a} × ${pair.class_b}：${VERDICT_LABELS[verdict]}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+            ? `已裁决 ${order[0]} × ${order[1]}：${VERDICT_LABELS[verdict]}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
             : "" // 仅名称相似/跳过：不动草稿，条目从面板消失即是反馈，不弹提示
       );
     } catch (e) {
@@ -52,9 +73,23 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
 
   return (
     <div style={{ borderTop: "1px solid var(--hairline)", padding: "14px 0 4px" }}>
-      {/* 候选对 + AI 软证据 */}
-      <div style={{ fontSize: 14, fontWeight: 600 }}>
-        <code>{pair.class_a}</code> × <code>{pair.class_b}</code>
+      {/* 候选对 + 对调 + AI 软证据 */}
+      <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span>
+          <code>{order[0]}</code> × <code>{order[1]}</code>
+        </span>
+        <button
+          className="chip"
+          style={{ fontSize: 11 }}
+          title="乘号顺序有讲究：「同一」留下乘号前的对象，「阶段」按两端来源定早晚。模型给反了就点我"
+          onClick={() => {
+            const next: [string, string] = [order[1], order[0]];
+            setOrder(next);
+            if (rate) setRate(alignRate(rate, next)); // 已算的交集率跟着类走；对齐不上就清掉，重新算
+          }}
+        >
+          对调两端
+        </button>
       </div>
       <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6 }}>
         AI 建议「{VERDICT_LABELS[pair.tendency]}」，依据：{pair.reason}。
@@ -64,7 +99,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 12, color: "var(--ink-2)", marginTop: 8 }}>
         {rate ? (
           <span>
-            交集率 <strong>{(rate.rate * 100).toFixed(0)}%</strong>（{pair.class_a} {rate.count_a} 条、{pair.class_b} {rate.count_b} 条，其中 {rate.count_hit} 条对得上号）
+            交集率 <strong>{(rate.rate * 100).toFixed(0)}%</strong>（{order[0]} {rate.count_a} 条、{order[1]} {rate.count_b} 条，其中 {rate.count_hit} 条对得上号）
             {rate.count_hit === 0 ? "——完全对不上，多半不相干" : rate.rate >= 0.5 ? "——多半是同一批" : ""}
           </span>
         ) : (
@@ -76,7 +111,8 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               setRateBusy(true);
               setError(null);
               try {
-                setRate(await apiPost<typeof rate>("/api/compute_overlap", { class_a: pair.class_a, class_b: pair.class_b }));
+                const r = await apiPost<OverlapResp>("/api/compute_overlap", { class_a: order[0], class_b: order[1] });
+                setRate(alignRate(r, order)); // 按当前两端对齐；类名对不上（草稿变了）就清掉让人再点
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {
@@ -118,12 +154,12 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               <span className="verdict-hint">{o.hint}</span>
               {o.v === Verdict.Stage && (
                 <span className="verdict-stage" onClick={(e) => e.stopPropagation()}>
-                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>填两个时期的名字：</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>填两个时期的名字（英文小写，问数按这里填的字过滤）：</span>
                     <span style={{ fontSize: 11, color: "var(--ink-3)" }}>早</span>
-                    <input ref={stageFromRef} placeholder="如：在途" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--panel-2)" }} />
+                    <input ref={stageFromRef} placeholder="in_transit" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--panel-2)" }} />
                     <span style={{ color: "var(--ink-3)" }}>→</span>
                     <span style={{ fontSize: 11, color: "var(--ink-3)" }}>晚</span>
-                    <input placeholder="如：在役" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--panel-2)" }} />
+                    <input placeholder="in_service" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--panel-2)" }} />
                     <span style={{ fontSize: 11, color: "var(--ink-3)" }}>，再点本行定案</span>
                 </span>
               )}

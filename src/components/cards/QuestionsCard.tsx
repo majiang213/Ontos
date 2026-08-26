@@ -2,11 +2,14 @@
 // 期望结果两种写法：纯数字（比对行数）或 字段=值（至少一行对上）。
 // 失败分阶段（编译失败/执行出错/答案不符），点状态标签看原因；发布新版后旧结果标「待重跑」。
 // 「对草稿跑一遍」试跑当前工作副本：结果只活在这张卡上（草稿标签），不落验收记录。
+// 「换成第 N 波问题」：三波走查的对错板（题与期望数字的唯一出处是 server 的 questionPacks）——
+// 先清空本空间全部题再装入，不自动跑；跑完本次明细留在题旁。
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { apiDel, apiGet, apiPost } from "../workspaceClient";
 import { Q_STATUS } from "../../server/features/acceptance/questionStatus";
+import { QUESTION_PACKS, type QuestionPack } from "../../server/features/acceptance/questionPacks";
 import Bezel from "./Bezel";
 
 interface QItem {
@@ -55,6 +58,24 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
     return { label: `v${q.version} ${q.status}`, cls: `tag ${q.status === Q_STATUS.pass ? "tag-ok" : "tag-warn"}` };
   };
 
+  /** 换成一包：先删本空间全部题（手打的也清），再逐条装入（带期望数字）。禁止带 run——装入不自动跑。 */
+  const loadPack = async (pack: QuestionPack) => {
+    if (acting || running || runningId !== null || runningDraft) return;
+    setActing(true);
+    try {
+      const data = await apiGet<{ questions?: QItem[] }>("/api/questions");
+      for (const q of data.questions ?? []) await apiDel("/api/questions", { id: q.id });
+      for (const q of pack.questions) await apiPost("/api/questions", { question: q.question, expected: q.expected });
+      setDraftRun(null); // 草稿试跑结果锚的是旧题的 id，一并作废
+      await load();
+      showToast(`已换成 ${pack.questions.length} 条${pack.name}问题`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "没换成"); // 中途失败也要说，再点一次重来
+    } finally {
+      setActing(false);
+    }
+  };
+
   const runOne = async (id: number) => {
     if (running || runningId !== null || runningDraft) return;
     setRunningId(id);
@@ -76,6 +97,17 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>
           <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
+        </div>
+        {/* 三波走查的对错板：装入先清空本空间全部题，不自动跑；期望数字装入即见 */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "8px 0 2px" }}>
+          {QUESTION_PACKS.map((p) => (
+            <button key={p.key} className="chip" disabled={acting || running || runningId !== null || runningDraft} onClick={() => void loadPack(p)}>
+              换成{p.name}问题
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6, marginBottom: 4 }}>
+          这是空白空间走完这一波裁决后的数字，不要在 test 空间用。装入会先清空本空间全部题（含手打的）。
         </div>
           {items.map((q) => {
             const t = tagOf(q);
