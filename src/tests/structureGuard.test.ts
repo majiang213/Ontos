@@ -122,7 +122,7 @@ const DIRECTION_RULES: { area: RegExp; forbidden: string[]; why: string }[] = [
       "server/features/ontology/ops/index",
       "server/features/ontology/ops/edit",
       "server/features/ontology/ops/importObjects",
-      "server/features/ontology/ops/subjectClass",
+      "server/features/ontology/ops/classMustExist",
     ],
     why: "读路径不依赖写路径：views 只消费纯函数（ops/replaceObject 的 replaceBlockers 是纯判定，放行）",
   },

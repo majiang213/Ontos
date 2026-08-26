@@ -10,7 +10,6 @@ export interface ConnectionRec {
   ro_pass?: string;
   rw_user?: string;
   rw_pass?: string;
-  options?: Record<string, unknown>;
 }
 
 export interface DecisionRec {

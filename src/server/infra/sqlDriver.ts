@@ -5,7 +5,7 @@
 
 import mysql from "mysql2/promise";
 import pg from "pg";
-import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
+import { buildAggregate, buildInsert, buildSelect, buildStatement, maskValue, type AggMetric, type Condition, type SourceDriver, type TableInfo } from "./driver";
 
 export interface SqlConnectionCfg {
   host?: string;
@@ -99,6 +99,11 @@ class PoolDriver<P extends { end(): Promise<void> }> implements SourceDriver {
 
   async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
     const { sql, params } = buildSelect(table, columns, conditions, this.dialect, limit);
+    return (await this.d.runQuery(this.pool(false), sql, params)).rows;
+  }
+
+  async selectAggregate(connection: string, table: string, group: { column: string; as: string }[], metrics: AggMetric[], conditions: Condition[]) {
+    const { sql, params } = buildAggregate(table, group, metrics, conditions, this.dialect);
     return (await this.d.runQuery(this.pool(false), sql, params)).rows;
   }
 

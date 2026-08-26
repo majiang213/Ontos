@@ -3,7 +3,7 @@
 // 用户接入的 sqlite 文件库走本类（connections.ts registerSaved）；演示种子/列注释在 fixture.ts（继承本类），问数剧本在 llm/canned.ts。
 
 import { DatabaseSync } from "node:sqlite";
-import { buildInsert, buildSelect, buildStatement, maskValue, type Condition, type SourceDriver, type TableInfo } from "./driver";
+import { buildAggregate, buildInsert, buildSelect, buildStatement, maskValue, type AggMetric, type Condition, type SourceDriver, type TableInfo } from "./driver";
 import { EngineReject, MSG } from "../errors";
 
 // node:sqlite 的参数类型是 SQLInputValue；引擎产出的 unknown[] 在这一处收口断言。
@@ -36,6 +36,11 @@ export class SqliteDriver implements SourceDriver {
 
   async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
     const { sql, params } = buildSelect(table, columns, conditions, "sqlite", limit);
+    return this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
+  }
+
+  async selectAggregate(connection: string, table: string, group: { column: string; as: string }[], metrics: AggMetric[], conditions: Condition[]) {
+    const { sql, params } = buildAggregate(table, group, metrics, conditions, "sqlite");
     return this.db(connection).prepare(sql).all(...bind(params)) as Record<string, unknown>[];
   }
 

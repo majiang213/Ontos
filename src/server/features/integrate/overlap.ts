@@ -3,7 +3,7 @@
 // 只读采样，内存里算，集合算完即弃；落库的只有计数与比率（adj_overlap）。
 
 import type { SourceDriver } from "../../infra/driver";
-import { EngineReject, MSG, codeOf, type Result } from "../../errors";
+import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { mustCls, keyColumn, sourcesOf, type Cls } from "../query/individual";
 import { getDraft } from "../ontology/current";
 import { hasSources, isCrossSource, sharedSourcesMsg } from "./eligibility";
@@ -14,7 +14,7 @@ import type { MetaStore } from "../../meta/store";
 
 /** 两端识别字段归一化后的集合重合度。无源 / 同源 / 缺识别字段拒绝。不收已定案闸——证据允许重算。 */
 export async function computeOverlap(env: EngineEnv, workspace: string, class_a: string, class_b: string): Promise<Result<OverlapResult>> {
-  try {
+  return toResult(async () => {
     const d = (await getDraft(env, workspace)).draft;
     const a = mustCls(d, class_a);
     const b = mustCls(d, class_b);
@@ -27,13 +27,8 @@ export async function computeOverlap(env: EngineEnv, workspace: string, class_a:
     if (!a.def.identity || !b.def.identity) {
       throw new EngineReject(MSG.pairNoIdentity);
     }
-    const value = await overlapRate(await env.getRegistry(workspace), a, b, env.meta, workspace);
-    return { code: 200, message: MSG.resultOverlap(value.rate), value };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return overlapRate(await env.getRegistry(workspace), a, b, env.meta, workspace);
+  }, (v) => MSG.resultOverlap(v.rate));
 }
 
 /** 识别列全量扫的行数上限：交集是内存集合运算，超大表先收窄再算。 */

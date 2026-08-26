@@ -8,7 +8,7 @@ import { query } from "../query/query";
 import type { LlmSlot } from "../../infra/llm/slot";
 import type { EngineEnv } from "../env";
 import { getDraft, getPublished } from "../ontology/current";
-import { MSG, codeOf, type Result } from "../../errors";
+import { MSG, toResult, type Result } from "../../errors";
 import { Q_STATUS, type QuestionStatus } from "./questionStatus";
 
 /** 期望结果的合法写法：留空（能查出就算过）/ 纯数字（比对行数）/ 字段=值（至少一行对上）。 */
@@ -49,7 +49,7 @@ export interface QuestionRunResult {
 /** 跑批：全量；onlyId 给了就只跑那一条。target=draft 对当前草稿试跑，状态不落库、版本返回 null。
  *  slot 可注入假实现（测试用），缺省用 env 的槽位（无 key 走离线回退）。 */
 export async function runQuestions(env: EngineEnv, workspace: string, opts: { onlyId?: number; slot?: LlmSlot; target?: "published" | "draft" } = {}): Promise<Result<{ results: QuestionRunResult[]; version: number | null }>> {
-  try {
+  return toResult(async () => {
     const draft = opts.target === "draft";
     const { config, version } = draft ? { config: (await getDraft(env, workspace)).draft, version: null } : await getPublished(env, workspace);
     const slot = opts.slot ?? env.llm;
@@ -80,10 +80,6 @@ export async function runQuestions(env: EngineEnv, workspace: string, opts: { on
       if (!draft) await env.meta.setQuestionStatus(workspace, q.id, status, version ?? undefined, detail || undefined); // 试跑不碰验收记录
       results.push({ id: q.id, question: q.question, status, detail });
     }
-    return { code: 200, message: MSG.resultRunDone(results.length), value: { results, version } };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return { results, version };
+  }, (v) => MSG.resultRunDone(v.results.length));
 }

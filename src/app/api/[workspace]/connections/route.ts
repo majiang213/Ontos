@@ -1,4 +1,4 @@
-// 连接管理：GET 列表（剥掉密码与 options）/ POST 保存 / DELETE 删除。
+// 连接管理：GET 列表（剥掉密码与库内路径）/ POST 保存 / DELETE 删除。
 // 薄适配：形状校验 + 写闸 → connections.saveConnection / dropConnection。
 
 import { z } from "zod";
@@ -21,15 +21,14 @@ const connectionSchema = z.object({
   ro_pass: z.string().optional(),
   rw_user: z.string().optional(),
   rw_pass: z.string().optional(),
-  options: z.record(z.string(), z.unknown()).optional(),
   test: z.boolean().optional(),
 });
 
 export async function GET(req: Request, { params }: { params: Promise<{ workspace: string }> }) {
   return respond(async () => {
-    // 密码、options、db_name 不外发（db_name 落库前被 resolve 成服务器绝对路径，路径不出网）
+    // 密码与 db_name 不外发（db_name 落库前被 resolve 成服务器绝对路径，路径不出网）
     const connections = (await metaStore().listConnections(await workspaceOf(params))).map(
-      ({ ro_pass: _a, rw_pass: _b, options: _c, db_name: _d, ...rest }) => rest
+      ({ ro_pass: _a, rw_pass: _b, db_name: _d, ...rest }) => rest
     );
     return { connections };
   });

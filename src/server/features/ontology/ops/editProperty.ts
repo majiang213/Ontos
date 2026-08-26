@@ -6,7 +6,7 @@ import { NAME_RE, type DraftOpInput as DraftOp } from "../../../schema/ops";
 import { DraftReject, MSG } from "../../../errors";
 import { referencesOf } from "../refs";
 import { FIELDS_UPDATE_ACTION, removeFieldsUpdateKeys, renameFieldsUpdateKey } from "../skeletons";
-import { mustType } from "./subjectClass";
+import { mustClass } from "./classMustExist";
 
 type RemovePropertyOp = Extract<DraftOp, { op: "remove_property" }>;
 type UpdatePropertyOp = Extract<DraftOp, { op: "update_property" }>;
@@ -17,7 +17,7 @@ function blockingRefs(d: OntologyConfig, object: string, name: string): string[]
 }
 
 export function removeProperty(d: OntologyConfig, input: RemovePropertyOp): void {
-  const t = mustType(d, input.object);
+  const t = mustClass(d, input.object);
   if (!t.properties[input.name]) throw new DraftReject(MSG.propNotFound(input.name));
   if (t.identity === input.name) throw new DraftReject(MSG.propIdentityNoDelete);
   const refs = blockingRefs(d, input.object, input.name);
@@ -27,7 +27,7 @@ export function removeProperty(d: OntologyConfig, input: RemovePropertyOp): void
 }
 
 export function updateProperty(d: OntologyConfig, input: UpdatePropertyOp): void {
-  const t = mustType(d, input.object);
+  const t = mustClass(d, input.object);
   const prop = t.properties[input.name];
   if (!prop) throw new DraftReject(MSG.propNotFound(input.name));
   if (input.description !== undefined) prop.description = input.description || undefined; // 空串 = 清掉

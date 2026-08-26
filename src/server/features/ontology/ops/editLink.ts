@@ -8,7 +8,7 @@ import { DraftReject, MSG } from "../../../errors";
 import { linkRefs } from "../refs";
 import { definedPinEnds, mergeEdgePins, renameEdgeState, setEdgePins } from "../canvasState";
 import type { DraftState } from "../canvasPack";
-import { mustType } from "./subjectClass";
+import { mustClass } from "./classMustExist";
 
 type CreateLinkOp = Extract<DraftOp, { op: "create_link" }>;
 type DeleteLinkOp = Extract<DraftOp, { op: "delete_link" }>;
@@ -18,8 +18,8 @@ export function createLink(state: DraftState, input: CreateLinkOp): void {
   const d = state.draft;
   if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.linkNameBad);
   if (d.link_types[input.name]) throw new DraftReject(MSG.linkExists(input.name));
-  mustType(d, input.from);
-  mustType(d, input.to);
+  mustClass(d, input.from);
+  mustClass(d, input.to);
   if (!d.object_types[input.from].properties[input.match.from]) throw new DraftReject(MSG.propNotOnClass(input.from, input.match.from));
   if (!d.object_types[input.to].properties[input.match.to]) throw new DraftReject(MSG.propNotOnClass(input.to, input.match.to));
   if (input.inverse && !NAME_RE.test(input.inverse)) throw new DraftReject(MSG.linkInverseBad);
@@ -55,8 +55,8 @@ export function updateLink(state: DraftState, input: UpdateLinkOp): void {
     if (from === to) throw new DraftReject(MSG.linkSameEnds);
     const refs = linkRefs(d, input.name); // 改端点与改名同理：引用它的动作按 from/to 走线，会静默断
     if (refs.length) throw new DraftReject(MSG.linkStillReferencedRewire(input.name, refs));
-    const fromT = mustType(d, from);
-    const toT = mustType(d, to);
+    const fromT = mustClass(d, from);
+    const toT = mustClass(d, to);
     let match = l.match;
     if (match) {
       match = match.filter((m) => fromT.properties[m.from] && toT.properties[m.to]);

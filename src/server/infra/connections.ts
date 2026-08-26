@@ -12,7 +12,7 @@ import { SqliteFixtureDriver } from "./fixture";
 import { SqliteDriver } from "./sqliteDriver";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
-import { ConnectionReject, MSG, codeOf, type Result } from "../errors";
+import { ConnectionReject, MSG, toResult, type Result } from "../errors";
 import { DEFAULT_WORKSPACE, TEST_WORKSPACE } from "./workspace";
 import type { TableInfo } from "./driver";
 
@@ -58,7 +58,7 @@ export function registerSaved(registry: DriverRegistry, rec: ConnectionRec): voi
 
 /** 保存连接：先注册再测，通过才落库。失败还回旧驱动。test=true 时空库不落库。 */
 export async function saveConnection(workspace: string, rec: ConnectionRec, test?: boolean): Promise<Result<{ ok: true; saved: boolean; warning?: string; tables?: TableInfo[] }>> {
-  try {
+  return toResult(async () => {
     const next = { ...rec };
     if (next.type === "sqlite") {
       if (!next.db_name) throw new ConnectionReject(MSG.sqliteNeedsPath, "bad_request");
@@ -81,7 +81,7 @@ export async function saveConnection(workspace: string, rec: ConnectionRec, test
         if (tables.length === 0) {
           registry.unregister(next.name);
           if (previous) registerSaved(registry, previous);
-          return { code: 200, message: MSG.connectedNoTables, value: { ok: true, warning: MSG.connectedNoTables, tables, saved: false } };
+          return { ok: true as const, warning: MSG.connectedNoTables, tables, saved: false };
         }
       } catch (e) {
         registry.unregister(next.name);
@@ -91,28 +91,19 @@ export async function saveConnection(workspace: string, rec: ConnectionRec, test
       }
     }
     await metaStore().saveConnection(workspace, next);
-    return { code: 200, message: MSG.resultConnectionSaved, value: { ok: true, saved: true } };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return { ok: true as const, saved: true };
+  }, (v) => (v.saved ? MSG.resultConnectionSaved : MSG.connectedNoTables));
 }
 
 /** 删除已保存的连接。内置演示源不在元库，删不了；已发布本体还引用着的也不能删——
  *  引用判定由调用方注入（infra 不上指 draft；路由传 refs.connectionInUse ∘ getPublished）。 */
 export async function dropConnection(workspace: string, name: string, isReferenced: (name: string) => Promise<boolean>): Promise<Result<void>> {
-  try {
+  return toResult(async () => {
     if (!(await metaStore().listConnections(workspace)).some((c) => c.name === name)) {
       throw new ConnectionReject(MSG.connectionNotFoundBuiltin(name));
     }
     if (await isReferenced(name)) throw new ConnectionReject(MSG.connectionInUsePublished(name));
     await metaStore().deleteConnection(workspace, name);
     (await getDriverRegistry(workspace)).unregister(name);
-    return { code: 200, message: MSG.resultConnectionDropped, value: undefined };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+  }, () => MSG.resultConnectionDropped);
 }

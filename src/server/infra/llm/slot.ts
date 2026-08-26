@@ -9,7 +9,7 @@ import type { TableInfo } from "../../infra/driver";
 import type { PairAdvice } from "../../schema/verdict";
 import type { DriverRegistry } from "../../infra/registry";
 import { resolveTableInfos } from "../../infra/tables";
-import { MSG, codeOf, type Result } from "../../errors";
+import { MSG, toResult, type Result } from "../../errors";
 
 export interface LlmSlot {
   /** 实现名，留痕用（离线回退 / 真模型名） */
@@ -31,13 +31,8 @@ export async function proposeObjectsFor(
   tables: { connection: string; table: string }[],
   notFound: (msg: string) => Error
 ): Promise<Result<Record<string, ObjectType>>> {
-  try {
+  return toResult(async () => {
     const infos = await resolveTableInfos(registry, tables, notFound);
-    const value = await slot.proposeObjects(infos);
-    return { code: 200, message: MSG.resultProposed(Object.keys(value).length), value };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return slot.proposeObjects(infos);
+  }, (v) => MSG.resultProposed(Object.keys(v).length));
 }

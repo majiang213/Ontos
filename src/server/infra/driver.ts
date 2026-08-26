@@ -28,6 +28,8 @@ export interface SourceDriver {
   dialectOf?(connection: string): "sqlite" | "mysql" | "pg" | undefined;
   // 下推只读查询：取哪些列、按什么条件筛，在库内完成。异步：真库走网络。limit 给时下推行数上限
   select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number): Promise<Record<string, unknown>[]>;
+  // 聚合下推（M7 查询治理）：分组键与指标在库内 GROUP BY，不拉全量明细。只有判定「整个聚合都能在库内算」才调（assemble.aggregatePushdown）
+  selectAggregate(connection: string, table: string, group: { column: string; as: string }[], metrics: AggMetric[], conditions: Condition[]): Promise<Record<string, unknown>[]>;
   // 写回三种：插、条件更新（返回受影响行数）、条件删除
   insert(connection: string, table: string, row: Record<string, unknown>): Promise<void>;
   update(connection: string, table: string, set: Record<string, unknown>, conditions: Condition[]): Promise<number>;
@@ -128,6 +130,13 @@ function conditionSql(cond: Condition, quote: (id: string) => string, dialect: "
 
 export type Dialect = "sqlite" | "mysql" | "pg";
 
+/** 聚合指标：op 与产出列名（as）由引擎给，column 已是源列名（"*" 只配 count）。 */
+export interface AggMetric {
+  op: "count" | "avg" | "sum" | "min" | "max";
+  column: string | "*";
+  as: string;
+}
+
 export function buildSelect(
   table: string,
   columns: string[],
@@ -142,6 +151,31 @@ export function buildSelect(
   const cols = columns.length ? columns.map(quote).join(", ") : "*";
   const sql = `SELECT ${cols} FROM ${quote(table)}${where}${limit ? " LIMIT ?" : ""}`;
   return { sql: renderPlaceholders(sql, dialect), params: limit ? [...params, limit] : params };
+}
+
+/** 聚合下推的构造（select 走 buildSelect）：GROUP BY 在库内算。
+ *  语义对齐内存聚合：count 数非空值 / count(*) 数行、avg/min/max 跳过 NULL（下推前提是 number 列，见 aggregatePushdown）；
+ *  sum 组内全是 NULL 时内存给 0 而 SQL 给 NULL，用 COALESCE 对齐。 */
+export function buildAggregate(
+  table: string,
+  group: { column: string; as: string }[],
+  metrics: AggMetric[],
+  conds: Condition[],
+  dialect: Dialect
+): { sql: string; params: unknown[] } {
+  const quote = quoteFor(dialect);
+  const parts = conds.map((c) => conditionSql(c, quote, dialect));
+  const where = parts.length ? ` WHERE ${parts.map((p) => p.sql).join(" AND ")}` : "";
+  const params = parts.flatMap((p) => p.params);
+  const gcols = group.map((g) => `${quote(g.column)} AS ${quote(g.as)}`);
+  const mcols = metrics.map((m) => {
+    const target = m.column === "*" ? "*" : quote(m.column);
+    const expr = m.op === "sum" ? `COALESCE(SUM(${target}), 0)` : `${m.op.toUpperCase()}(${target})`;
+    return `${expr} AS ${quote(m.as)}`;
+  });
+  const groupBy = group.length ? ` GROUP BY ${group.map((g) => quote(g.column)).join(", ")}` : "";
+  const sql = `SELECT ${[...gcols, ...mcols].join(", ")} FROM ${quote(table)}${where}${groupBy}`;
+  return { sql: renderPlaceholders(sql, dialect), params };
 }
 
 /** update/delete 的构造（select 走 buildSelect）。 */

@@ -152,7 +152,7 @@ export function validateSemantics(config: OntologyConfig): void {
    ③ 取值来源形状（规约在 schema/spec/actionSpec；过滤操作数在 schema/spec/filterSpec；词表原语在 schema/spec/valueSpec）；
    ④ update / delete 必须带 identity 或 filter（认人必须写明）。
    只在草稿写入/发布路径调（editDraft / mutateDraft / publish 的 validateSemantics 之后）；
-   loadPublished / rollbackTo 不调——历史已发布的坏配置加载放行，运行期由 action.ts 兜底。 */
+   getPublished / rollbackTo 不调——历史已发布的坏配置加载放行，运行期由 action.ts 兜底。 */
 export function validateActionShapes(config: OntologyConfig): void {
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {

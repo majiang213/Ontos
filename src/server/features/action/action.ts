@@ -44,15 +44,6 @@ export async function runAction(
   driver: SourceDriver,
   req: ActionRequest
 ): Promise<ActionResult> {
-  return runActionInner(env, config, driver, req);
-}
-
-async function runActionInner(
-  env: EngineEnv,
-  config: OntologyConfig,
-  driver: SourceDriver,
-  req: ActionRequest
-): Promise<ActionResult> {
   if (!config.object_types[req.object]) return reject("pre", MSG.classNotInConfig(req.object));
   const cls = mustCls(config, req.object);
   const action: ActionDef | undefined = cls.def.actions?.[req.action];

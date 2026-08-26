@@ -10,6 +10,28 @@ export function insertIgnoreSql(dialect: DatasourceDialect, into: string): strin
   return `INSERT OR IGNORE INTO ${into}`;
 }
 
+/** 方言 upsert（唯一出处）：mysql 用 ON DUPLICATE KEY UPDATE col=VALUES(col)，pg/sqlite 用 ON CONFLICT(keys) DO UPDATE SET col=excluded.col。
+ *  touchUpdatedAt=true 追加 updated_at 刷新（mysql/pg 用 CURRENT_TIMESTAMP，sqlite 用 datetime('now')）。 */
+export function upsertSql(
+  dialect: DatasourceDialect,
+  table: string,
+  columns: string[],
+  conflict: string[],
+  update: string[],
+  touchUpdatedAt = false
+): string {
+  const cols = `(${columns.join(", ")})`;
+  const qs = `(${columns.map(() => "?").join(", ")})`;
+  if (dialect === "mysql") {
+    const set = update.map((c) => `${c}=VALUES(${c})`);
+    if (touchUpdatedAt) set.push("updated_at=CURRENT_TIMESTAMP");
+    return `INSERT INTO ${table} ${cols} VALUES ${qs} ON DUPLICATE KEY UPDATE ${set.join(", ")}`;
+  }
+  const set = update.map((c) => `${c}=excluded.${c}`);
+  if (touchUpdatedAt) set.push(`updated_at=${dialect === "sqlite" ? "datetime('now')" : "CURRENT_TIMESTAMP"}`);
+  return `INSERT INTO ${table} ${cols} VALUES ${qs} ON CONFLICT(${conflict.join(", ")}) DO UPDATE SET ${set.join(", ")}`;
+}
+
 export abstract class ConcernStore {
   constructor(protected datasource: MetaDatasource) {}
 

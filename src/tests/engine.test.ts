@@ -14,6 +14,7 @@ import { EngineReject } from "../server/errors";
 import { runAction } from "../server/features/action/action";
 import { freshDriver } from "../server/infra/fixture";
 import { SqliteFixtureDriver, seedDemo } from "../server/infra/fixture";
+import { SqliteDriver } from "../server/infra/sqliteDriver";
 import { generateValue } from "../server/features/query/expr";
 import { cleanupRuntime, setupRuntime, testEnv, unwrap } from "./helpers";
 import type { EngineEnv } from "../server/features/env";
@@ -303,6 +304,50 @@ describe("过滤与展开的边界", () => {
     });
     expect(rows).toEqual([{ serial_no: "SN-GRP", avg_started_at: 200, min_started_at: 100, max_started_at: 300, sum_started_at: 400, count: 2, count_ended_at: 0 }]);
     expect((await queryEngine(env, config, freshDriver(), {  object: "repair", aggregate: { group_by: ["serial_no"], metrics: [{ median: "started_at" }] }  })).code).toBe(422);
+  });
+
+  it("聚合下推：单源可下推的聚合在库内 GROUP BY，结果与组装路径一致", async () => {
+    const all = await q({ object: "department", properties: ["name"] });
+    const pushed = await q({ object: "department", aggregate: { group_by: ["name"], metrics: [{ count: "*" }] } });
+    expect(pushed.path.some((l) => l.includes("聚合在库内算"))).toBe(true); // 取数路径如实说出在库内算
+    const manual = new Map<string, number>();
+    for (const r of all.rows) manual.set(String(r.name), (manual.get(String(r.name)) ?? 0) + 1);
+    expect(Object.fromEntries(pushed.rows.map((r) => [String(r.name), r.count]))).toEqual(Object.fromEntries(manual));
+    // 多源类（equipment 三源对齐）与派生参与（status 分组）都不下推，回内存聚合
+    const multi = await q({ object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } });
+    expect(multi.path.some((l) => l.includes("聚合在库内算"))).toBe(false);
+    const derived = await q({ object: "repair", aggregate: { group_by: ["is_open"], metrics: [{ count: "*" }] } });
+    expect(derived.path.some((l) => l.includes("聚合在库内算"))).toBe(false);
+  });
+
+  it("聚合下推语义：number 字段 avg/sum/min/max/count 与「组内全 NULL」口径同内存聚合", async () => {
+    const driver = new SqliteDriver();
+    const db = driver.register("meters");
+    db.exec(`CREATE TABLE meter (meter_no TEXT PRIMARY KEY, grp TEXT, reading REAL)`);
+    const ins = db.prepare(`INSERT INTO meter (meter_no, grp, reading) VALUES (?, ?, ?)`);
+    ins.run("M-1", "a", 10); ins.run("M-2", "a", null); ins.run("M-3", "a", 20); ins.run("M-4", "b", null);
+    const cfg = configSchema.parse({
+      object_types: {
+        meter: {
+          kind: "thing",
+          identity: "meter_no",
+          sources: { meters: { connection: "meters", table: "meter", fields: { meter_no: "meter_no", grp: "grp", reading: "reading" } } },
+          properties: { meter_no: { type: "string" }, grp: { type: "string" }, reading: { type: "number" } },
+        },
+      },
+    });
+    const r = await query(env, cfg, driver, {
+      object: "meter",
+      aggregate: { group_by: ["grp"], metrics: [{ avg: "reading" }, { sum: "reading" }, { min: "reading" }, { max: "reading" }, { count: "*" }, { count: "reading" }] },
+      order: { grp: "asc" },
+    });
+    expect(r.path.some((l) => l.includes("聚合在库内算"))).toBe(true);
+    // b 组全 NULL：sum 给 0（内存口径，SQL 原生是 NULL），avg/min/max 给 null，count:reading 数非空 = 0
+    expect(r.rows).toEqual([
+      { grp: "a", avg_reading: 15, sum_reading: 30, min_reading: 10, max_reading: 20, count: 3, count_reading: 2 },
+      { grp: "b", avg_reading: null, sum_reading: 0, min_reading: null, max_reading: null, count: 1, count_reading: 0 },
+    ]);
+    await driver.close();
   });
 
   it("取数路径记录下推与内存核对", async () => {

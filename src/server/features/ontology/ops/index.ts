@@ -13,7 +13,7 @@ import { removeProperty, updateProperty } from "./editProperty";
 import { createLink, deleteLink, updateLink } from "./editLink";
 import { importObjects } from "./importObjects";
 import { replaceObject } from "./replaceObject";
-import { mustType } from "./subjectClass";
+import { mustClass } from "./classMustExist";
 
 /** 解释一个 op：只改内存（state.draft 与界面状态三键）。落库、校验、rev、dirty 全由 editDraft 决定。 */
 export function applyOp(state: DraftState, input: DraftOp, published: OntologyConfig): void {
@@ -29,12 +29,12 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
       deleteObject(d, input);
       break;
     case "update_object": {
-      const t = mustType(d, input.name);
+      const t = mustClass(d, input.name);
       if (input.description !== undefined) t.description = input.description;
       break;
     }
     case "add_property": {
-      const t = mustType(d, input.object);
+      const t = mustClass(d, input.object);
       if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.propNameBad);
       if (t.properties[input.name]) throw new DraftReject(MSG.propExists(input.name));
       t.properties[input.name] = { type: input.type, description: input.description, values: input.values };
@@ -47,7 +47,7 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
       updateProperty(d, input);
       break;
     case "set_identity": {
-      const t = mustType(d, input.object);
+      const t = mustClass(d, input.object);
       if (input.name === "") {
         delete t.identity; // 取消识别字段
         break;
@@ -89,7 +89,7 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
       break;
     }
     case "remove_action": {
-      const t = mustType(d, input.object);
+      const t = mustClass(d, input.object);
       if (!t.actions?.[input.name]) throw new DraftReject(MSG.actionNotFound(input.name));
       delete t.actions[input.name];
       if (Object.keys(t.actions).length === 0) delete t.actions; // 空 map 会让 sameConfig 的 dirty 收不回来，删干净

@@ -41,7 +41,7 @@ describe("actionSkeletonFor（按类挑动作骨架）", () => {
       object_types: { tag: { kind: "thing", identity: "code", properties: { code: { type: "string" } } } },
     } as unknown as Partial<OntologyConfig>);
     const out = actionSkeletonFor(c, "tag");
-    expect(out).toEqual({ name: "set_fields", action: null, reason: "该类没有可写字段（唯一键与派生属性不可写）" });
+    expect(out).toEqual({ name: "set_fields", action: null, reason: "该类没有可写字段（唯一键与派生字段不可写）" });
   });
 
   it("类不存在：EngineReject（与 read_class 同文案）", () => {

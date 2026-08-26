@@ -106,7 +106,7 @@ describe("配置存储（工作副本与发布）", () => {
     await s.editDraft({ op: "update_property", object: "equipment", name: "name", description: "" }, WORKSPACE);
     expect((await s.getDraft(WORKSPACE)).draft.object_types.equipment.properties.name.description).toBeUndefined();
     // 不存在被拒
-    await expectRejected(s.editDraft({ op: "update_property", object: "equipment", name: "ghost", description: "x" }, WORKSPACE), "属性不存在");
+    await expectRejected(s.editDraft({ op: "update_property", object: "equipment", name: "ghost", description: "x" }, WORKSPACE), "字段不存在");
     // equipment.name 被源映射引用 → 改名被拒
     await expectRejected(s.editDraft({ op: "update_property", object: "equipment", name: "name", new_name: "dev_name" }, WORKSPACE), /仍被引用/);
     // 手工对象的字段改名成功 + 唯一键指针跟随
@@ -157,7 +157,7 @@ describe("配置存储（工作副本与发布）", () => {
   it("编辑操作守卫：删识别字段被拒；派生属性不能当识别字段；摆位不置 dirty", async () => {
     const s = await freshStore(tmp);
     await expectRejected(s.editDraft({ op: "remove_property", object: "equipment", name: "serial_no" }, WORKSPACE), "唯一键不能直接删");
-    await expectRejected(s.editDraft({ op: "set_identity", object: "equipment", name: "status" }, WORKSPACE), "派生属性");
+    await expectRejected(s.editDraft({ op: "set_identity", object: "equipment", name: "status" }, WORKSPACE), "派生字段");
     await s.editDraft({ op: "save_layout", positions: { equipment: { x: 10, y: 20 } } }, WORKSPACE);
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(false);
     expect((await s.getDraft(WORKSPACE)).layout.equipment).toEqual({ x: 10, y: 20 });
@@ -272,7 +272,7 @@ describe("配置存储（工作副本与发布）", () => {
     // 重名拒绝
     await expectRejected(s.editDraft({ op: "create_link", name: "located_in", from: "equipment", to: "department", match: { from: "dept", to: "dept_id" } }, WORKSPACE), "已存在");
     // 配对字段不存在拒绝
-    await expectRejected(s.editDraft({ op: "create_link", name: "bad_link", from: "equipment", to: "department", match: { from: "ghost", to: "dept_id" } }, WORKSPACE), "没有属性");
+    await expectRejected(s.editDraft({ op: "create_link", name: "bad_link", from: "equipment", to: "department", match: { from: "ghost", to: "dept_id" } }, WORKSPACE), "没有字段");
     // 端点不存在拒绝
     await expectRejected(s.editDraft({ op: "create_link", name: "bad2", from: "equipment", to: "ghost", match: { from: "dept", to: "x" } }, WORKSPACE), "类不存在");
     // 被动作引用的转化关系删不掉

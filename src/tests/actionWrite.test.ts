@@ -166,7 +166,7 @@ describe("动作写入（set_action / remove_action）与动作形状四查", ()
     expect((await s.publish(WORKSPACE)).code).toBe(200); // 关键断言：落地，不弹回
   });
 
-  it("历史已发布配置违反动作形状校验也能加载（loadPublished 不查）；但草稿写入会拦", async () => {
+  it("历史已发布配置违反动作形状校验也能加载（getPublished 不查）；但草稿写入会拦", async () => {
     const s = await freshStore(tmp);
     // 手工塞一个 v2：转化关系 orphan_tr 没有任何动作引用（② 违例）
     const bad = structuredClone((await s.getPublished(WORKSPACE)).config);

@@ -6,7 +6,7 @@ import { getDraft } from "../ontology/current";
 import { adjudicate, type Verdict } from "./applyVerdict";
 import { hasSources, isCrossSource, SAME_SOURCE_OK_VERDICTS, sharedSourcesMsg } from "./eligibility";
 import { VERDICT_LABELS } from "../../schema/verdict";
-import { EngineReject, MSG, codeOf, type Result } from "../../errors";
+import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 
 export interface DecideInput {
@@ -27,7 +27,7 @@ export interface DecideInput {
 
 /** 人定案：资格闸 → 写草稿 → 留痕。 */
 export async function decide(env: EngineEnv, input: DecideInput, workspace: string = DEFAULT_WORKSPACE): Promise<Result<{ ok: true; recorded: boolean }>> {
-  try {
+  return toResult(async () => {
     const d = (await getDraft(env, workspace)).draft;
     const clsA = d.object_types[input.class_a];
     const clsB = d.object_types[input.class_b];
@@ -58,10 +58,6 @@ export async function decide(env: EngineEnv, input: DecideInput, workspace: stri
     } catch {
       recorded = false; // 留痕失败不挡定案——裁决已进工作副本，记录缺失由返回值如实上报
     }
-    return { code: 200, message: MSG.resultDecided(VERDICT_LABELS[input.verdict]), value: { ok: true, recorded } };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return { ok: true as const, recorded };
+  }, () => MSG.resultDecided(VERDICT_LABELS[input.verdict]));
 }

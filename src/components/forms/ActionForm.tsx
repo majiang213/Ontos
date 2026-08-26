@@ -1,5 +1,4 @@
-// 动作表单（附录 B 动作定义的子集，见《外部Agent编辑画布.md》§6）——新建或编辑一条简单动作（子集之外的动作由 formCompatible 挡住，进不来）。
-// 行类型与 prefill/buildActionDef 往返函数收在 ./actionView（纯函数，单测覆盖往返恒等）。
+// 动作表单：新建或编辑一条简单动作。形状说明见下方块注释。
 "use client";
 
 import { useRef, useState } from "react";
@@ -16,7 +15,6 @@ import { buildActionDef, prefillEff, prefillPre, type EffRow, type PreRow, type 
 const selStyle: React.CSSProperties = { fontSize: 12, padding: "4px 6px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", maxWidth: 150 };
 const valInputStyle: React.CSSProperties = { fontSize: 12, padding: "4px 8px", flex: 1, minWidth: 60 };
 
-/** 动作表单：新建或编辑一条简单动作（子集之外的动作由 formCompatible 挡住，进不来）。 */
 export function ActionForm({
   clsName,
   ont,

@@ -60,7 +60,6 @@ CREATE TABLE IF NOT EXISTS conn_source (      -- 数据源连接：本体按 nam
   ro_pass TEXT,                               -- 密码明文存（演示期；加密为后续项）
   rw_user TEXT,                               -- 可写账号：动作写回用，可空
   rw_pass TEXT,                               -- 密码明文存（演示期；加密为后续项）
-  options TEXT,                               -- 方言项 JSON：ssl、超时等
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (workspace_id, name)
@@ -77,7 +76,6 @@ COMMENT ON COLUMN conn_source.ro_user IS '只读账号：读表结构与问数�
 COMMENT ON COLUMN conn_source.ro_pass IS '密码明文存（演示期；加密为后续项）';
 COMMENT ON COLUMN conn_source.rw_user IS '可写账号：动作写回用，可空';
 COMMENT ON COLUMN conn_source.rw_pass IS '密码明文存（演示期；加密为后续项）';
-COMMENT ON COLUMN conn_source.options IS '方言项 JSON：ssl、超时等';
 COMMENT ON COLUMN conn_source.created_at IS '创建时间';
 COMMENT ON COLUMN conn_source.updated_at IS '最近改动时间（保存连接即刷新）';
 

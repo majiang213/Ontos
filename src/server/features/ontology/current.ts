@@ -14,15 +14,13 @@ export async function getRev(env: EngineEnv, workspace: string = DEFAULT_WORKSPA
   return (await env.meta.getDraftPack(workspace))?.rev ?? 0;
 }
 
-async function loadPublished(env: EngineEnv, workspace: string): Promise<{ config: OntologyConfig; version: number }> {
+/** 已发布快照：每请求读库（无内存缓存，跨实例立即可见）。只过前两道校验（结构 + 语义），动作形状四查不查——
+ *  历史已发布的坏配置加载放行，运行期由 action.ts 兜底（见 validate.ts 尾注）。 */
+export async function getPublished(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<{ config: OntologyConfig; version: number }> {
   const { version, yaml } = await env.meta.latestVersion(workspace, seedYamlFor(workspace));
   const config = configSchema.parse(load(yaml));
   validateSemantics(config);
   return { config, version };
-}
-
-export async function getPublished(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<{ config: OntologyConfig; version: number }> {
-  return loadPublished(env, workspace); // 每请求读库：无内存缓存，跨实例立即可见
 }
 
 /** 工作副本（读接口）：读工作行水合；没有工作行从已发布造一行并落库（首访写库，名字说清）。 */

@@ -37,7 +37,6 @@ CREATE TABLE IF NOT EXISTS conn_source (      -- 数据源连接：本体按 nam
   ro_pass TEXT,                               -- 密码明文存（演示期；加密为后续项）
   rw_user TEXT,                               -- 可写账号：动作写回用，可空
   rw_pass TEXT,                               -- 密码明文存（演示期；加密为后续项）
-  options TEXT,                               -- 方言项 JSON：ssl、超时等
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, name)

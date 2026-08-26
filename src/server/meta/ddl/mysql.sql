@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS conn_source (
   ro_pass TEXT COMMENT '密码明文存（演示期；加密为后续项）',
   rw_user TEXT COMMENT '可写账号：动作写回用，可空',
   rw_pass TEXT COMMENT '密码明文存（演示期；加密为后续项）',
-  options TEXT COMMENT '方言项 JSON：ssl、超时等',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最近改动时间（保存连接即刷新）',
   UNIQUE (workspace_id, name),

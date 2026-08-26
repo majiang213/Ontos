@@ -63,8 +63,8 @@ describe("referencesOf（删属性前的引用扫描）", () => {
     const refs = referencesOf(d, "a", "sn");
     expect(refs).toContain("源映射 sa");
     expect(refs).toContain("关系 ab"); // match.from
-    expect(refs).toContain("派生属性 a.flag"); // 布尔派生值侧 { property: "sn" }
-    expect(refs).toContain("派生属性 b.trail"); // 他类派生的 $link 子过滤值侧引用 a.sn（跨类值侧盲区，R4 修）
+    expect(refs).toContain("派生字段 a.flag"); // 布尔派生值侧 { property: "sn" }
+    expect(refs).toContain("派生字段 b.trail"); // 他类派生的 $link 子过滤值侧引用 a.sn（跨类值侧盲区，R4 修）
     expect(refs).toContain("动作 a.act_a"); // pre 的 filter 键 + update.properties 的 { property: "sn" }
   });
 
@@ -72,8 +72,8 @@ describe("referencesOf（删属性前的引用扫描）", () => {
     const refs = referencesOf(d, "a", "mark");
     expect(refs).toContain("公理 ax1");
     expect(refs).toContain("源映射 sa");
-    expect(refs).toContain("派生属性 stat"); // when 过滤键
-    expect(refs).toContain("派生属性 b.stage"); // 他类派生经 ba 落到 a.mark
+    expect(refs).toContain("派生字段 stat"); // when 过滤键
+    expect(refs).toContain("派生字段 b.stage"); // 他类派生经 ba 落到 a.mark
     expect(refs).toContain("动作 a.act_a"); // pre 键 + inform 值侧
     expect(refs).toContain("动作 b.act_b"); // pre 的 $link 嵌套落点
   });
@@ -106,7 +106,7 @@ describe("linkRefs（删关系前的引用扫描）", () => {
     // linkRefs 按出现的名字扫：pre 里写的是 ba；删 ab 时应同时挡反向名——这条钉住现状口径
     expect(linkRefs(d, "ba")).toContain("动作 b.act_b");
     // 列表派生的 when 是 src→cond 映射：$link 藏在 cond 层，不拆开就会漏（老实现的盲区）
-    expect(linkRefs(d, "ba")).toContain("派生属性 b.stage");
+    expect(linkRefs(d, "ba")).toContain("派生字段 b.stage");
   });
 
   it("conv_rel：转化关系只被 transition.property 引用，linkRefs 不收（反例）", () => {

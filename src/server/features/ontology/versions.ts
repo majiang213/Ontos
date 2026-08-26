@@ -4,7 +4,7 @@
 
 import { dump, load } from "js-yaml";
 import { configSchema, type OntologyConfig } from "../../schema/config";
-import { DraftReject, MSG, codeOf, type Result } from "../../errors";
+import { DraftReject, MSG, toResult, type Result } from "../../errors";
 import type { EngineEnv } from "../env";
 import { DEFAULT_WORKSPACE, seedYamlFor } from "../../infra/workspace";
 import { applyPack, canvasSnapshot, persistWorkingCopy, versionCanvasPack } from "./canvasPack";
@@ -14,10 +14,10 @@ import { sameConfig } from "./sameConfig";
 import { validateSemantics } from "./validate";
 
 export async function publish(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<Result<{ version: number }>> {
-  try {
+  return toResult(async () => {
     const expectedRev = await getRev(env, workspace);
     const state = await getDraft(env, workspace);
-    if (!state.dirty) return { code: 200, message: MSG.resultPublished(state.baseVersion), value: { version: state.baseVersion } }; // 无改动不产空版本
+    if (!state.dirty) return { version: state.baseVersion }; // 无改动不产空版本
     let config: OntologyConfig;
     try {
       config = validateFull(state.draft); // 三查单源（结构 + 语义 + 动作形状四查，与草稿写入同闸）
@@ -51,16 +51,12 @@ export async function publish(env: EngineEnv, workspace: string = DEFAULT_WORKSP
       }
     }
     await fillDecisionVersions(env, version, workspace); // 裁决留痕的生效版本随发布回填
-    return { code: 200, message: MSG.resultPublished(version), value: { version } };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return { version };
+  }, (v) => MSG.resultPublished(v.version));
 }
 
 export async function discard(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<Result<void>> {
-  try {
+  return toResult(async () => {
     const expectedRev = await getRev(env, workspace);
     const state = await getDraft(env, workspace);
     const published = await getPublished(env, workspace);
@@ -73,12 +69,7 @@ export async function discard(env: EngineEnv, workspace: string = DEFAULT_WORKSP
     } catch {
       // 留痕是附属，不挡放弃
     }
-    return { code: 200, message: MSG.resultDiscarded, value: undefined };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+  }, () => MSG.resultDiscarded);
 }
 
 export function listVersions(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<{ version: number; createdAt: string; origin: string }[]> {
@@ -87,7 +78,7 @@ export function listVersions(env: EngineEnv, workspace: string = DEFAULT_WORKSPA
 
 /** 把某次已发布版本覆盖到当前工作副本（对象、线、摆位）。不插入新版本，问数仍读已发布。 */
 export async function rollbackTo(env: EngineEnv, version: number, workspace: string = DEFAULT_WORKSPACE): Promise<Result<{ version: number }>> {
-  try {
+  return toResult(async () => {
     const expectedRev = await getRev(env, workspace);
     const yaml = await env.meta.versionYaml(workspace, version);
     if (yaml === undefined) throw new DraftReject(MSG.versionNotFound(version));
@@ -105,12 +96,8 @@ export async function rollbackTo(env: EngineEnv, version: number, workspace: str
     applyPack(state, pack, { layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins });
     const saved = await commitDraft(env, workspace, state, expectedRev, true); // 回滚算内容变化：rev+1
     if (!saved) throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
-    return { code: 200, message: MSG.resultRolledBack(version), value: { version } };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return { version };
+  }, (v) => MSG.resultRolledBack(v.version));
 }
 
 /** 发布成功后回填：把还没绑版本的裁决留痕挂上这个版本。回填失败不影响发布。 */

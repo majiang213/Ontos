@@ -1,7 +1,7 @@
 // 驱动注册表 —— 连接名 → 驱动。fixture 连接与 mysql/pg 连接共存，引擎按连接名路由。
 // 问数与动作只认连接名；注册表是 SourceDriver 的一种（多方言混合，不带 dialect 属性）。
 
-import type { Condition, SourceDriver, TableInfo } from "./driver";
+import type { AggMetric, Condition, SourceDriver, TableInfo } from "./driver";
 import { EngineReject, MSG } from "../errors";
 
 export class DriverRegistry implements SourceDriver {
@@ -39,6 +39,9 @@ export class DriverRegistry implements SourceDriver {
 
   async select(connection: string, table: string, columns: string[], conditions: Condition[], limit?: number) {
     return this.resolve(connection).select(connection, table, columns, conditions, limit);
+  }
+  async selectAggregate(connection: string, table: string, group: { column: string; as: string }[], metrics: AggMetric[], conditions: Condition[]) {
+    return this.resolve(connection).selectAggregate(connection, table, group, metrics, conditions);
   }
   async insert(connection: string, table: string, row: Record<string, unknown>) {
     return this.resolve(connection).insert(connection, table, row);

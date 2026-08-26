@@ -4,7 +4,7 @@
 
 import type { OntologyConfig } from "../../schema/config";
 import { isUiStateOp, type DraftOpInput as DraftOp } from "../../schema/ops";
-import { DraftReject, MSG, codeOf, type Result } from "../../errors";
+import { DraftReject, MSG, toResult, type Result } from "../../errors";
 import type { EngineEnv } from "../env";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 import { applyOp } from "./ops";
@@ -15,7 +15,7 @@ import { getDraft, getPublished, getRev } from "./current";
 /** 受理一条 op：改工作副本，一次只改一步。base_rev 只在 MCP 信封出现（REST 画布不传）。
  *  无写队列：读-改-CAS；冲突时 MCP 路径直接 422「草稿已变」，画布路径自动重读重试一次（保持"后写叠加应用"）。 */
 export async function editDraft(env: EngineEnv, input: DraftOp, workspace: string = DEFAULT_WORKSPACE, opts?: { base_rev?: number }): Promise<Result<DraftState>> {
-  try {
+  return toResult(async () => {
     const maxAttempts = opts?.base_rev !== undefined ? 1 : 2; // MCP 带 base_rev：冲突即拒；画布：重试一次
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const expectedRev = opts?.base_rev ?? (await getRev(env, workspace));
@@ -27,24 +27,20 @@ export async function editDraft(env: EngineEnv, input: DraftOp, workspace: strin
       if (isUiStateOp(input.op)) {
         applyOp(state, input, published);
         const saved = await persistWorkingCopy(env, workspace, state, expectedRev, true);
-        if (saved !== null) return { code: 200, message: MSG.resultDraftSaved, value: state };
+        if (saved !== null) return state;
         if (attempt === maxAttempts) throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
         continue; // 被并发写推进：重读重试
       }
       const backup = structuredClone(state.draft);
       applyOp(state, input, published);
-      // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在属性的坏草稿不能攒到发布一刻才炸）
+      // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在字段的坏草稿不能攒到发布一刻才炸）
       validateDraftOrThrow(state, backup);
       const saved = await commitDraft(env, workspace, state, expectedRev, true);
-      if (saved) return { code: 200, message: MSG.resultDraftSaved, value: state };
+      if (saved) return state;
       if (attempt === maxAttempts) throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
     }
     throw new DraftReject(MSG.draftChanged(await getRev(env, workspace))); // 理论不可达：循环内已抛
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e; // 意外异常是引擎故障，不进 Result（respond 兜 500）
-  }
+  }, () => MSG.resultDraftSaved);
 }
 
 /** 受理一个改草稿的函数（裁决应用等成组改动走这里）：改完立即校验，不合法就回退并抛 DraftReject——与 editDraft 同闸。

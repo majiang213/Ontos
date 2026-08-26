@@ -6,19 +6,13 @@ import type { ExpandNode, QueryRequest } from "../../schema/request";
 import type { SourceDriver } from "../../infra/driver";
 import type { EngineEnv } from "../env";
 import type { EvalContext } from "./expr";
-import { EngineReject, MSG, codeOf, type Result } from "../../errors";
+import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { assertFilterShapes } from "./compare";
-import { createEnv, matchConds, selectIndividuals } from "./assemble";
+import { aggregatePushdown, createEnv, matchConds, metricColumn, selectIndividuals } from "./assemble";
 import { currentOf, evalDerived, transitionHolds } from "./evaluate";
 import { mustCls, mustLink, propValue, type Cls, type Env, type Individual } from "./individual";
 
 const DEFAULT_LIMIT = 200; // 查询治理：请求不写 limit 时的兜底上限
-
-/** 聚合指标的产出列名（唯一出处）：count:* → "count"，avg:price → "avg_price"。
- *  order 合法集与聚合产出必须用同一命名，改规则只许改这里。 */
-function metricColumn(op: string, field: string): string {
-  return field === "*" ? op : `${op}_${field}`;
-}
 
 /* ---------- 查询树求值 ---------- */
 
@@ -28,14 +22,7 @@ export interface QueryResult {
 }
 
 export async function query(env: EngineEnv, config: OntologyConfig, driver: SourceDriver, req: QueryRequest): Promise<Result<QueryResult>> {
-  try {
-    const value = await queryInner(env, config, driver, req);
-    return { code: 200, message: MSG.resultQueryRows(value.rows.length), value };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e; // 意外异常是引擎故障，不进 Result（respond 兜 500）
-  }
+  return toResult(() => queryInner(env, config, driver, req), (v) => MSG.resultQueryRows(v.rows.length));
 }
 
 async function queryInner(env: EngineEnv, config: OntologyConfig, driver: SourceDriver, req: QueryRequest): Promise<QueryResult> {
@@ -53,20 +40,25 @@ async function queryInner(env: EngineEnv, config: OntologyConfig, driver: Source
   const depthOf = (exs: ExpandNode[] | undefined, d: number): number => (exs?.length ? Math.max(...exs.map((e) => depthOf(e.expand, d + 1))) : d);
   if (depthOf(req.expand, 0) > 3) throw new EngineReject(MSG.expandTooDeep);
 
+  // 聚合下推（M7）：整个聚合能在库内算就不拉明细；不能（多源对齐、派生参与、$link 过滤）回内存聚合
+  const aggPlan = req.aggregate ? await aggregatePushdown(evalEnv, cls, req.aggregate, req.filter, req.identity, ctx) : null;
+
   // 聚合的分组键与指标字段也要下推进去
   const requested = req.aggregate
     ? [...req.aggregate.group_by, ...req.aggregate.metrics.flatMap((m) => Object.values(m)).filter((f) => f !== "*")]
     : req.properties;
 
-  const individuals = await selectIndividuals(evalEnv, req.object, {
-    identity: req.identity,
-    filter: req.filter,
-    requested,
-    expands: req.expand,
-    ctx,
-    path,
-    limit: req.aggregate || req.order ? undefined : (req.limit ?? DEFAULT_LIMIT), // 聚合要全量分组、order 要全量排序，都不能先截断
-  });
+  const individuals = aggPlan
+    ? []
+    : await selectIndividuals(evalEnv, req.object, {
+        identity: req.identity,
+        filter: req.filter,
+        requested,
+        expands: req.expand,
+        ctx,
+        path,
+        limit: req.aggregate || req.order ? undefined : (req.limit ?? DEFAULT_LIMIT), // 聚合（内存路径）要全量分组、order 要全量排序，都不能先截断
+      });
 
   // 展开：按已声明关系进入目标类
   const expanded = new Map<string, Record<string, Record<string, unknown>[]>>();
@@ -81,7 +73,12 @@ async function queryInner(env: EngineEnv, config: OntologyConfig, driver: Source
   }
 
   let rows: Record<string, unknown>[];
-  if (req.aggregate) {
+  if (req.aggregate && aggPlan) {
+    rows = await evalEnv.driver.selectAggregate(aggPlan.connection, aggPlan.table, aggPlan.group, aggPlan.metrics, aggPlan.conds);
+    // 数值列按数收口：pg 的 count/sum 等以串返回，内存路径的指标恒为 number
+    for (const r of rows) for (const m of aggPlan.metrics) if (r[m.as] != null) r[m.as] = Number(r[m.as]);
+    path.push(`下推 ${aggPlan.connection}.${aggPlan.table}：聚合在库内算（GROUP BY ${req.aggregate.group_by.join("、") || "全体"}），命中 ${rows.length} 组（只读）`);
+  } else if (req.aggregate) {
     rows = await aggregate(cls, individuals, req.aggregate, evalEnv, ctx, path);
     path.push(`聚合：${req.aggregate.group_by.join("、")} 分组，${rows.length} 组`);
   } else {

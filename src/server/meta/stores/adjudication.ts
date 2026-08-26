@@ -1,7 +1,7 @@
 // 裁决留痕与交集计数：adj_decision（含版本回填/放弃标记）与 adj_overlap（按对更新，值集合不落库）。
 
 import type { DecisionRec, OverlapRec } from "../types";
-import { ConcernStore } from "./base";
+import { ConcernStore, upsertSql } from "./base";
 
 export class AdjudicationStore extends ConcernStore {
   async recordDecision(workspace: string, d: DecisionRec): Promise<void> {
@@ -36,14 +36,14 @@ export class AdjudicationStore extends ConcernStore {
   async recordOverlap(workspace: string, o: OverlapRec): Promise<void> {
     const id = await this.wsId(workspace);
     const vals = [id, o.class_a, o.class_b, o.norm_rule ?? null, o.count_a, o.count_b, o.count_hit, o.rate];
-    await this.datasource.run(
-      this.datasource.dialect === "mysql"
-        ? `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE norm_rule = VALUES(norm_rule), count_a = VALUES(count_a), count_b = VALUES(count_b), count_hit = VALUES(count_hit), rate = VALUES(rate)`
-        : `INSERT INTO adj_overlap (workspace_id, class_a, class_b, norm_rule, count_a, count_b, count_hit, rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(workspace_id, class_a, class_b) DO UPDATE SET norm_rule = excluded.norm_rule, count_a = excluded.count_a, count_b = excluded.count_b, count_hit = excluded.count_hit, rate = excluded.rate`,
-      vals
+    const sql = upsertSql(
+      this.datasource.dialect,
+      "adj_overlap",
+      ["workspace_id", "class_a", "class_b", "norm_rule", "count_a", "count_b", "count_hit", "rate"],
+      ["workspace_id", "class_a", "class_b"],
+      ["norm_rule", "count_a", "count_b", "count_hit", "rate"]
     );
+    await this.datasource.run(sql, vals);
   }
 
   async listOverlaps(workspace: string): Promise<(OverlapRec & { id: number; created_at: string })[]> {

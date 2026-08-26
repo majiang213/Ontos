@@ -308,7 +308,7 @@ object_types:
           - create:
               object: appointment           # 再新建一条任职
               properties:                   # 只写这次要赋的源列属性。held_by 靠 person_no 的 match 成立
-                appt_no: { from: generated }   # 任职编号。按该类该属性的计数器发号
+                appt_no: { from: generated }   # 任职编号。按该类该属性的 generate 列表发号（雪花号）
                 person_no: { from: identity }  # 人员编号=请求顶上的工号
                 title: { from: request }       # 职务=request.title
                 dept: { from: request }        # 部门=request.dept

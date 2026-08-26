@@ -6,7 +6,7 @@ import type { Filter, LinkType, OntologyConfig } from "../../schema/config";
 import { walkFilter } from "../../schema/spec/filterSpec";
 import type { ExpandNode } from "../../schema/request";
 import { EngineReject, MSG } from "../../errors";
-import { dialectFor, toColumnValue, type Condition, type SourceDriver } from "../../infra/driver";
+import { dialectFor, toColumnValue, type AggMetric, type Condition, type SourceDriver } from "../../infra/driver";
 import type { EvalContext } from "./expr";
 import { pushCondition } from "./filterOp";
 import { isOpObject } from "../../schema/spec/filterSpec";
@@ -23,6 +23,12 @@ export interface SelectOpts {
   ctx?: EvalContext;
   path?: string[];
   limit?: number; // 单源且无过滤时下推行数上限；多源/带过滤必须取全量再对齐核对，不下推
+}
+
+/** 聚合指标的产出列名（唯一出处）：count:* → "count"，avg:price → "avg_price"。
+ *  order 合法集、内存聚合产出、下推聚合的 AS 别名必须用同一命名，改规则只许改这里。 */
+export function metricColumn(op: string, field: string): string {
+  return field === "*" ? op : `${op}_${field}`;
 }
 
 /** match 配对 → 目标侧条件（唯一出处）：reversed 换向；配对值为空返回 null（关系不成立，没有目标）。
@@ -145,6 +151,73 @@ async function toConditions(column: string, cv: unknown, ctx: EvalContext, dateL
   } catch {
     return null; // 操作数取不到值（如依赖 current），留内存核对
   }
+}
+
+/** 聚合下推计划：connection/table 之外，group 与 metrics 的列都已翻成源列名，conds 已按方言归一。 */
+export interface AggregatePlan {
+  connection: string;
+  table: string;
+  group: { column: string; as: string }[];
+  metrics: AggMetric[];
+  conds: Condition[];
+}
+
+/** 整个聚合能不能在库内算（M7 查询治理的聚合下推）：能返回计划，不能返回 null（调用方回内存聚合）。
+ *  下推门槛（与 selectIndividuals 的逐条件放行不同，聚合是全或无——分组后再内存核对会数错）：
+ *  单源；分组键与指标字段都非派生且映射在该源；avg/sum/min/max 只推 number 字段（内存语义是剔除非数值）；
+ *  过滤每个键都能落成该源的条件（无 $link、无派生、操作数落得了地）；identity 恒可下推（对齐键等值）。 */
+export async function aggregatePushdown(
+  env: Env,
+  cls: Cls,
+  agg: { group_by: string[]; metrics: Record<string, string>[] },
+  filter: Filter | undefined,
+  identity: unknown,
+  ctx: EvalContext
+): Promise<AggregatePlan | null> {
+  const srcs = sourcesOf(cls);
+  if (srcs.length !== 1) return null; // 多源要先按识别值对齐成个体再分组，推下去语义变
+  const [, entry] = srcs[0];
+  const group: { column: string; as: string }[] = [];
+  for (const g of agg.group_by) {
+    const def = cls.def.properties[g];
+    if (!def || def.derived || !entry.fields[g]) return null;
+    group.push({ column: entry.fields[g], as: g });
+  }
+  const metrics: AggMetric[] = [];
+  for (const m of agg.metrics) {
+    const [op, field] = Object.entries(m)[0];
+    if (!["count", "avg", "sum", "min", "max"].includes(op)) return null; // 不认识的聚合交内存路径报（aggregateUnknown 口径不变）
+    if (field === "*") {
+      if (op !== "count") return null;
+      metrics.push({ op: "count", column: "*", as: metricColumn(op, field) });
+      continue;
+    }
+    const def = cls.def.properties[field];
+    if (!def || def.derived || !entry.fields[field]) return null;
+    if (op !== "count" && def.type !== "number") return null;
+    metrics.push({ op: op as AggMetric["op"], column: entry.fields[field], as: metricColumn(op, field) });
+  }
+  const conds: Condition[] = [];
+  for (const [prop, cv] of Object.entries(filter ?? {})) {
+    if (prop.startsWith("$")) return null;
+    const def = cls.def.properties[prop];
+    if (!def) throw new EngineReject(MSG.filterPropUnknown(cls.name, prop));
+    if (def.derived) return null;
+    const column = entry.fields[prop];
+    if (!column) return null;
+    const one = await toConditions(column, cv, ctx, def.type === "date");
+    if (!one) return null;
+    conds.push(...one);
+  }
+  if (identity !== undefined) conds.push({ column: keyColumn(cls, entry), op: "eq", value: identity });
+  // date 条件的值是 Unix 秒：下推活体库前按连接方言归一（与 selectIndividuals 同一条规则）
+  const dialect = dialectFor(env.driver, entry.connection);
+  const bound = conds.map((c) => {
+    if (!c.dateLike || c.value === undefined) return c;
+    const v = Array.isArray(c.value) ? c.value.map((x) => toColumnValue(x, "date", dialect)) : toColumnValue(c.value, "date", dialect);
+    return { ...c, value: v };
+  });
+  return { connection: entry.connection, table: entry.table, group, metrics, conds: bound };
 }
 
 /** 组装个体：各源分别下推，按对齐键配成同一个体，再做内存过滤核对。 */

@@ -62,6 +62,7 @@ describe("错误分层：400 / 422 / 500", () => {
     const { getDriverRegistry } = await import("../server/infra/connections");
     (await getDriverRegistry(TEST)).register("purchase_sys", {
       select: async () => { throw new Error("库炸了"); },
+      selectAggregate: async () => { throw new Error("库炸了"); },
       insert: async () => {},
       update: async () => 0,
       delete: async () => 0,

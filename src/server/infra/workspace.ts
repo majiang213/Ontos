@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaStore } from "../meta/store";
 import { runtime } from "../runtime";
-import { WorkspaceReject, MSG, codeOf, type Result } from "../errors";
+import { WorkspaceReject, MSG, toResult, type Result } from "../errors";
 
 export const DEFAULT_WORKSPACE = "default";
 
@@ -25,15 +25,10 @@ export function seedYamlFor(workspace: string): string {
 }
 
 export async function listWorkspaces(): Promise<Result<string[]>> {
-  try {
+  return toResult(async () => {
     const names = await metaStore().listWorkspaces();
-    const value = names.includes(TEST_WORKSPACE) ? names : [...names, TEST_WORKSPACE]; // test 常驻列表，首次访问才真正注册（latestVersion 播种）
-    return { code: 200, message: MSG.resultWorkspaces(value.length), value };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+    return names.includes(TEST_WORKSPACE) ? names : [...names, TEST_WORKSPACE]; // test 常驻列表，首次访问才真正注册（latestVersion 播种）
+  }, (v) => MSG.resultWorkspaces(v.length));
 }
 
 /** 注册（若不存在）并把种子插成该空间的 v1。 */
@@ -44,14 +39,9 @@ export function ensureWorkspace(workspace: string): Promise<number> {
 
 /** 新建空间（空白起步：空本体、无连接，从连接数据源开始玩）。 */
 export async function createWorkspace(name: string): Promise<Result<void>> {
-  try {
+  return toResult(async () => {
     if (!isWorkspaceName(name)) throw new WorkspaceReject(MSG.workspaceNameBad(name));
     if ((await metaStore().listWorkspaces()).includes(name)) throw new WorkspaceReject(MSG.workspaceExists(name));
     await metaStore().ensureWorkspace(name, seedYamlFor(name));
-    return { code: 200, message: MSG.resultWorkspaceCreated(name), value: undefined };
-  } catch (e) {
-    const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
-    throw e;
-  }
+  }, () => MSG.resultWorkspaceCreated(name));
 }
