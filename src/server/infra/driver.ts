@@ -7,7 +7,7 @@ import { treatsNullAsUntilNow } from "../schema/config";
 
 export type CondOp =
   | "eq" | "ne" | "lt" | "lte" | "gt" | "gte"
-  | "in" | "contains" | "null" | "notnull";
+  | "in" | "contains" | "null" | "notnull" | "notblank";
 
 export interface Condition {
   column: string;
@@ -95,6 +95,9 @@ function conditionSql(cond: Condition, quote: (id: string) => string, dialect: "
       return { sql: `${col} IS NULL`, params: [] };
     case "notnull":
       return { sql: `${col} IS NOT NULL`, params: [] };
+    case "notblank":
+      // 缺识别值排除（聚合下推用）：与组装路径的「kv == null || 空白即丢」同口径——唯一索引不挡 NULL/空白
+      return { sql: `(${col} IS NOT NULL AND TRIM(${col}) <> '')`, params: [] };
     case "in": {
       const vals = (cond.value as unknown[]) ?? [];
       if (vals.length === 0) return { sql: "1 = 0", params: [] };

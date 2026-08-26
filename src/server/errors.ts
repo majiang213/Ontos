@@ -255,6 +255,7 @@ export const MSG = {
   updatePropsNoEmpty: "update.properties 不能为空（空 SET 不是合法 SQL）",
   matchXorTransition: "match 与 transition 必须且只能写一种",
   metricSingleKey: "每条聚合只写一个键",
+  metricDuplicate: "聚合指标不能重复",
   orderSingleKey: "order 只支持单键",
   internalError: "内部错误",
   unauthorizedWrite: "未授权：写操作需要有效的令牌",

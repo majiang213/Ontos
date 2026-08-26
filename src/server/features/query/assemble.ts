@@ -154,12 +154,39 @@ async function toConditions(column: string, cv: unknown, ctx: EvalContext, dateL
 }
 
 /** 聚合下推计划：connection/table 之外，group 与 metrics 的列都已翻成源列名，conds 已按方言归一。 */
-export interface AggregatePlan {
+interface AggregatePlan {
   connection: string;
   table: string;
   group: { column: string; as: string }[];
   metrics: AggMetric[];
   conds: Condition[];
+}
+
+/** 聚合下推专用的过滤编译：比 toConditions 多三道语义闸（下推后没有内存二次核对，必须一次编对）——
+ *  lt/lte/gt/gte 只推 number 列且操作数必须是数（JS 对非数比较恒 false，SQL 是字典序）；in 含 null 不下推；
+ *  contains 不下推（LIKE 的通配/大小写语义与 JS includes 不一致）。其余形状与 toConditions 同。 */
+async function strictConditions(column: string, cv: unknown, ctx: EvalContext, dateLike: boolean, defType: string | undefined): Promise<Condition[] | null> {
+  try {
+    if (isOpObject(cv)) {
+      const conds: Condition[] = [];
+      for (const [op, operand] of Object.entries(cv)) {
+        const v = await resolveOperand(operand, ctx);
+        if (["lt", "lte", "gt", "gte"].includes(op) && (defType !== "number" || typeof v !== "number")) return null;
+        if (op === "in" && Array.isArray(v) && v.includes(null)) return null;
+        if (op === "contains") return null;
+        const c = pushCondition(column, op, v, dateLike);
+        if (!c) return null;
+        conds.push(c);
+      }
+      return conds;
+    }
+    if (cv === null) return [pushCondition(column, "eq", null, dateLike)!];
+    const v = await resolveOperand(cv, ctx);
+    const c = pushCondition(column, "eq", v, dateLike);
+    return c ? [c] : null;
+  } catch {
+    return null; // 操作数取不到值（如依赖 current），留内存核对
+  }
 }
 
 /** 整个聚合能不能在库内算（M7 查询治理的聚合下推）：能返回计划，不能返回 null（调用方回内存聚合）。
@@ -201,15 +228,18 @@ export async function aggregatePushdown(
   for (const [prop, cv] of Object.entries(filter ?? {})) {
     if (prop.startsWith("$")) return null;
     const def = cls.def.properties[prop];
-    if (!def) throw new EngineReject(MSG.filterPropUnknown(cls.name, prop));
+    if (!def) throw new EngineReject(MSG.propUnknown(cls.name, prop)); // 与内存路径（neededProps）同文案，同一请求一种说法
     if (def.derived) return null;
     const column = entry.fields[prop];
     if (!column) return null;
-    const one = await toConditions(column, cv, ctx, def.type === "date");
+    const one = await strictConditions(column, cv, ctx, def.type === "date", def.type);
     if (!one) return null;
     conds.push(...one);
   }
   if (identity !== undefined) conds.push({ column: keyColumn(cls, entry), op: "eq", value: identity });
+  // 缺识别值排除：内存路径按「kv == null || 空白」丢行（组装语义），下推前先在 SQL 里丢掉同样形状的行——
+  // 同源重复键由「源表 identity 列必须是唯一索引」的不变量兜（AGENTS.md），唯一索引不挡 NULL，所以这里要显式排空白
+  conds.push({ column: keyColumn(cls, entry), op: "notblank" });
   // date 条件的值是 Unix 秒：下推活体库前按连接方言归一（与 selectIndividuals 同一条规则）
   const dialect = dialectFor(env.driver, entry.connection);
   const bound = conds.map((c) => {

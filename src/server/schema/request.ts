@@ -10,7 +10,8 @@ export const aggregateSchema = z.object({
   group_by: z.array(z.string()).nonempty(),
   metrics: z
     .array(z.record(z.string(), z.string()).refine((m) => Object.keys(m).length === 1, { message: MSG.metricSingleKey }))
-    .nonempty(), // [{ count: "*" }, { avg: "field" }]
+    .nonempty()
+    .refine((ms) => new Set(ms.map((m) => Object.keys(m)[0])).size === ms.length, { message: MSG.metricDuplicate }), // [{ count: "*" }, { avg: "field" }]；指标名不许重复（下推按别名展开，重复别名 SQL 报错）
 });
 export type Aggregate = z.infer<typeof aggregateSchema>;
 

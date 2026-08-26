@@ -304,6 +304,8 @@ describe("过滤与展开的边界", () => {
     });
     expect(rows).toEqual([{ serial_no: "SN-GRP", avg_started_at: 200, min_started_at: 100, max_started_at: 300, sum_started_at: 400, count: 2, count_ended_at: 0 }]);
     expect((await queryEngine(env, config, freshDriver(), {  object: "repair", aggregate: { group_by: ["serial_no"], metrics: [{ median: "started_at" }] }  })).code).toBe(422);
+    // 指标名重复：schema 拒（下推按别名展开，重复别名会产出非法 SQL）
+    expect(() => queryRequestSchema.parse({ object: "repair", aggregate: { group_by: ["serial_no"], metrics: [{ count: "*" }, { count: "*" }] } })).toThrow();
   });
 
   it("聚合下推：单源可下推的聚合在库内 GROUP BY，结果与组装路径一致", async () => {
@@ -326,6 +328,7 @@ describe("过滤与展开的边界", () => {
     db.exec(`CREATE TABLE meter (meter_no TEXT PRIMARY KEY, grp TEXT, reading REAL)`);
     const ins = db.prepare(`INSERT INTO meter (meter_no, grp, reading) VALUES (?, ?, ?)`);
     ins.run("M-1", "a", 10); ins.run("M-2", "a", null); ins.run("M-3", "a", 20); ins.run("M-4", "b", null);
+    ins.run("", "a", 5); // 空白识别值：组装路径丢行，下推也要丢（缺识别值排除）
     const cfg = configSchema.parse({
       object_types: {
         meter: {
@@ -342,11 +345,17 @@ describe("过滤与展开的边界", () => {
       order: { grp: "asc" },
     });
     expect(r.path.some((l) => l.includes("聚合在库内算"))).toBe(true);
-    // b 组全 NULL：sum 给 0（内存口径，SQL 原生是 NULL），avg/min/max 给 null，count:reading 数非空 = 0
+    // b 组全 NULL：sum 给 0（内存口径，SQL 原生是 NULL），avg/min/max 给 null，count:reading 数非空 = 0；
+    // 空白识别值行不进任何组（缺识别值排除与组装路径同口径）
     expect(r.rows).toEqual([
       { grp: "a", avg_reading: 15, sum_reading: 30, min_reading: 10, max_reading: 20, count: 3, count_reading: 2 },
       { grp: "b", avg_reading: null, sum_reading: 0, min_reading: null, max_reading: null, count: 1, count_reading: 0 },
     ]);
+    // 语义闸：字符串列比大小 / in 含 null / contains 都不下推（内存二次核对兜底），取数路径如实说内存算
+    for (const filter of [{ grp: { gt: "a" } }, { grp: { in: ["a", null] } }, { grp: { contains: "a" } }]) {
+      const mem = await query(env, cfg, driver, { object: "meter", filter, aggregate: { group_by: ["grp"], metrics: [{ count: "*" }] } });
+      expect(mem.path.some((l) => l.includes("聚合在库内算"))).toBe(false);
+    }
     await driver.close();
   });
 
