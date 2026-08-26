@@ -206,7 +206,7 @@ describe("M8 动作", () => {
     const after = await query(env, config, driver, { object: "assignment", filter: { serial_no: "SN-90001" }, properties: ["asgn_no", "dept_id"] });
     expect(after.rows.length).toBe(1);
     expect(after.rows[0].dept_id).toBe("D07");
-    expect(String(after.rows[0].asgn_no)).toMatch(/^SN-90001-\d{8}-0001$/); // generate：identity + 日期 + 序号
+    expect(String(after.rows[0].asgn_no)).toMatch(/^SN-90001-\d{8}-\d{15,19}$/); // generate：identity + 日期 + 雪花号
   });
 
   it("结束维修：前置用设备出发的关系名，效应过滤落在维修自己的字段上", async () => {
@@ -232,7 +232,7 @@ describe("M8 动作", () => {
     const current = appts.filter((a) => a.is_current === true);
     expect(current.length).toBe(1);
     expect(current[0].title).toBe("经理");
-    expect(String(current[0].appt_no)).toMatch(/^P001-\d{8}-0001$/); // 日期段与旧记录天然不撞
+    expect(String(current[0].appt_no)).toMatch(/^P001-\d{8}-\d{15,19}$/); // 日期段与旧记录天然不撞；雪花段跨实例不撞
   });
 
   it("配置里没有的动作，引擎拒绝", async () => {
@@ -472,14 +472,14 @@ describe("表达式与发号", () => {
     expect(v).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
-  it("sequence 的 start 生效（走真实发号路径）", async () => {
+  it("generate 的 snowflake 段走真实发号路径（跨实例不撞号）", async () => {
     const c2 = structuredClone(config);
     c2.object_types.appointment.properties.appt_no.generate = [
       { from: "identity" },
       "-",
       { date: "now/d", format: "yyyyMMdd" },
       "-",
-      { sequence: { start: 100, width: 4 } },
+      { snowflake: true },
     ];
     const driver = freshDriver();
     const res = await runAction(env, c2, driver, {
@@ -491,7 +491,7 @@ describe("表达式与发号", () => {
       expand: [{ relation: "appointments", properties: ["appt_no", "is_current"] }],
     });
     const cur = (after.rows[0].appointments as Record<string, unknown>[]).find((a) => a.is_current === true);
-    expect(String(cur!.appt_no)).toMatch(/-0100$/);
+    expect(String(cur!.appt_no)).toMatch(/^P001-\d{8}-\d{15,19}$/);
   });
 });
 

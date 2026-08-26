@@ -171,7 +171,7 @@ export const MSG = {
   generatedUnsupported: (prop: string) => `该路径不支持 from: generated（属性 ${prop}：发号只在 create 投影里可用）`,
   valueSourceUnknown: (detail: string) => `无法识别的取值来源：${detail}`,
   noGenerate: (cls: string, prop: string) => `${cls}.${prop} 没有 generate`,
-  noSequence: "没有计数器，不能发号",
+  noSnowflake: "运行环境没注入雪花号生成器，generate 的 snowflake 项算不了",
   noClock: "运行环境没注入时钟，日期表达式算不了",
   noUuid: "运行环境没注入随机源，uuid 生成不了",
   generateItemUnknown: (detail: string) => `无法识别的 generate 项：${detail}`,

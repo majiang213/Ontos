@@ -60,9 +60,11 @@ export function applyPack(
 }
 
 /** 工作行落库：画布全部内容（本体 + 界面状态）的唯一落点（onto_version 里 version IS NULL 的行）。
- *  dirty 与否都写——界面状态也以这为家。save_* 路径也走这里：界面状态不算本体改动（不碰 dirty、不过校验、不加 rev）。 */
-export async function persistWorkingCopy(env: EngineEnv, workspace: string, state: DraftState): Promise<void> {
-  await env.meta.setWorkingPack(workspace, canvasSnapshot(state));
+ *  CAS 语义：expectedRev = 写入者声明基于的修订号；bump=true——界面状态 op 也 bump（rev+1），
+ *  内容写与界面写互相 CAS 检测（否则内容写盖掉并发摆位）。
+ *  返回保存后的 rev；冲突返回 null（调用方决定重试或抛「草稿已变」）。 */
+export async function persistWorkingCopy(env: EngineEnv, workspace: string, state: DraftState, expectedRev: number, bump: boolean): Promise<number | null> {
+  return env.meta.saveWorkingPack(workspace, canvasSnapshot(state), expectedRev, bump);
 }
 
 /** 读工作行并水合成 DraftState；还没有工作行就从已发布造一行并落库——「空间恒有可变头」这个不变量由本函数维持。
@@ -75,10 +77,10 @@ export async function readWorkingCopy(env: EngineEnv, workspace: string, config:
   if (saved === undefined) {
     const state: DraftState = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: {}, edgeBends: {}, edgePins: {} };
     applyPack(state, {}, fallback);
-    await persistWorkingCopy(env, workspace, state); // 首次访问造工作行：此后这空间恒有可变头
+    await persistWorkingCopy(env, workspace, state, 0, false); // 首访造行：无行时 saveDraftPack 走 INSERT 分支（expectedRev 0 起）
     return state;
   }
-  const pack = unpackCanvas(saved);
+  const pack = unpackCanvas(saved.pack);
   let draft: OntologyConfig;
   if (pack.config === undefined) {
     draft = structuredClone(config); // 迁移留下的摆位-only 工作行：本体用已发布，首次写入即补全 pack

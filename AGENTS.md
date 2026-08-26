@@ -54,7 +54,7 @@
 1. **这个键是哪一层？** 存在（类、属性、关系、效应）/ 落点（源映射、写回）/ 告知。一层一个键。通知不是效应，列名不是属性。
 2. **同类操作是不是同一套骨架？** `update` 和 `create` 都是「哪个类 → 找谁或新生谁 → 属性怎么赋值」。前置里的 `$link` 和效应里的 `filter.$link` 必须同形。两套写法就是没设计完。
 3. **是不是为这一个场景新开的口？** 调岗、维修、验收只能当组合示例，不能各加专用键。加键前先问：没有这个场景，这个键还有没有独立含义。
-4. **是不是保留字？** `$link`、`now`、`update`/`create`/`delete`/`link` 进了配置就是全系统保留字。新造一个必须先写入附录 B「保留字」表。完整已发布文本以附录 C 为准。认人必须写 `object` + `identity: { from: identity }` 或 `object` + `filter`，不许 `$root`，不许省略 `object` 当根。`match` 关系靠配对字段成立，`create` 不写 `link`。转化是 `- link: converted`，没有另一端。过滤落在哪一类，关系名就从哪一类出发。写回按效应和 `sources` 推出，动作上不要 `write` 名单。告知的 `properties` 必须写明来源。插入时要生业务编号：属性上 `generate` 是一段列表，按顺序拼接字面量、已有取值（`{ from: identity }`、请求字段）、`{ date: now/d, format: yyyyMMdd }`、`{ sequence: { start, width } }`、`{ uuid: v7 }`。效应写 `{ from: generated }`。不要「请求有就用、没有就编」。`appt_no` 只是任职编号的属性名，不是保留字。不要 `today`、`yesterday`、`builtin`、`addDays`，不要 `{ add: { left, right } }`。
+4. **是不是保留字？** `$link`、`now`、`update`/`create`/`delete`/`link` 进了配置就是全系统保留字。新造一个必须先写入附录 B「保留字」表。完整已发布文本以附录 C 为准。认人必须写 `object` + `identity: { from: identity }` 或 `object` + `filter`，不许 `$root`，不许省略 `object` 当根。`match` 关系靠配对字段成立，`create` 不写 `link`。转化是 `- link: converted`，没有另一端。过滤落在哪一类，关系名就从哪一类出发。写回按效应和 `sources` 推出，动作上不要 `write` 名单。告知的 `properties` 必须写明来源。插入时要生业务编号：属性上 `generate` 是一段列表，按顺序拼接字面量、已有取值（`{ from: identity }`、请求字段）、`{ date: now/d, format: yyyyMMdd }`、`{ snowflake: true }`（64 位雪花号十进制串）、`{ uuid: v7 }`。效应写 `{ from: generated }`。不要「请求有就用、没有就编」。`appt_no` 只是任职编号的属性名，不是保留字。不要 `today`、`yesterday`、`builtin`、`addDays`，不要 `{ add: { left, right } }`，generate 里没有 `sequence`（发号器已整体改雪花，`{ sequence: { start, width } }` 是旧形状）。
 
 改例子等于改附录 B。只改一处、另一处还用旧骨架，不许提交。
 
@@ -88,7 +88,7 @@ _UI 说法_：映射。_Avoid_：新系统、出码、运行中、对象列表�
 _UI 说法_：本体（产品核心词，保留）。
 
 **工作空间** 🔴：
-隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链与**工作副本**同在 `onto_version`（`version IS NULL` 的一行是可变头，画布全部内容——本体+摆位+弯折+钉点——只活在它的 `canvas_json`；发布 = 工作行复制成编号行），其余各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册）——按空间名判断填充，与是否配置 LLM Key 无关；API 用 `/api/<空间名>/…` 路径段指定。
+隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链与**工作副本**同在 `onto_version`（`version IS NULL` 的一行是可变头，画布全部内容——本体+摆位+弯折+钉点——只活在它的 `canvas_json`；草稿修订号 `rev` 也持久化在这行，写走 CAS（`UPDATE … WHERE rev = ?`，0 行=冲突）；发布 = 工作行复制成编号行），其余各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL）。**无状态**：草稿/已发布快照全部读库、无进程内写队列与内存缓存——同一份元库下任意多实例行为一致；多实例部署 = MySQL 元库 + 每实例分配 `ONTOS_INSTANCE_ID`（0–1023，雪花号实例位；不分配则随机派生，碰撞概率极低但存在）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册）——按空间名判断填充，与是否配置 LLM Key 无关；fixture 各实例各自播种，多实例下对 `test` 空间的写会分叉（演示空间不承诺多实例一致）；API 用 `/api/<空间名>/…` 路径段指定。
 _UI 说法_：工作空间（左上角下拉）。
 
 **对象类型 / 属性 / 关系** 🔶：
@@ -234,6 +234,7 @@ _UI 说法_：取数路径。
 - **生成要模型，执行不要。** 模型只产草稿（对象/关系/动作定义），人裁决。执行器解释已发布本体，禁自由 SQL。缺参可先补全，补完仍交执行器。
 - **不是 ReAct。** 画布纠错 = 人改字段或再勾表点「生成对象」（`proposeObjects` 一次）→ 停。不要后端自转圈、自己调工具写库。Claude / Codex 是 MCP 调用方，不是把循环做进 Ontos。
 - **持久化**：本体、动作定义、映射、`log_action`。SQL 即用即弃。业务行留原库。
+- **create 幂等**：无状态化后没有进程内串行队列，并发重发同一 create 靠「源表 identity 列唯一索引 + 插入失败重查兜底」——源表 identity 列必须是唯一索引（fixture 已补），重发命中记幂等 note，不重复落行。
 - **完整 YAML 实例**见《ontos-article.md》附录 C。JSON 只选已发布动作；校验/改数在该条 `pre`/`effect`。YAML 建模时模型草、人发布。
 - **多样业务**（入职还要下发考勤/工资）按设计文档 §9：同一人的源就在本类 `sources` 加一行；不是人就加对象+effect；不是同一变更就另立动作。禁止按行业在执行器里写分支。
 

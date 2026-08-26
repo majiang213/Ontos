@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ workspac
     const workspace = await workspaceOf(params);
     const env = engineEnv();
     const state = await getDraft(env, workspace);
-    const rev = getRev(env, workspace);
+    const rev = await getRev(env, workspace);
     const etag = etagOf(workspace, rev);
     const headers = { ETag: etag, "Cache-Control": "no-store" };
     if (req.headers.get("if-none-match") === etag) {

@@ -133,25 +133,27 @@ describe("整份替换（replace_object）与 base_rev", () => {
 
   it("base_rev：相等才写入； stale 拒绝且不落地；并发下第二个写入拿到 DraftReject", async () => {
     const s = await freshStore(tmp);
-    const r0 = s.getRev(WORKSPACE);
+    const r0 = await s.getRev(WORKSPACE);
     // 串行：先成功一次（rev +1），再带旧 base_rev 必拒
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE, { base_rev: r0 });
-    expect(s.getRev(WORKSPACE)).toBe(r0 + 1);
+    expect(await s.getRev(WORKSPACE)).toBe(r0 + 1);
     await expectRejected(s.editDraft({ op: "add_property", object: "vendor", name: "v1", type: "string" }, WORKSPACE, { base_rev: r0 }),/草稿已变/);
     expect((await s.getDraft(WORKSPACE)).draft.object_types.vendor.properties.v1).toBeUndefined(); // 没落地
-    // 并发：p1 先跑完把 rev 推到 r0+2，p2 的 base_rev=r0+1 在 task 开头对不上
-    const cur = s.getRev(WORKSPACE);
-    const p1 = s.editDraft({ op: "add_property", object: "vendor", name: "v2", type: "string" }, WORKSPACE);
+    // 并发：两个都带 base_rev=cur（MCP 语义，均不重试）——CAS 恰好一个赢、一个 422「草稿已变」
+    const cur = await s.getRev(WORKSPACE);
+    const p1 = s.editDraft({ op: "add_property", object: "vendor", name: "v2", type: "string" }, WORKSPACE, { base_rev: cur });
     const p2 = s.editDraft({ op: "add_property", object: "vendor", name: "v3", type: "string" }, WORKSPACE, { base_rev: cur });
     const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1.code).toBe(200); // 先到者写入成功
-    expect(r2.code).toBe(422); // 后到者 base_rev 对不上，Result 拒绝（不再以异常形式 reject）
-    expect(r2.message).toMatch(/草稿已变/);
+    const codes = [r1.code, r2.code].sort();
+    expect(codes).toEqual([200, 422]); // 一个成功一个冲突（CAS 赢家不固定，断言集合）
+    const loser = r1.code === 200 ? r2 : r1;
+    expect(loser.message).toMatch(/草稿已变/);
+    const winnerProp = r1.code === 200 ? "v2" : "v3";
     const props = (await s.getDraft(WORKSPACE)).draft.object_types.vendor.properties;
-    expect(props.v2).toBeDefined();
-    expect(props.v3).toBeUndefined(); // 输的那次不落地
+    expect(props[winnerProp]).toBeDefined(); // 赢的那次落地
+    expect(props[winnerProp === "v2" ? "v3" : "v2"]).toBeUndefined(); // 输的那次不落地
     // base_rev 对上了又能写（队列没被拒绝拖死）
-    await s.editDraft({ op: "add_property", object: "vendor", name: "v3", type: "string" }, WORKSPACE, { base_rev: s.getRev(WORKSPACE) });
+    await s.editDraft({ op: "add_property", object: "vendor", name: "v3", type: "string" }, WORKSPACE, { base_rev: await s.getRev(WORKSPACE) });
     expect((await s.getDraft(WORKSPACE)).draft.object_types.vendor.properties.v3).toBeDefined();
   });
 });

@@ -1,4 +1,4 @@
-// 界面状态三键的跟随纪律 —— 摆位 / 弯折 / 钉点：不算本体（不校验、不加 rev、不算 dirty），但要落库、
+// 界面状态三键的跟随纪律 —— 摆位 / 弯折 / 钉点：不算本体（不校验、不算 dirty、不算内容改动），但要落库（bump rev）、
 // 要随关系改名搬迁、要在事务收尾清死键。三键的写入一律走这里的原语，不许在别处直接改 state.layout / edgeBends / edgePins。
 
 import type { BorderPin } from "../../schema/ops";

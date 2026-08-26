@@ -13,10 +13,10 @@ export interface EvalContext {
   request?: Record<string, unknown>; // 请求参数
   current?: Record<string, unknown>; // 本条过滤或 update 正在谈的个体的源列属性值
   currentDerived?: (prop: string) => unknown | Promise<unknown>; // 点名的属性是派生属性时，按需现算（异步：可能要查源）
-  nextSequence?: (key: string, start?: number) => number | Promise<number>; // generate 的计数器（元库版是异步）
   allowPreKeys?: boolean; // true 才许用 $request / $exists（它们只属于前置，见 §5.2）
   clock?: () => number; // 此刻（UTC Unix 秒）：日期表达式的唯一时间源，由边界注入（引擎不读系统时钟）
   uuid?: () => string; // uuid v7：generate 的 { uuid: v7 } 唯一随机源，由边界注入（引擎不碰 crypto）
+  snowflake?: () => string; // 雪花号：generate 的 { snowflake: true } 唯一发号源，由边界注入（无共享计数器）
 }
 
 /* ---------- 日期表达式 ----------
@@ -180,10 +180,9 @@ export async function generateValue(cls: string, prop: string, def: PropertyDef,
       parts.push(formatUtc(evalDateExpr(String(rec.date), requireClock(ctx)), String(rec.format ?? "yyyyMMdd")));
       continue;
     }
-    if (rec.sequence) {
-      if (!ctx.nextSequence) throw new Error(MSG.noSequence);
-      const seq = rec.sequence as { start?: number; width?: number };
-      parts.push(pad(await ctx.nextSequence(`${cls}.${prop}`, seq.start ?? 1), seq.width ?? 4));
+    if (rec.snowflake === true) {
+      if (!ctx.snowflake) throw new Error(MSG.noSnowflake);
+      parts.push(ctx.snowflake());
       continue;
     }
     if (rec.uuid === "v7") {

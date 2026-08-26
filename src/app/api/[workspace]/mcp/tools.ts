@@ -89,7 +89,7 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, args) => {
       const { config, version } = await ctx.published(); // 动作永远读已发布，不可改成草稿
       const action = actionRequestSchema.parse(args);
-      const result = await withActionLog({ meta: ctx.env.meta, clock: ctx.env.clock }, ctx.workspace, version, action, () => runAction(ctx.env, config, ctx.driver, action, { workspace: ctx.workspace, nextSequence: (k, s) => ctx.env.meta.nextSeq(ctx.workspace, k, s) }));
+      const result = await withActionLog({ meta: ctx.env.meta, clock: ctx.env.clock }, ctx.workspace, version, action, () => runAction(ctx.env, config, ctx.driver, action));
       // 业务失败（前置/公理/投影）按 MCP 约定标 isError，调用方不用猜
       return { payload: result, isError: !result.ok };
     },
@@ -174,11 +174,11 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, args) => {
       const { base_rev, ...rest } = editDraftEnvelope.parse(args); // 先剥信封再 parse op（判别联合不收信封字段）
       const op = mcpDraftOpSchema.parse(rest); // 无 save_layout；Zod 失败 -32602
-      // 不在路由里比 getRev、不再套一层队列：base_rev 的比较在 editDraft 的 enqueue task 开头
+      // 不在路由里比 getRev：base_rev 的比对在 editDraft 内并入 rev CAS（冲突即 422）
       const r = await editDraft(ctx.env, op, ctx.workspace, { base_rev });
       if (r.code !== 200) throw new DraftReject(r.message); // 域拒绝经 Result 返回，按 MCP 约定转 -32000（route 的 catch 接）
       const next = r.value;
-      return { payload: { ok: true, dirty: next.dirty, rev: getRev(ctx.env, ctx.workspace), base_version: next.baseVersion, op: op.op, names: affectedNames(op) } };
+      return { payload: { ok: true, dirty: next.dirty, rev: await getRev(ctx.env, ctx.workspace), base_version: next.baseVersion, op: op.op, names: affectedNames(op) } };
     },
   },
 ];

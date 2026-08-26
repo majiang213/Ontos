@@ -55,16 +55,16 @@ export function seedDemo(d: SqliteFixtureDriver, clock: () => number = realNow) 
   const DEPTS = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08"];
 
   const purchase = d.register("purchase_sys");
-  purchase.exec(`CREATE TABLE po_item (po_id INTEGER PRIMARY KEY AUTOINCREMENT, item_name TEXT, sn TEXT)`);
+  purchase.exec(`CREATE TABLE po_item (po_id INTEGER PRIMARY KEY AUTOINCREMENT, item_name TEXT, sn TEXT UNIQUE)`);
   const insPo = purchase.prepare(`INSERT INTO po_item (item_name, sn) VALUES (?, ?)`);
   for (let i = 0; i < 120; i++) insPo.run(`精密机床-${i + 1}号`, sn4(i));
   insPo.run("精密机床-217号", "SN-40217"); // 验收演示的主角：只在采购源（在途）
 
   const device = d.register("device_sys");
-  device.exec(`CREATE TABLE device (dev_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, serial_no TEXT, dept_id TEXT, status TEXT)`);
+  device.exec(`CREATE TABLE device (dev_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, serial_no TEXT UNIQUE, dept_id TEXT, status TEXT)`);
   device.exec(`CREATE TABLE department (dept_id TEXT PRIMARY KEY, dept_name TEXT)`);
-  device.exec(`CREATE TABLE repair (id INTEGER PRIMARY KEY AUTOINCREMENT, repair_no TEXT, serial_no TEXT, started_at INTEGER, ended_at INTEGER)`);
-  device.exec(`CREATE TABLE assignment (id INTEGER PRIMARY KEY AUTOINCREMENT, asgn_no TEXT, sn TEXT, dept_id TEXT, valid_from INTEGER, valid_to INTEGER)`);
+  device.exec(`CREATE TABLE repair (id INTEGER PRIMARY KEY AUTOINCREMENT, repair_no TEXT UNIQUE, serial_no TEXT, started_at INTEGER, ended_at INTEGER)`);
+  device.exec(`CREATE TABLE assignment (id INTEGER PRIMARY KEY AUTOINCREMENT, asgn_no TEXT UNIQUE, sn TEXT, dept_id TEXT, valid_from INTEGER, valid_to INTEGER)`);
   const insDev = device.prepare(`INSERT INTO device (name, serial_no, dept_id, status) VALUES (?, ?, ?, ?)`);
   for (let i = 80; i < 120; i++) insDev.run(`机床台账-${i + 1}号`, sn4(i), DEPTS[i % DEPTS.length], i < 83 ? "scrapped" : null);
   for (let i = 0; i < 60; i++) insDev.run(`在役仪表-${i + 1}号`, `SN-6${String(i).padStart(4, "0")}`, DEPTS[i % DEPTS.length], null);
@@ -80,12 +80,12 @@ export function seedDemo(d: SqliteFixtureDriver, clock: () => number = realNow) 
     .run("A-20250101-0001", "SN-40090", "D02", Math.floor(Date.UTC(2025, 0, 1) / 1000), null);
 
   const asset = d.register("asset_sys");
-  asset.exec(`CREATE TABLE asset (asset_id INTEGER PRIMARY KEY AUTOINCREMENT, asset_name TEXT, sn TEXT)`);
-  asset.exec(`CREATE TABLE warranty_card (card_id INTEGER PRIMARY KEY AUTOINCREMENT, sn TEXT, expiry INTEGER)`);
+  asset.exec(`CREATE TABLE asset (asset_id INTEGER PRIMARY KEY AUTOINCREMENT, asset_name TEXT, sn TEXT UNIQUE)`);
+  asset.exec(`CREATE TABLE warranty_card (card_id INTEGER PRIMARY KEY AUTOINCREMENT, sn TEXT UNIQUE, expiry INTEGER)`);
 
   const hr = d.register("hr_sys");
   hr.exec(`CREATE TABLE person (person_no TEXT PRIMARY KEY, name TEXT)`);
-  hr.exec(`CREATE TABLE appointment (id INTEGER PRIMARY KEY AUTOINCREMENT, appt_no TEXT, person_no TEXT, title TEXT, dept_id TEXT, valid_from INTEGER, valid_to INTEGER)`);
+  hr.exec(`CREATE TABLE appointment (id INTEGER PRIMARY KEY AUTOINCREMENT, appt_no TEXT UNIQUE, person_no TEXT, title TEXT, dept_id TEXT, valid_from INTEGER, valid_to INTEGER)`);
   hr.prepare(`INSERT INTO person (person_no, name) VALUES (?, ?)`).run("P001", "张三");
   hr.prepare(`INSERT INTO appointment (appt_no, person_no, title, dept_id, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
     .run("P001-20250101-0001", "P001", "专员", "D01", now - 500 * 86400, null); // 一条在任

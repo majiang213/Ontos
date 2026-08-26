@@ -47,10 +47,6 @@ describe("空间隔离", () => {
     await meta.recordDecision("default", { class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: Verdict.Skip, decided_by: "测试" });
     expect((await meta.listDecisions("default")).length).toBe(1);
     expect((await meta.listDecisions("lab")).length).toBe(0);
-    // 发号器也按空间分开：同名序列各自从 1 起
-    expect(await meta.nextSeq("default", "eq")).toBe(1);
-    expect(await meta.nextSeq("default", "eq")).toBe(2);
-    expect(await meta.nextSeq("lab", "eq")).toBe(1);
   });
 
   it("摆位按空间分开存（onto_version 的工作行）", async () => {

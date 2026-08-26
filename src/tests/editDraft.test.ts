@@ -61,7 +61,10 @@ describe("配置存储（工作副本与发布）", () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE);
     await s.editDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WORKSPACE);
-    (await s.getDraft(WORKSPACE)).draft.object_types.vendor.identity = "ghost"; // 绕过 editDraft 写坏草稿，验证发布闸
+    // 绕过 editDraft 写坏草稿（无状态化后 getDraft 每次水合，必须显式落库），验证发布闸
+    const state = await s.getDraft(WORKSPACE);
+    state.draft.object_types.vendor.identity = "ghost";
+    await (await meta()).saveWorkingPack(WORKSPACE, { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins }, await s.getRev(WORKSPACE), false);
     await expectRejected(s.publish(WORKSPACE));
   });
 
@@ -128,23 +131,23 @@ describe("配置存储（工作副本与发布）", () => {
     expect(state.draft.object_types.vendor).toBeUndefined();
   });
 
-  it("rev：内容变更 +1；摆位不加；放弃后变且不为 0；干净草稿上回滚也 +1", async () => {
+  it("rev：内容变更 +1；摆位也 +1（界面状态写同样走 CAS）；放弃后变且不为 0；干净草稿上回滚也 +1", async () => {
     const s = await freshStore(tmp);
-    expect(s.getRev(WORKSPACE)).toBe(0);
+    expect(await s.getRev(WORKSPACE)).toBe(0);
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE);
-    expect(s.getRev(WORKSPACE)).toBe(1);
+    expect(await s.getRev(WORKSPACE)).toBe(1);
     await s.editDraft({ op: "save_layout", positions: { vendor: { x: 1, y: 2 } } }, WORKSPACE);
-    expect(s.getRev(WORKSPACE)).toBe(1); // 摆位不算本体改动，不催监视器
-    const before = s.getRev(WORKSPACE);
+    expect(await s.getRev(WORKSPACE)).toBe(2); // 摆位写也 bump：界面状态写与内容写互相 CAS 检测
+    const before = await s.getRev(WORKSPACE);
     await s.discard(WORKSPACE);
-    expect(s.getRev(WORKSPACE)).toBe(before + 1); // 放弃也 +1：草稿内容变了（且永远不归零）
-    expect(s.getRev(WORKSPACE)).not.toBe(0);
+    expect(await s.getRev(WORKSPACE)).toBe(before + 1); // 放弃也 +1：草稿内容变了（且永远不归零）
+    expect(await s.getRev(WORKSPACE)).not.toBe(0);
     // 干净草稿（rev 可能为正）上回滚也 +1——监视器按相等比较，少了这拍另一标签页会漏刷新
     await s.rollbackTo(1, WORKSPACE);
-    expect(s.getRev(WORKSPACE)).toBe(before + 2);
+    expect(await s.getRev(WORKSPACE)).toBe(before + 2);
   });
 
-  it("写队列失败续链：前一次 DraftReject 之后，后续写入仍成功", async () => {
+  it("拒绝后续链：前一次 DraftReject 之后，后续写入仍成功", async () => {
     const s = await freshStore(tmp);
     await expectRejected(s.editDraft({ op: "create_object", name: "equipment", kind: "thing" }, WORKSPACE), "类已存在");
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE); // 不能被上一次拒绝拖死
@@ -186,7 +189,7 @@ describe("配置存储（工作副本与发布）", () => {
     const saved = await store.getWorkingPack(WORKSPACE);
     expect(saved).toBeDefined();
     expect(JSON.stringify(saved)).toContain("vendor");
-    expect((saved as { config: unknown }).config).toBeDefined(); // pack 里是 config 对象，不是 YAML 文本
+    expect((saved as { pack: { config: unknown } }).pack.config).toBeDefined(); // pack 里是 config 对象，不是 YAML 文本
     expect(await store.versionYaml(WORKSPACE, 2)).toBeUndefined(); // 没点发布，没有 v2 YAML
     await restartRuntime(tmp);
     const state = await s.getDraft(WORKSPACE);
@@ -330,9 +333,11 @@ describe("配置存储（工作副本与发布）", () => {
   it("发布闸拦动作里的坏引用：效应指向不存在的类", async () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE); // 先产生合法改动，置 dirty
-    (await s.getDraft(WORKSPACE)).draft.object_types.equipment.actions!.bad = {
+    const state = await s.getDraft(WORKSPACE);
+    state.draft.object_types.equipment.actions!.bad = {
       effect: [{ update: { object: "ghost_class", filter: { x: 1 }, properties: { y: 2 } } }],
     };
+    await (await meta()).saveWorkingPack(WORKSPACE, { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins }, await s.getRev(WORKSPACE), false);
     await expectRejected(s.publish(WORKSPACE), "不存在的类");
   });
 });

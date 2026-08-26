@@ -78,7 +78,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ workspa
       driver: await getDriverRegistry(workspace),
       config: async () => (space === "draft" ? (await getDraft(env, workspace)).draft : (await getPublished(env, workspace)).config),
       published: async () => await getPublished(env, workspace), // 返回 { config, version }：留痕盖版本号由调用方取
-      draftView: async () => ({ state: await getDraft(env, workspace), rev: getRev(env, workspace), published: (await getPublished(env, workspace)).config }),
+      draftView: async () => ({ state: await getDraft(env, workspace), rev: await getRev(env, workspace), published: (await getPublished(env, workspace)).config }),
     };
     const out = await tool.handler(ctx, args);
     return rpcOk(id, toolResult(out.payload, out.isError));

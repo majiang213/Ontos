@@ -113,7 +113,7 @@ describe("MCP 工具端点", () => {
     const sc = d.result.structuredContent;
     expect(sc.space).toBe("draft");
     expect(sc.dirty).toBe(true);
-    expect(sc.rev).toBe(s.getRev("test"));
+    expect(sc.rev).toBe(await s.getRev("test"));
     expect(sc.base_version).toBe(1);
     expect(sc.classes.find((c: { name: string }) => c.name === "vendor").state).toBe("new");
     expect(sc.classes.find((c: { name: string }) => c.name === "equipment").state).toBe("same");
@@ -166,7 +166,7 @@ describe("MCP 工具端点", () => {
     const s = await draftEngine();
     const list = await call("list_classes", { space: "draft" });
     const rev = list.result.structuredContent.rev as number;
-    expect(rev).toBe(s.getRev("test"));
+    expect(rev).toBe(await s.getRev("test"));
     // 落地 import_objects（propose_objects 的落地点）
     const imp = await call("edit_draft", {
       op: "import_objects",
@@ -186,8 +186,8 @@ describe("MCP 工具端点", () => {
     // query 仍只读已发布：未发布的 vendor 查不到
     expect((await call("query", { query: { object: "vendor" } })).error?.code).toBe(-32000);
     // 撞名 → -32000；锁定的整份替换（已发布类）→ -32000 带白话原因
-    expect((await call("edit_draft", { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } }, base_rev: s.getRev("test") })).error?.code).toBe(-32000);
-    const lock = await call("edit_draft", { op: "replace_object", name: "equipment", def: { kind: "thing", properties: {} }, base_rev: s.getRev("test") });
+    expect((await call("edit_draft", { op: "import_objects", objects: { vendor: { kind: "thing", properties: {} } }, base_rev: await s.getRev("test") })).error?.code).toBe(-32000);
+    const lock = await call("edit_draft", { op: "replace_object", name: "equipment", def: { kind: "thing", properties: {} }, base_rev: await s.getRev("test") });
     expect(lock.error?.code).toBe(-32000);
     expect(lock.error?.message).toMatch(/不能整对象替换：已经发布过/);
     // 已发布类的草稿视图：replaceable=false 且带原因
@@ -223,7 +223,7 @@ describe("MCP 工具端点", () => {
   it("set_action 经 edit_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {
     const s = await draftEngine();
     const def = { description: "改名", effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { name: { from: "request" } } } }] };
-    const r = await call("edit_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: s.getRev("test") });
+    const r = await call("edit_draft", { op: "set_action", object: "equipment", name: "rename", def, base_rev: await s.getRev("test") });
     expect(r.error).toBeUndefined();
     expect(r.result.structuredContent.names).toEqual(["equipment.rename"]);
     // 草稿视图：完整动作定义（读回-改-写回闭环）
@@ -239,7 +239,7 @@ describe("MCP 工具端点", () => {
     expect(run.error).toBeUndefined();
     expect(run.result.isError).toBe(true);
     // remove_action：names 同样是 类名.动作名
-    const rm = await call("edit_draft", { op: "remove_action", object: "equipment", name: "rename", base_rev: s.getRev("test") });
+    const rm = await call("edit_draft", { op: "remove_action", object: "equipment", name: "rename", base_rev: await s.getRev("test") });
     expect(rm.error).toBeUndefined();
     expect(rm.result.structuredContent.names).toEqual(["equipment.rename"]);
     expect((await s.getDraft("test")).draft.object_types.equipment.actions!.rename).toBeUndefined();

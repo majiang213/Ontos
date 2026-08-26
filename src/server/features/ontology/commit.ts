@@ -3,17 +3,22 @@
 // editDraft / mutateDraft / publish / discard / rollbackTo 五个入口共用这一份，不各写各的收尾。
 
 import { configSchema, type OntologyConfig } from "../../schema/config";
-import { DraftReject } from "../../errors";
+import { DraftReject, MSG } from "../../errors";
 import type { EngineEnv } from "../env";
 import { gcDeadKeys } from "./canvasState";
 import { persistWorkingCopy, type DraftState } from "./canvasPack";
-import { getPublished, storeOf } from "./current";
+import { getPublished } from "./current";
 import { sameConfig } from "./sameConfig";
 import { validateActionShapes, validateSemantics } from "./validate";
 
-/** rev += 1 的纪律只有这一条：内容写进 Store 之后、下一个 await 之前——晚一拍，监视器带旧 ETag 会 304，把已改的草稿当成没变。 */
-export function bumpRev(env: EngineEnv, workspace: string): void {
-  storeOf(env, workspace).rev += 1;
+/** 草稿写路径的统一收尾：清界面状态死键 → 按结构重算 dirty（改出去又改回来要能收回来）→ CAS 落工作行。
+ *  expectedRev = 写入者声明基于的修订号（base_rev ?? 读到的）；bump 恒为 true——界面状态 op 也 bump（rev+1），
+ *  内容写与界面写互相 CAS 检测。
+ *  返回是否保存成功：CAS 冲突 = false，调用方决定重试（画布路径）或抛「草稿已变」（MCP 路径）。 */
+export async function commitDraft(env: EngineEnv, workspace: string, state: DraftState, expectedRev: number, bump = true): Promise<boolean> {
+  gcDeadKeys(state);
+  state.dirty = !sameConfig(state.draft, (await getPublished(env, workspace)).config);
+  return (await persistWorkingCopy(env, workspace, state, expectedRev, bump)) !== null;
 }
 
 /** 三道校验单源（结构 + 语义 + 动作形状四查）：草稿写入与发布同调这一份。
@@ -34,12 +39,4 @@ export function validateDraftOrThrow(state: DraftState, backup: OntologyConfig):
     state.draft = backup;
     throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
-}
-
-/** 草稿写路径的统一收尾：rev → 清界面状态死键 → 按结构重算 dirty（改出去又改回来要能收回来）→ 落工作行。 */
-export async function commitDraft(env: EngineEnv, workspace: string, state: DraftState): Promise<void> {
-  bumpRev(env, workspace);
-  gcDeadKeys(state);
-  state.dirty = !sameConfig(state.draft, (await getPublished(env, workspace)).config);
-  await persistWorkingCopy(env, workspace, state);
 }

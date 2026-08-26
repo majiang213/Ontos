@@ -582,7 +582,7 @@ object_types:
           - "-"
           - { date: now/d, format: yyyyMMdd }
           - "-"
-          - { sequence: { start: 1, width: 4 } }
+          - { snowflake: true }
       serial_no: { type: string, description: 设备序列号 }   # 用来对上设备
       dept_id: { type: string, description: 部门编号 }      # 用来对上部门
       valid_from: { type: date, description: 生效日 }
@@ -1314,7 +1314,7 @@ actions:
 | `description` | 给人 / Agent 读 |
 | `values` | `enum` 的可取值；只列出有规则能算出的值 |
 | `derived` | 有它就是派生属性，禁止再出现在任何源的 `fields` 里 |
-| `generate` | 可选。列表，按顺序拼成该属性的值。项为：字面量；与效应相同的取值；`{ date: now/d, format: yyyyMMdd }`（UTC，记号 `yyyy` `MM` `dd` `HH` `mm` `ss`）；`{ sequence: { start: 1, width: 4 } }`（该类该属性一个计数器）；`{ uuid: v7 }`。效应写 `{ from: generated }` |
+| `generate` | 可选。列表，按顺序拼成该属性的值。项为：字面量；与效应相同的取值；`{ date: now/d, format: yyyyMMdd }`（UTC，记号 `yyyy` `MM` `dd` `HH` `mm` `ss`）；`{ snowflake: true }`（64 位雪花号十进制串：41 位毫秒时间戳 + 10 位实例 + 12 位序列，实例位来自 `ONTOS_INSTANCE_ID` 或随机派生）；`{ uuid: v7 }`。效应写 `{ from: generated }` |
 
 `derived` 按形状区分，没有第三种专用键。
 
@@ -1613,7 +1613,7 @@ object_types:
           - "-"
           - { date: now/d, format: yyyyMMdd }
           - "-"
-          - { sequence: { start: 1, width: 4 } }
+          - { snowflake: true }
       serial_no:
         type: string
         description: 设备序列号
@@ -1671,7 +1671,7 @@ object_types:
           - "-"
           - { date: now/d, format: yyyyMMdd }
           - "-"
-          - { sequence: { start: 1, width: 4 } }
+          - { snowflake: true }
       serial_no:
         type: string
         description: 设备序列号
@@ -1763,7 +1763,7 @@ object_types:
           - "-"
           - { date: now/d, format: yyyyMMdd }
           - "-"
-          - { sequence: { start: 1, width: 4 } }
+          - { snowflake: true }
       person_no:
         type: string
         description: 人员编号                    # 用来和人对上；held_by 比的就是它

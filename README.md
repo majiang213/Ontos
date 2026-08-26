@@ -71,7 +71,7 @@ src/
 │                           revWatcher.ts（轮询纪律）、workspaceClient.ts（API 适配器：拼工作空间路径段）
 ├── server/                 后端：领域包、适配层、共享内核、元库、运行态、种子配置
 │   ├── features/           领域包（按业务链划分，域间依赖成 DAG，结构守门把守）：
-│   │   ├── ontology/       本体构建域：editDraft（受理：排队/base_rev/分流）、commit（落定：三查回退/收尾）、
+│   │   ├── ontology/       本体构建域：editDraft（受理：base_rev/分流，冲突自动重读重试）、commit（落定：三查回退/收尾）、
 │   │   │                   current（当前两份：已发布 + 工作副本）、versions（版本链：发布/放弃/回滚）、
 │   │   │                   canvasPack（画布包编解码与水合）、canvasState（界面状态三键跟随）、
 │   │   │                   ops/（op 分派 index + 厚不变量 editObject/editProperty/editLink/importObjects/replaceObject）、
@@ -89,6 +89,7 @@ src/
 │   ├── infra/              适配层：driver（源驱动接口 + 方言）、sqlDriver（MySQL/PG）、sqliteDriver（SQLite 文件）、
 │   │                       fixture（演示内存库，继承 sqliteDriver）、registry（驱动注册表）、
 │   │                       connections（连接注册与生命周期）、tables（表结构发现）、workspace（工作空间）、
+│   │                       snowflake.ts（雪花号：41 位毫秒 + 10 位实例 + 12 位序列，发号器唯一实现）、
 │   │                       llm/（模型槽位：slot 接口 + canned 离线回退 + aiSdk 真模型 + identityHint）、
 │   │                       trail.ts（问数/动作留痕编排：跨域应用服务，版本号由调用方传入）
 │   ├── schema/             Zod 形状（共享内核）：config（本体配置）、request（问数/动作请求）、ops（编辑操作）、
@@ -98,11 +99,10 @@ src/
 │   │                       actionSpec（动作形状规约：位置规则、表单子集、效应种类/取值位置走查）
 │   ├── meta/               平台元数据库：store.ts（门面）+ backends.ts（SQLite / MySQL 两种后端，ONTOS_META_DSN 切换）
 │   │                       + ddl/（sqlite.ts / mysql.ts，方言各一份）+ types.ts
-│   │                       + stores/（工作空间/版本链/连接/裁决/问题集/留痕/序号 七个关切存储）
+│   │                       + stores/（工作空间/版本链/连接/裁决/问题集/留痕 六个关切存储）
 │   ├── errors.ts           领域/草稿/连接/空间拒绝类型
 │   ├── etag.ts             画布轮询 ETag/304
-│   ├── enqueue.ts          键控串行队列（草稿写队列与动作串行队列的原语）
-│   ├── runtime.ts          运行态（元库/注册表/配置存储的进程级单例 + engineEnv 组装，测试可整套换掉）
+│   ├── runtime.ts          运行态（元库/驱动注册表/LLM 槽位的实例本地句柄 + clock/uuid/雪花注入 + engineEnv 组装，测试可整套换掉）
 │   └── config/             ontology.yaml（演示模板）与 ontos-meta.db（元库文件）
 └── tests/                  vitest；引擎行为约定钉在测试里
 ```
@@ -207,4 +207,7 @@ npm test       # 引擎 golden 测试（vitest）
 | `OPENAI_API_KEY` | 接真模型（OpenAI 兼容协议，通用键，同 Claude Code / Codex 惯例）：问数编译、逆向建模、疑似重复建议三个槽位从离线回退切换成真模型 | 不设 = 离线确定性回退（问数剧本只在 `test` 演示空间；生成对象/候选对建议是通用启发式，各空间可用）。注意演示数据的归属不按 Key 判断：`test` 空间有无 Key 都有演示模板与 fixture 连接，其余空间永远空白起步 |
 | `OPENAI_BASE_URL` / `OPENAI_MODEL` | 换接入点/模型（任何 OpenAI 兼容端点均可，含内部网关）；设了 `OPENAI_API_KEY` 则 `OPENAI_MODEL` 必填，不设报错 | BASE_URL 不设 = `@ai-sdk/xai` 默认端点（`https://api.x.ai/v1`） |
 | `ONTOS_TOKEN` | 写端点令牌闸（连接/发布/裁决/动作等要写库的 API 需 `Authorization: Bearer <token>`） | 不设 = 写端点不验令牌 |
-| `ONTOS_META_DSN` | 平台元库连接串。`mysql://…` 走 MySQL | 不设 = 单文件 SQLite `src/server/config/ontos-meta.db` |
+| `ONTOS_META_DSN` | 平台元库连接串。`mysql://…` 走 MySQL | 不设 = 单文件 SQLite `src/server/config/ontos-meta.db`（本地开发/单实例） |
+| `ONTOS_INSTANCE_ID` | 雪花号实例位（0–1023）。**多实例部署必配**：同一 MySQL 元库下每实例一个不重复的值，保证发号不撞 | 不设 = 随机派生（0–1023，碰撞概率极低但存在；单实例无所谓） |
+
+服务本身**无状态**：草稿、版本、元数据全在元库里，写走 rev CAS，没有进程内写队列与内存快照缓存——同一份元库下任意多实例行为一致（`test` 演示空间除外：fixture 各实例各自播种，多实例下对它的写会分叉）。多实例部署 = MySQL 元库 + 每实例分配 `ONTOS_INSTANCE_ID`；SQLite 单文件保留本地开发与单实例部署。

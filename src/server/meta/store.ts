@@ -9,7 +9,6 @@ import { AdjudicationStore } from "./stores/adjudication";
 import { ConnectionsStore } from "./stores/connections";
 import { LogsStore } from "./stores/logs";
 import { QuestionsStore } from "./stores/questions";
-import { SeqStore } from "./stores/seq";
 import { VersionChainStore } from "./stores/versionChain";
 import { WorkspacesStore } from "./stores/workspaces";
 import type { ActionLogRec, ConnectionRec, DecisionRec, OverlapRec, QueryLogRec } from "./types";
@@ -21,7 +20,6 @@ export class MetaStore {
   private adjudication: AdjudicationStore;
   private questions: QuestionsStore;
   private logs: LogsStore;
-  private seq: SeqStore;
 
   constructor(private backend: MetaBackend) {
     this.workspaces = new WorkspacesStore(backend);
@@ -30,7 +28,6 @@ export class MetaStore {
     this.adjudication = new AdjudicationStore(backend);
     this.questions = new QuestionsStore(backend);
     this.logs = new LogsStore(backend);
-    this.seq = new SeqStore(backend);
   }
 
   async close() {
@@ -62,10 +59,10 @@ export class MetaStore {
     return this.versions.versionCanvas(workspace, version);
   }
   getWorkingPack(workspace: string) {
-    return this.versions.getWorkingPack(workspace);
+    return this.versions.getDraftPack(workspace);
   }
-  setWorkingPack(workspace: string, pack: unknown) {
-    return this.versions.setWorkingPack(workspace, pack);
+  saveWorkingPack(workspace: string, pack: unknown, expectedRev: number, bump: boolean) {
+    return this.versions.saveDraftPack(workspace, pack, expectedRev, bump);
   }
 
   /* 连接 */
@@ -125,11 +122,6 @@ export class MetaStore {
   }
   listActionLogs(workspace: string, limit?: number) {
     return this.logs.listActionLogs(workspace, limit);
-  }
-
-  /* 发号器 */
-  nextSeq(workspace: string, name: string, start?: number) {
-    return this.seq.nextSeq(workspace, name, start);
   }
 }
 

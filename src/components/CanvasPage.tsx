@@ -91,7 +91,7 @@ export default function CanvasPage() {
       }
       if (prev) showToast(externalToast(prev, data)); // 首轮由 refresh 负责，不弹
     },
-    onFormBlocked: () => showToast("草稿有更新，保存会盖掉外面刚写的"),
+    onFormBlocked: () => showToast("草稿有更新：保存会合并最新内容，同一字段以你后保存的为准"),
     onFailOnce: () => showToast("没法自动刷新画布，请重新打开本页"),
   });
 

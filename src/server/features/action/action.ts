@@ -11,7 +11,6 @@ import { createEnv, selectIndividuals } from "../query/assemble";
 import { evalDerived, evalFilterOnIndividual } from "../query/evaluate";
 import { currentView, keyColumn, mustCls, propValue, sourcesOf, type Cls, type Env, type Individual } from "../query/individual";
 import { generateValue, resolveLiteral, resolveValue, type EvalContext } from "../query/expr";
-import { enqueueKeyed } from "../../enqueue";
 import type { EngineEnv } from "../env";
 import { buildNotifications, type NotificationRecord } from "./notify";
 import { MSG } from "../../errors";
@@ -33,38 +32,26 @@ export interface ActionResult {
   notifications?: NotificationRecord[];
 }
 
-/* 发号计数器的默认实现驻内存（测试/纯引擎用）；路由层经 runAction 的 opts 注入元数据库版，重启不复位。 */
-const sequenceCounters = new Map<string, number>();
-function nextSequence(key: string, start = 1): number {
-  const n = Math.max(sequenceCounters.get(key) ?? 0, start - 1) + 1;
-  sequenceCounters.set(key, n);
-  return n;
-}
+const reject = (stage: ActionResult["stage"], error: string): ActionResult => ({ ok: false, stage, error, projections: [] });
 
 function emptyIndividual(cls: Cls): Individual {
   return { key: "", rows: Object.fromEntries(sourcesOf(cls).map(([s]) => [s, null])) };
 }
 
-const reject = (stage: ActionResult["stage"], error: string): ActionResult => ({ ok: false, stage, error, projections: [] });
-
 export async function runAction(
   env: EngineEnv,
   config: OntologyConfig,
   driver: SourceDriver,
-  req: ActionRequest,
-  opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number>; workspace?: string } // 路由层注入元数据库发号器（异步）；缺省用内存版。workspace = 串行键（哪份本体世界的动作互斥；缺省 default）
+  req: ActionRequest
 ): Promise<ActionResult> {
-  // 每空间一条动作串行队列（env.actionTails）：发号与 create 幂等都是 check-then-act，
-  // 并发裸奔会发出重号、补偿重发会插重复行——串行化后这两条在队列内天然互斥
-  return enqueueKeyed(env.actionTails, opts?.workspace ?? "default", () => runActionInner(env, config, driver, req, opts));
+  return runActionInner(env, config, driver, req);
 }
 
 async function runActionInner(
   env: EngineEnv,
   config: OntologyConfig,
   driver: SourceDriver,
-  req: ActionRequest,
-  opts?: { nextSequence?: (key: string, start?: number) => number | Promise<number> }
+  req: ActionRequest
 ): Promise<ActionResult> {
   if (!config.object_types[req.object]) return reject("pre", MSG.classNotInConfig(req.object));
   const cls = mustCls(config, req.object);
@@ -77,9 +64,9 @@ async function runActionInner(
     action: req.action,
     object: req.object,
     request: req.request ?? {},
-    nextSequence: opts?.nextSequence ?? nextSequence,
     clock: env.clock,
     uuid: env.uuid,
+    snowflake: env.snowflake,
     allowPreKeys: true, // 前置才许用 $request / $exists
   };
 
@@ -350,7 +337,13 @@ async function projectCreate(env: Env, p: Extract<Planned, { kind: "create" }>, 
       await driver.insert(entry.connection, entry.table, row); // 未映射的 pk 由源库自生
       out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
     } catch (e) {
-      out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
+      // 无状态化后无串行队列：并发 create 的幂等从"队列串行"变为"源表 identity 列唯一索引 + 插入失败重查兜底"。
+      // 不嗅探错误文案：插入失败就重查一次，查到了 = 幂等命中（并发者已插），查不到 = 原样报错。
+      if (await alreadyInserted(env, p, entry, vals)) {
+        out.push({ source: srcName, table: entry.table, op: "insert", ok: true, note: MSG.noteAlreadyInserted });
+      } else {
+        out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });
+      }
     }
   }
   return out;

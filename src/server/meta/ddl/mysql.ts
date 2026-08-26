@@ -1,5 +1,5 @@
 // 元库 DDL（MySQL 方言）——建库单源：一种数据库一个文件（sqlite.ts 同构手写，不做字符串替换派生）。
-// 不兼容旧库：老库直接删掉重建。
+// 旧库不重建：启动时按 information_schema 判列缺失，跑本文件末尾的 ALTER 迁移（backends.ts 调用）。
 // 注释纪律：注释只写一次，在 COMMENT 子句里（源码可读 + 进 information_schema 元数据，工具可查）；
 // sqlite.ts 没有 COMMENT 语法，同一份文本在那边是行内 -- 注释——两边对齐维护，sqlite 是源、本文件是投影。
 // 与 sqlite.ts 的方言差异（全部刻意，改之前先读这段）：
@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS onto_version (
   origin TEXT NOT NULL DEFAULT ('publish') COMMENT '恒 publish（工作行带默认值，不读它）；rollback 行只见于历史库',
   note TEXT COMMENT '发布说明',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  rev INT NOT NULL DEFAULT 0 COMMENT '工作行的草稿修订号（编号行恒 0，不读它）：CAS 冲突检测与 ETag 的源',
+  draft_key BIGINT GENERATED ALWAYS AS (CASE WHEN version IS NULL THEN workspace_id END) VIRTUAL COMMENT '工作行唯一锚（编号行为 NULL 不参与；VIRTUAL 与 SQLite 方言对齐，只用于唯一索引）',
   UNIQUE (workspace_id, version),
+  UNIQUE KEY uq_draft_key (draft_key),
   FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='版本链 + 工作行：编号行是不可变历史；version IS NULL 的是工作行（每空间恰一行的可变头）';
 CREATE TABLE IF NOT EXISTS conn_source (
@@ -123,11 +126,12 @@ CREATE TABLE IF NOT EXISTS log_action (
   INDEX idx_log_action_ws_time (workspace_id, created_at),
   FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='动作留痕';
-CREATE TABLE IF NOT EXISTS meta_seq (
-  workspace_id BIGINT NOT NULL COMMENT '所属空间',
-  name VARCHAR(191) NOT NULL COMMENT '序列名（如 appt_no）；按空间分开，各自起号',
-  value INT NOT NULL COMMENT '当前已发到几号',
-  PRIMARY KEY (workspace_id, name),
-  FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发号器：generate 的 sequence 片段按名取号';
 `;
+
+/* ---------- 旧库迁移（无状态化：工作行补 rev / draft_key 两列 + 唯一索引；meta_seq 计数器表随雪花发号废弃） ----------
+ * 新库由 MYSQL_DDL 直接建好，这里只补老库；幂等靠调用方按 information_schema 判列缺失再执行
+ * （MySQL 的 ADD COLUMN / CREATE INDEX 都没有 IF NOT EXISTS）。 */
+export const MYSQL_ALTER_REV = `ALTER TABLE onto_version ADD COLUMN rev INT NOT NULL DEFAULT 0`;
+export const MYSQL_ALTER_DRAFT_KEY = `ALTER TABLE onto_version ADD COLUMN draft_key BIGINT GENERATED ALWAYS AS (CASE WHEN version IS NULL THEN workspace_id END) VIRTUAL`;
+export const MYSQL_INDEX_DRAFT_KEY = `CREATE UNIQUE INDEX uq_draft_key ON onto_version (draft_key)`;
+export const MYSQL_DROP_SEQ = `DROP TABLE IF EXISTS meta_seq`;

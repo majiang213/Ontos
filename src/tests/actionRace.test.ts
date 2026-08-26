@@ -1,10 +1,10 @@
-// 动作并发原子性回归（R7 卡 1）：
-// ① nextSeq 并发出号不重（旧形态 upsert→select 两句之间可交错，并发必重号——本测试在旧实现下确定性失败）；
-// ② 并发重发同一 create 动作只插一行（旧裸奔形态两个都过查重、插重复行）。
-// 串行化在 runAction 的每空间队列（runtime.actionTails），发号原子性在 meta/stores/seq。
+// 动作并发原子性回归（无状态化后语义）：
+// ① 雪花发号：同实例同毫秒序列递增不撞；不同实例（不同 instanceId）同毫秒不撞——无共享计数器，无需协调；
+// ② 并发重发同一 create 动作只插一行：幂等从"进程内队列串行"变为"源表 identity 列唯一索引 + 插入失败重查兜底"。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupRuntime, draftEngine, meta, setupRuntime, testEnv } from "./helpers";
+import { cleanupRuntime, draftEngine, setupRuntime, testEnv } from "./helpers";
+import { makeSnowflake } from "../server/infra/snowflake";
 
 const WORKSPACE = "test";
 
@@ -17,30 +17,35 @@ afterEach(async () => {
 });
 
 describe("动作并发原子性", () => {
-  it("nextSeq 并发 10 个：不重号（恰好 1..10 各一次）", async () => {
-    const m = await meta();
-    const nums = await Promise.all(Array.from({ length: 10 }, () => m.nextSeq(WORKSPACE, "race_key")));
-    expect([...nums].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  it("雪花发号：同实例同毫秒序列递增不撞；不同实例同毫秒不撞", () => {
+    const clock = () => 1787616000; // 固定时钟：所有调用同一毫秒
+    const a = makeSnowflake(clock, 1);
+    const b = makeSnowflake(clock, 2);
+    const first = a();
+    expect(a()).not.toBe(first); // 同实例同毫秒：序列递增
+    expect(a()).not.toBe(first);
+    expect(b()).not.toBe(a()); // 不同实例同毫秒：实例位不同
+    const c = makeSnowflake(clock, 3);
+    const all = Array.from({ length: 101 }, () => c()); // 同一实例连续 101 个
+    expect(new Set(all).size).toBe(all.length); // 同实例同毫秒：序列位 12 位递增，远未耗尽
   });
 
-  it("并发重发同一 create（登记新设备）：先到的插入，后到的被前置拦（各源已有此序列号）", async () => {
+  it("并发重发同一 create（登记新设备）：两次都 ok、源表恰一行、输的那次带幂等 note", async () => {
     const { runAction } = await import("../server/features/action/action");
     const { getPublished } = await draftEngine();
     const { getDriverRegistry } = await import("../server/infra/connections");
     const env = testEnv();
-    const m = await meta();
     const config = (await getPublished(WORKSPACE)).config;
     const registry = await getDriverRegistry(WORKSPACE);
-    // register：create equipment，serial_no 来自 identity——幂等键就是它，是队列护住的那条 check-then-act
-    // SN-90002 各源都没有（$exists: false 前置才过）；串行后第二个看到已插入的行，前置 $exists:false 拦下
+    // register：create equipment，serial_no 来自 identity——幂等键就是它（device.serial_no 有 UNIQUE）
+    // SN-90002 各源都没有（$exists: false 前置才过）；并发下两个都过前置，插入时唯一索引拦下后到者，
+    // 重查发现行已存在 → 幂等命中（noteAlreadyInserted），源库恰一行
     const req = { action: "register", object: "equipment", identity: "SN-90002", request: { name: "竞态机床", dept: "D03" } };
-    const call = () => runAction(env, config, registry, req, { workspace: WORKSPACE, nextSequence: (k, s) => m.nextSeq(WORKSPACE, k, s) });
+    const call = () => runAction(env, config, registry, req);
     const [r1, r2] = await Promise.all([call(), call()]);
-    // 旧裸奔形态：两个都过查重、都真插（device 表两行同 serial_no）；串行后：一成一拒
-    const oks = [r1.ok, r2.ok].sort();
-    expect(oks).toEqual([false, true]);
-    const rejected = r1.ok ? r2 : r1;
-    expect(rejected.stage).toBe("pre");
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    expect([r1, r2].filter((r) => r.projections.some((p) => p.note !== undefined)).length).toBe(1); // 恰好一个带幂等 note
     const rows = await registry.select("device_sys", "device", ["serial_no"], [{ column: "serial_no", op: "eq", value: "SN-90002" }]);
     expect(rows.length).toBe(1); // 源库恰一行，没有重复业务行
   });

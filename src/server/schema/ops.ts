@@ -77,7 +77,7 @@ const setActionOp = z.object({ op: z.literal("set_action"), object: z.string(), 
 const removeActionOp = z.object({ op: z.literal("remove_action"), object: z.string(), name: z.string() });
 
 /** 界面状态 op（摆位/弯折）：唯一名单。不写本体——mcpDraftOpSchema 不含（Agent 不写界面状态）、
- *  affectedNames 返回空、editDraft 只落库不校验不加 rev。钉点不是独立 op：随建线/改接的 pins 键同车。 */
+ *  affectedNames 返回空、editDraft 只落库不校验（不算内容改动；落库仍 bump rev，内容写与界面写互相 CAS 检测）。钉点不是独立 op：随建线/改接的 pins 键同车。 */
 export const UI_STATE_OPS = ["save_layout", "save_edge_bend"] as const;
 export const isUiStateOp = (op: string): op is (typeof UI_STATE_OPS)[number] => (UI_STATE_OPS as readonly string[]).includes(op);
 

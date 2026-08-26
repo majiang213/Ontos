@@ -133,9 +133,9 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
     const s = await draftEngine();
     const r1 = await get("ontology", undefined, TEST);
     expect(r1.status).toBe(200);
-    expect(r1.data.rev).toBe(s.getRev(TEST));
+    expect(r1.data.rev).toBe(await s.getRev(TEST));
     const etag = r1.headers.get("etag");
-    expect(etag).toBe(`"test-${s.getRev(TEST)}"`);
+    expect(etag).toBe(`"test-${await s.getRev(TEST)}"`);
     expect(r1.headers.get("cache-control")).toBe("no-store");
     // 命中：304 空体，同样带 no-store 与同一 ETag
     const r2 = await get("ontology", { "if-none-match": etag! }, TEST);
@@ -146,7 +146,7 @@ describe("GET /api/ontology：rev + ETag 监视器口径", () => {
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST);
     const r3 = await get("ontology", { "if-none-match": etag! }, TEST);
     expect(r3.status).toBe(200);
-    expect(r3.data.rev).toBe(s.getRev(TEST));
+    expect(r3.data.rev).toBe(await s.getRev(TEST));
     expect(r3.data.object_types.vendor).toBeDefined();
   });
 

@@ -69,8 +69,6 @@ export async function draftEngine() {
     getDraft: (workspace?: string) => current.getDraft(engineEnv(), workspace),
     getPublished: (workspace?: string) => current.getPublished(engineEnv(), workspace),
     getRev: (workspace?: string) => current.getRev(engineEnv(), workspace),
-    storeOf: (workspace: string) => current.storeOf(engineEnv(), workspace),
-    enqueue: (workspace: string, task: () => Promise<unknown>) => current.enqueue(engineEnv(), workspace, task),
     publish: (workspace?: string) => versions.publish(engineEnv(), workspace),
     discard: (workspace?: string) => versions.discard(engineEnv(), workspace),
     listVersions: (workspace?: string) => versions.listVersions(engineEnv(), workspace),
