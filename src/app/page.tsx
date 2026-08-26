@@ -2,7 +2,7 @@
 // 左上角是工作空间切换器：空间 = 共享元库里按 workspace_id 隔开的一整套配置与历史。
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { CaretDown, Check, Plus } from "@phosphor-icons/react";
 import CanvasPage from "@/components/CanvasPage";
 import { apiGet, apiPost, setWorkspace } from "@/components/workspaceClient";
@@ -13,16 +13,17 @@ export default function Home() {
     setWorkspace(w); // 全局单值先换，再按 key 重挂画布
     setWorkspaceState(w);
   }, []);
+  const brand: ReactNode = (
+    <>
+      <span className="nav-brand">Ontos</span>
+      <span className="nav-sha" title="当前代码版本（git 短 hash）">{process.env.NEXT_PUBLIC_GIT_SHA}</span>
+      <WorkspaceSwitcher workspace={workspace} onChange={switchWorkspace} />
+    </>
+  );
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* 左上角：品牌 + 空间切换器（全局） */}
-      <div style={{ position: "fixed", top: 14, left: 16, zIndex: 30, display: "flex", gap: 8, alignItems: "center" }}>
-        <span className="nav-brand">Ontos</span>
-        <span className="nav-sha" style={{ fontSize: 10, color: "var(--ink-3)", userSelect: "none" }} title="当前代码版本（git 短 hash）">{process.env.NEXT_PUBLIC_GIT_SHA}</span>
-        <WorkspaceSwitcher workspace={workspace} onChange={switchWorkspace} />
-      </div>
-      {/* 切空间按 key 重挂（换一整套配置与历史） */}
-      <CanvasPage key={workspace} />
+      {/* 切空间按 key 重挂（换一整套配置与历史）；品牌和入口在左上同一条工具条 */}
+      <CanvasPage key={workspace} brand={brand} />
     </div>
   );
 }

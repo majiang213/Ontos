@@ -93,7 +93,7 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
   };
 
   return (
-    <div className="float-card float-tl" style={{ top: 120, width: 440 }}>
+    <div className="float-card float-tl dock-follow" style={{ width: 440 }}>
       <Bezel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>验收问题集</span>

@@ -28,7 +28,7 @@ export default function VersionsCard({
     return () => { alive = false; };
   }, [onError]);
   return (
-    <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
+    <div className="float-card float-tl dock-follow" style={{ width: 300 }}>
       <Bezel>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>版本历史</span>

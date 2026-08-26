@@ -79,7 +79,12 @@ input { font-family: inherit; outline: none; }
   font-family: var(--font-serif);
   font-size: 15px;
   letter-spacing: 0.01em;
-  padding: 4px 12px 4px 14px;
+  padding: 4px 8px 4px 10px;
+}
+.nav-sha {
+  font-size: 10px;
+  color: var(--ink-3);
+  user-select: none;
 }
 /* ---------- 空间切换器（触发器 + 下拉面板） ---------- */
 .workspace-trigger {
@@ -206,6 +211,11 @@ input { font-family: inherit; outline: none; }
 .btn:hover { border-color: var(--line-strong); box-shadow: var(--shadow-lift); transform: translateY(-1px); }
 .btn:active { transform: scale(0.98); }
 .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+.btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
 
 .btn-cta {
   display: inline-flex;
@@ -222,6 +232,8 @@ input { font-family: inherit; outline: none; }
 }
 .btn-cta:hover { background: var(--accent-ink); }
 .btn-cta:active { transform: scale(0.98); }
+.btn-cta:disabled { opacity: 0.45; cursor: default; transform: none; }
+.btn-cta:disabled:hover { background: var(--accent); }
 .btn-cta .ico {
   display: inline-flex;
   align-items: center;
@@ -233,6 +245,7 @@ input { font-family: inherit; outline: none; }
   transition: transform var(--t-fast);
 }
 .btn-cta:hover .ico { transform: translate(2px, -2px); }
+.btn-cta:disabled:hover .ico { transform: none; }
 
 /* ---------- 画布节点 ---------- */
 .node-shell {
@@ -338,6 +351,9 @@ input { font-family: inherit; outline: none; }
 .react-flow__controls { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow-soft); }
 .react-flow__controls button { background: var(--panel); border-bottom: 1px solid var(--hairline); color: var(--ink-2); }
 .react-flow__controls button:hover { background: var(--panel-2); }
+/* 缩放在左下，表结构贴它右侧，不要叠在同一角 */
+.react-flow__panel.bottom.left { left: 16px; bottom: 18px; }
+.schema-toggle { bottom: 18px; left: 68px; }
 .react-flow__attribution { display: none; }
 
 /* ---------- 浮动卡 ---------- */
@@ -348,6 +364,45 @@ input { font-family: inherit; outline: none; }
 }
 .float-tl { top: 76px; left: 16px; }
 .float-tr { top: 76px; right: 16px; }
+.float-tl.dock { top: 14px; z-index: 30; }
+.float-tl.dock-follow { top: 68px; z-index: 30; }
+
+/* 左上工具条：一条，关卡用按钮、其余用文字，竖线隔开几组 */
+.dock { max-width: calc(100vw - 32px); }
+.dock-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dock-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+.dock-split {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  margin: 0 6px;
+  background: var(--hairline-strong);
+  flex-shrink: 0;
+}
+.dock-bar .btn { padding: 6px 12px; font-size: 12px; }
+.dock-bar .btn-cta { font-size: 12px; padding: 6px 12px; }
+.dock-link {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-2);
+  padding: 5px 8px;
+  border-radius: 8px;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.dock-link:hover { color: var(--ink); background: var(--panel-2); }
+.dock-link.is-on { color: var(--accent-ink); background: var(--accent-soft); }
 .float-bc { bottom: 18px; left: 50%; translate: -50% 0; max-width: calc(100vw - 24px); } /* translate 属性居中，与 transform 入场动画解耦；窄屏不溢出 */
 
 /* 画布节点入场：动内壳不动节点——xyflow 的定位 transform 在节点上，动画改它会覆盖定位（新节点闪现堆叠） */
@@ -434,6 +489,146 @@ select.ctl { background: var(--panel); }
 }
 .chip:hover { background: var(--panel); color: var(--ink); transform: translateY(-1px); }
 
+/* ---------- 待确认面板（底中决策单：格子选唯一键 + 钉住的确认条 + 锁住的疑似重复托盘） ---------- */
+.decide {
+  width: min(860px, calc(100vw - 32px));
+  max-height: 78%;
+}
+.decide .bezel-core {
+  display: flex;
+  flex-direction: column;
+  max-height: 72vh;
+  min-width: 0;
+  overflow: hidden;
+}
+.decide-head,
+.decide-foot { flex-shrink: 0; }
+.decide-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px 8px;
+}
+.decide-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.decide-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 8px;
+}
+.decide-kicker {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.decide-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.decide-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.decide-cell:focus-within { outline: 1px solid var(--accent); }
+.decide-cell-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.decide-obj {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.decide-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.decide-select { position: relative; display: block; min-width: 0; }
+.decide-select::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ink-2);
+  border-bottom: 1.5px solid var(--ink-2);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+.decide-cell select.ctl {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 34px;
+  font-size: 13px;
+  padding-right: 28px;
+  border-radius: 10px;
+  border-color: var(--line-strong);
+  background: var(--panel-2);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.decide-empty {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.decide-lock {
+  flex-shrink: 0;
+  align-self: stretch;
+  min-width: 0;
+  margin: 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.decide-lock.is-open {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 36vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.decide-lock-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.decide-lock.is-open .decide-lock-title { color: var(--ink); }
+.decide-lock-note {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 4px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.decide-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--hairline);
+}
+
 /* ---------- 响应式：窄视口阶梯收窄 ---------- */
 @media (max-width: 900px) {
   .nav-sha { display: none; } /* 窄屏隐藏版本号 */
@@ -443,7 +638,15 @@ select.ctl { background: var(--panel); }
 @media (max-width: 768px) {
   .float-tl, .float-tr { left: 12px; right: 12px; }
   .float-tr { top: auto; bottom: 76px; }
+  .float-tl.dock-follow { top: 120px; }
+  .dock { max-width: calc(100vw - 24px); }
+  .dock-split { display: none; }
   .node-shell { width: min(288px, calc(100vw - 40px)); }
   /* 顶栏瘦身（版本号已在 900px 档隐藏） */
   .nav-brand { padding: 4px 4px 4px 0; }
+  .decide-grid { grid-template-columns: minmax(0, 1fr); }
+  .decide-head, .decide-body, .decide-foot { padding-left: 12px; padding-right: 12px; }
+  .decide-lock { margin-left: 12px; margin-right: 12px; }
+  .decide-foot { justify-content: stretch; }
+  .decide-foot .btn-cta { width: 100%; justify-content: center; }
 }

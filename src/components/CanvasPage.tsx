@@ -1,12 +1,12 @@
 // 本体构建页 —— 纯画布页（无对话列）。
 // 画布内容 = 工作副本（已发布 + 未发布改动）；发布走「发布 vN+1 / 放弃」；表结构收进底部抽屉。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import OntologyCanvas from "./canvas/OntologyCanvas";
 import type { CanvasLink, CanvasObject } from "./canvas/layout";
 import type { BorderPin } from "./canvas/geometry";
-import PairCard from "./cards/PairCard";
 import Bezel from "./cards/Bezel";
+import DecisionPanel, { identityRows } from "./cards/DecisionPanel";
 import { ApiError, apiGet, apiPost, apiDel } from "./workspaceClient";
 import QuestionsCard from "./cards/QuestionsCard";
 import { ConnectForm, CreateForm, LinkForm } from "./forms/forms";
@@ -32,7 +32,7 @@ interface IntrospectResp {
 
 /** 浮卡（「同一时间只浮一张卡」的类型表达）：开一张 = 收其余，互斥由联合类型保证，不再手工维护。
  *  左上组（版本/新建/连接/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
- *  例外：底中裁决面板与底部表结构抽屉是独立区域，不进联合。 */
+ *  例外：底中待确认面板与底部表结构抽屉是独立区域，不进联合。 */
 type Card =
   | { kind: "versions" }
   | { kind: "create" }
@@ -43,7 +43,7 @@ type Card =
   | { kind: "object"; name: string } // 对象编辑卡
   | null;
 
-export default function CanvasPage() {
+export default function CanvasPage({ brand }: { brand: ReactNode }) {
   const [ont, setOnt] = useState<OntologyResp | null>(null);
   const [schema, setSchema] = useState<IntrospectResp | null>(null);
   const [card, setCard] = useState<Card>(null);
@@ -144,6 +144,38 @@ export default function CanvasPage() {
     [withLocalWrite, refresh]
   );
 
+  /** 待确认面板「确认唯一键」：有改动的对象逐个 set_identity，落草稿后重拉疑似重复；失败返回 false（面板不解锁）。 */
+  const confirmIdentity = useCallback(
+    async (selections: Record<string, string>): Promise<boolean> => {
+      if (Object.values(selections).some((v) => !v)) return false; // 未设置的不落库：有源类取消唯一键会被校验闸拒
+      const changed = Object.entries(selections).filter(
+        ([name, v]) => v !== (ont?.object_types?.[name]?.identity ?? "")
+      );
+      const ok = await withLocalWrite(async () => {
+        for (const [name, v] of changed) {
+          await apiPost("/api/edit_draft", { op: "set_identity", object: name, name: v });
+        }
+        await refresh();
+        await loadPairs(); // 无改动也重拉：区块二要的是当前草稿算出的候选对
+      });
+      if (ok && changed.length > 0) showToast(`唯一键已定：${changed.map(([n, v]) => `${n} → ${v}`).join("、")}`);
+      return ok;
+    },
+    [ont, withLocalWrite, refresh, loadPairs, showToast]
+  );
+
+  /** 裁决一条后：重拉候选对（被合并撤掉的类，挂着它的条目随之消失）+ 刷新画布。空 msg = 不动草稿的结论。 */
+  const onPairDone = useCallback(
+    (msg: string) => {
+      if (msg) showToast(msg);
+      void withLocalWrite(async () => {
+        await loadPairs();
+        await refresh();
+      });
+    },
+    [showToast, withLocalWrite, loadPairs, refresh]
+  );
+
   const saveLayout = useCallback(
     (positions: Record<string, { x: number; y: number }>) => {
       void op({ op: "save_layout", positions });
@@ -213,7 +245,7 @@ export default function CanvasPage() {
       await withLocalWrite(async () => {
         const { object_types } = await apiPost<{ object_types: Record<string, unknown> }>("/api/propose_objects", { tables });
         await apiPost("/api/edit_draft", { op: "import_objects", objects: object_types });
-        showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）`);
+        showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）。点「待确认」定唯一键`);
         setDrawerOpen(false);
         await refresh();
       });
@@ -293,50 +325,34 @@ export default function CanvasPage() {
         onLayoutChange={saveLayout}
       />
 
-      {/* 左上：发布状态 + 入口 */}
-      <div className="float-card float-tl" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", maxWidth: "calc(100vw - 32px)" }}>
-          <button
-            className="eyebrow"
-            style={{ cursor: "pointer", border: "none" }}
-            title="版本历史"
-            onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })} // toggle：再点收起；列表 VersionsCard 自取
-          >
-            {ont ? versionLabel(ont) : "已发布 v…"} ▾
-          </button>
-          {/* 发布常驻工具条、永可点：有改动时是「发布 vN+1 / 放弃」，没改动点一下给提示（不置灰） */}
-          {ont?.dirty ? (
-            <>
-              {/* title 点名将发生的变化：将删除的类 + 动作差集（规则在 ontFrame.publishTitle） */}
-              <button
-                className="btn-cta"
-                style={{ fontSize: 12, padding: "6px 10px 6px 14px" }}
-                title={publishTitle(ont)}
-                onClick={publish}
-                disabled={publishing}
-              >
-                发布 v{(ont?.version ?? 1) + 1}
-              </button>
-              <button className="btn" onClick={discard} disabled={publishing}>放弃</button>
-            </>
-          ) : (
-            <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>
-          )}
-          <button className="btn" onClick={() => setCard({ kind: "create" })}>新建对象</button>
-          <button className="btn" onClick={() => setCard({ kind: "connect" })}>连接数据源</button>
-          <button
-            className="btn"
-            onClick={async () => {
-              try {
-                await loadPairs();
-                setPanelOpen(true);
-              } catch (e) {
-                netErr(e);
-              }
-            }}
-          >
-            疑似重复
-          </button>
-          <button className="btn" onClick={() => (card?.kind === "questions" ? setCard(null) : setCard({ kind: "questions" }))}>验收问题集</button>
+      {/* 左上一条工具条：品牌和入口同一行。顺序是连接 → 待确认 → 发布；关卡用按钮，其余用文字。 */}
+      <div className="float-card float-tl dock">
+        <Bezel pad="6px 8px">
+          <div className="dock-bar">
+            <div className="dock-brand">{brand}</div>
+            <i className="dock-split" aria-hidden />
+            <button className={`dock-link${card?.kind === "connect" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "connect" ? null : { kind: "connect" })}>连接数据源</button>
+            <button className={`dock-link${card?.kind === "create" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "create" ? null : { kind: "create" })}>新建对象</button>
+            <i className="dock-split" aria-hidden />
+            <button className={`btn${panelOpen ? " is-on" : ""}`} onClick={() => setPanelOpen((v) => !v)}>待确认</button>
+            <i className="dock-split" aria-hidden />
+            <button className={`dock-link${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })}>
+              {ont ? versionLabel(ont) : "已发布 v…"} ▾
+            </button>
+            {ont?.dirty ? (
+              <>
+                <button className="btn-cta" title={publishTitle(ont)} onClick={publish} disabled={publishing}>
+                  发布 v{(ont?.version ?? 1) + 1}
+                </button>
+                <button className="btn" onClick={discard} disabled={publishing}>放弃</button>
+              </>
+            ) : (
+              <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>
+            )}
+            <i className="dock-split" aria-hidden />
+            <button className={`dock-link${card?.kind === "questions" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "questions" ? null : { kind: "questions" })}>验收问题集</button>
+          </div>
+        </Bezel>
       </div>
 
       {/* 空画布引导：没有任何对象时告诉人两条起步路径 */}
@@ -358,36 +374,19 @@ export default function CanvasPage() {
       {/* 验收问题集卡 */}
       {card?.kind === "questions" && <QuestionsCard onClose={() => setCard(null)} showToast={showToast} version={ont?.version} />}
 
-      {/* 底中：裁决面板（疑似重复）。打开时优先于发布条——同一时间底中只有这一张卡 */}
+      {/* 底中：待确认面板（唯一键 → 疑似重复，两段解锁）。打开时优先于发布条——同一时间底中只有这一张卡 */}
       {panelOpen && (
-        <div className="float-card float-bc" style={{ width: 760, maxHeight: "78%" }}>
-          <Bezel coreStyle={{ overflow: "auto", maxHeight: "72vh" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>疑似重复的对象（{pairs.length} 处）</span>
-              <button className="chip" aria-label="关闭" onClick={() => setPanelOpen(false)}>✕</button>
-            </div>
-            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>这些跨源对象可能是同一批现实对象，两两列出，请你逐条定夺；三个以上重复时会出多条，裁完一条会自动重算。</div>
-            {pairs.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 8 }}>没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
-            {pairs.map((p) => (
-              <PairCard
-                key={`${p.class_a}|${p.class_b}`}
-                pair={p}
-                onDone={(msg) => {
-                  if (msg) showToast(msg); // 空串 = 不动草稿的结论（仅名称相似/跳过），不弹提示
-                  // 裁决也走 withLocalWrite：不然人刚裁的「同一」会被轮询 toast 成外部改动
-                  void withLocalWrite(async () => {
-                    await loadPairs(); // 重新拉一遍：被合并撤掉的类，挂着它的条目随之消失（三个以上重复时会连环）
-                    await refresh();
-                  });
-                }}
-              />
-            ))}
-          </Bezel>
-        </div>
+        <DecisionPanel
+          rows={identityRows(ont?.object_types ?? {}, Object.keys(ont?.object_types ?? {}))}
+          pairs={pairs}
+          onConfirmIdentity={confirmIdentity}
+          onPairDone={onPairDone}
+          onClose={() => setPanelOpen(false)}
+        />
       )}
 
-      {/* 左下：表结构抽屉开关（常驻） */}
-      <div className="float-card" style={{ bottom: 18, left: 16 }}>
+      {/* 左下：表结构抽屉开关（常驻）。贴缩放钮右侧，见 .schema-toggle */}
+      <div className="float-card schema-toggle">
         <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
       </div>
 
@@ -400,7 +399,7 @@ export default function CanvasPage() {
 
       {/* 连接数据源卡（左上） */}
       {card?.kind === "connect" && (
-        <div className="float-card float-tl" style={{ top: 120, width: 420, maxWidth: "calc(100vw - 24px)" }}>
+        <div className="float-card float-tl dock-follow" style={{ width: 420, maxWidth: "calc(100vw - 24px)" }}>
           <Bezel>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>连接数据源</div>
             <ConnectForm
@@ -422,7 +421,7 @@ export default function CanvasPage() {
 
       {/* 新建对象卡（左上） */}
       {card?.kind === "create" && (
-        <div className="float-card float-tl" style={{ top: 120, width: 300 }}>
+        <div className="float-card float-tl dock-follow" style={{ width: 300 }}>
           <Bezel>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>新建对象</div>
             <CreateForm
