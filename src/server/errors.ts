@@ -262,6 +262,7 @@ export const MSG = {
   expectRowsMismatch: (n: number, got: number) => `期望 ${n} 行，实得 ${got} 行`,
   expectTotalMismatch: (n: number, got: number) => `期望合计 ${n}，实得 ${got}`,
   expectTruncated: (limit: number, n: number) => `查询带了截断 limit=${limit}，不能和期望 ${n} 比`,
+  expectMultiMetric: (count: number) => `聚合带了 ${count} 条指标，没法和单个期望数字比——一条问题只留一条指标`,
   expectFieldMiss: (field: string, value: string, got: number) => `没有一行的「${field}」等于「${value}」（实查 ${got} 行）`,
   internalError: "内部错误",
   unauthorizedWrite: "未授权：写操作需要有效的令牌",

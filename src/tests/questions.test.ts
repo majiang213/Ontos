@@ -45,6 +45,9 @@ describe("期望结果写法", () => {
     const list: QueryRequest = { object: "equipment", limit: 5 };
     expect(checkExpected("10", Array.from({ length: 5 }, () => ({})), list)).toContain("截断 limit=5");
     expect(checkExpected("5", Array.from({ length: 5 }, () => ({})), { object: "equipment" })).toBeNull(); // 没带 limit 照比行数
+    // 多指标聚合：单个期望数字没法对，明说（不静默按第一条比）
+    const multi: QueryRequest = { object: "equipment", aggregate: { group_by: ["dept"], metrics: [{ count: "*" }, { avg: "weight" }] } };
+    expect(checkExpected("97", [{ count: 97, avg_weight: 1 }], multi)).toContain("一条问题只留一条指标");
   });
 });
 

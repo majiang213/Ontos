@@ -41,15 +41,15 @@ export function checkExpected(raw: string | undefined, rows: Record<string, unkn
   if (e === null) return EXPECTED_HINT;
   if (e.kind === "any") return null;
   if (e.kind === "rows") {
-    if (queryReq?.aggregate) {
-      const metric = queryReq.aggregate.metrics[0] as Record<string, string> | undefined;
-      if (!metric) return null; // 形状闸在 schema 层，这里防御
-      const [op, field] = Object.entries(metric)[0];
+    if (queryReq.aggregate) {
+      const metrics = queryReq.aggregate.metrics; // schema 已保证非空、指标名不重复；多条指标没法对单个期望数字
+      if (metrics.length !== 1) return MSG.expectMultiMetric(metrics.length);
+      const [op, field] = Object.entries(metrics[0])[0];
       const key = metricColumn(op, field);
       const total = rows.reduce((s, r) => s + Number(r[key] ?? 0), 0);
       return total === e.n ? null : MSG.expectTotalMismatch(e.n, total);
     }
-    if (queryReq?.limit != null && queryReq.limit < e.n) return MSG.expectTruncated(queryReq.limit, e.n);
+    if (queryReq.limit != null && queryReq.limit < e.n) return MSG.expectTruncated(queryReq.limit, e.n);
     return rows.length === e.n ? null : MSG.expectRowsMismatch(e.n, rows.length);
   }
   return rows.some((r) => String(r[e.field] ?? "").trim() === e.value) ? null : MSG.expectFieldMiss(e.field, e.value, rows.length);

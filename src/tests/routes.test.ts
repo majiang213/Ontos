@@ -119,12 +119,14 @@ describe("propose_objects：只建议不落地", () => {
 
   it("跨次生成撞名：草稿已有 customer 时改成 crm_sys_customer 再交还，落地不 422；不占用仍用表名", async () => {
     const s = await draftEngine();
-    // 挂一个带 customer 表的连接（走查第三波的情形：上一波已生成销售客户 customer）
+    // 挂一个带 customer 表的连接（走查第三波的情形：上一波已生成销售客户 customer）；用完注销，不留进共享注册表
     const { getDriverRegistry } = await import("../server/infra/connections");
     const { SqliteDriver } = await import("../server/infra/sqliteDriver");
+    const registry = await getDriverRegistry(TEST);
     const d = new SqliteDriver();
     d.register("crm_sys").exec(`CREATE TABLE customer (cust_no TEXT PRIMARY KEY, name TEXT)`);
-    (await getDriverRegistry(TEST)).register("crm_sys", d);
+    registry.register("crm_sys", d);
+    try {
     await s.editDraft(
       { op: "import_objects", objects: { customer: { kind: "thing", identity: "cust_no", properties: { cust_no: { type: "string" } } } } },
       TEST
@@ -149,6 +151,9 @@ describe("propose_objects：只建议不落地", () => {
     );
     expect(direct.status).toBe(422);
     expect(direct.data.error).toMatch(/类已存在/);
+    } finally {
+      registry.unregister("crm_sys"); // 挂进共享注册表的临时连接，用完摘掉
+    }
   });
 });
 

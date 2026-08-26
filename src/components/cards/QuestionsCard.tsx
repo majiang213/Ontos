@@ -70,7 +70,8 @@ export default function QuestionsCard({ onClose, showToast, version }: { onClose
       await load();
       showToast(`已换成 ${pack.questions.length} 条${pack.name}问题`);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "没换成"); // 中途失败也要说，再点一次重来
+      await load(); // 中途失败可能留下半包：先把真实状态拉回来，别显示旧列表
+      showToast(e instanceof Error ? e.message : "没换成"); // 再点一次重来（会先清空再装入）
     } finally {
       setActing(false);
     }

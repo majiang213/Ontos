@@ -77,11 +77,15 @@ export async function saveConnection(workspace: string, rec: ConnectionRec, test
       throw new ConnectionReject(MSG.demoSourceName(next.name));
     }
     registerSaved(registry, next);
-    // sidecar 严校验（表单路径，落库之前）：注释文件存在但读不出 → 拒，卸掉刚注册的驱动、不落库。
-    // 水合路径（registerFile）对同一情形只警告不加注释——第一次接入坏注释挡在表单，进程重启不会被一份坏 JSON 拖死。
-    if (next.type === "sqlite" && next.db_name && readSidecarComments(next.db_name).kind === "corrupt") {
+    // 注册后任何一步不过，都把注册表还回旧驱动（previous 在则重挂）——sidecar 严校验与内省测试共用这一个回退
+    const rollback = () => {
       registry.unregister(next.name);
       if (previous) registerSaved(registry, previous);
+    };
+    // sidecar 严校验（表单路径，落库之前）：注释文件存在但读不出 → 拒，不落库。
+    // 水合路径（registerFile）对同一情形只警告不加注释——第一次接入坏注释挡在表单，进程重启不会被一份坏 JSON 拖死。
+    if (next.type === "sqlite" && next.db_name && readSidecarComments(next.db_name).kind === "corrupt") {
+      rollback();
       throw new ConnectionReject(MSG.sidecarCommentsUnreadable(next.db_name), "bad_request");
     }
     let tables: TableInfo[] | undefined;
@@ -89,13 +93,11 @@ export async function saveConnection(workspace: string, rec: ConnectionRec, test
       try {
         tables = await registry.introspect(next.name);
         if (tables.length === 0) {
-          registry.unregister(next.name);
-          if (previous) registerSaved(registry, previous);
+          rollback();
           return { ok: true as const, warning: MSG.connectedNoTables, tables, saved: false };
         }
       } catch (e) {
-        registry.unregister(next.name);
-        if (previous) registerSaved(registry, previous);
+        rollback();
         // 驱动报错含主机/路径/服务端细节，不原样出网（与 listTables 的净化同一条纪律）；raw 错误吞掉由 catch 兜底
         throw new ConnectionReject(MSG.connectFailed);
       }
