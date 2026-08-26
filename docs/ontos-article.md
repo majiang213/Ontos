@@ -980,7 +980,7 @@ flowchart TD
           - create:
               object: appointment           # 再新建一条任职
               properties:                   # 只写这次要赋的源列属性。held_by 靠 person_no 的 match 成立
-                appt_no: { from: generated }   # 属性名：任职编号。按该类该属性的计数器发号
+                appt_no: { from: generated }   # 属性名：任职编号。按雪花号发号（generate 的 { snowflake: true }）
                 person_no: { from: identity }  # 人员编号=请求顶上的 identity（如下面的 P001）
                 title: { from: request }       # 职务=request.title（如下面的「经理」）
                 dept: { from: request }        # 部门=request.dept（如下面的 D07）
@@ -1736,7 +1736,7 @@ object_types:
           - create:
               object: appointment
               properties:
-                appt_no: { from: generated }     # 任职编号（属性名，不是保留字）。计数器发号
+                appt_no: { from: generated }     # 任职编号（属性名，不是保留字）。雪花号发号
                 person_no: { from: identity }    # 人员编号=请求顶上的工号
                 title: { from: request }
                 dept: { from: request }

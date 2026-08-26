@@ -58,10 +58,10 @@ export class MetaStore {
   versionCanvas(workspace: string, version: number) {
     return this.versions.versionCanvas(workspace, version);
   }
-  getWorkingPack(workspace: string) {
+  getDraftPack(workspace: string) {
     return this.versions.getDraftPack(workspace);
   }
-  saveWorkingPack(workspace: string, pack: unknown, expectedRev: number, bump: boolean) {
+  saveDraftPack(workspace: string, pack: unknown, expectedRev: number, bump: boolean) {
     return this.versions.saveDraftPack(workspace, pack, expectedRev, bump);
   }
 

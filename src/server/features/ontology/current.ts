@@ -11,7 +11,7 @@ import { readWorkingCopy, type DraftState } from "./canvasPack";
 /** 草稿修订号：每次写 +1（内容 op、界面状态 op、发布/放弃/回滚都算），只加不回零；界面状态写也 bump，
  *  内容写与界面写才能互相被 CAS 检测。持久化在 onto_version 工作行的 rev 列：跨实例一致、重启不复位。 */
 export async function getRev(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<number> {
-  return (await env.meta.getWorkingPack(workspace))?.rev ?? 0;
+  return (await env.meta.getDraftPack(workspace))?.rev ?? 0;
 }
 
 async function loadPublished(env: EngineEnv, workspace: string): Promise<{ config: OntologyConfig; version: number }> {

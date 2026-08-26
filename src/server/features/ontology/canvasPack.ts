@@ -18,7 +18,7 @@ export interface DraftState {
   edgePins: Record<string, { source?: BorderPin; target?: BorderPin }>; // 线端点钉点（存同一列的 pins）；界面状态
 }
 
-/** 落库用的整包：config + 界面状态三键。三键必有值——「老内存态缺键」的补丁只有一个落点（current.getDraft 的 ??=）。 */
+/** 落库用的整包：config + 界面状态三键。三键必有值——水合侧由 readWorkingCopy 全量铺三键（缺键用已发布版后备）。 */
 export function canvasSnapshot(state: DraftState): { config: OntologyConfig; layout: DraftState["layout"]; edgeBends: DraftState["edgeBends"]; edgePins: DraftState["edgePins"] } {
   return { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins };
 }
@@ -64,13 +64,13 @@ export function applyPack(
  *  内容写与界面写互相 CAS 检测（否则内容写盖掉并发摆位）。
  *  返回保存后的 rev；冲突返回 null（调用方决定重试或抛「草稿已变」）。 */
 export async function persistWorkingCopy(env: EngineEnv, workspace: string, state: DraftState, expectedRev: number, bump: boolean): Promise<number | null> {
-  return env.meta.saveWorkingPack(workspace, canvasSnapshot(state), expectedRev, bump);
+  return env.meta.saveDraftPack(workspace, canvasSnapshot(state), expectedRev, bump);
 }
 
 /** 读工作行并水合成 DraftState；还没有工作行就从已发布造一行并落库——「空间恒有可变头」这个不变量由本函数维持。
  *  迁移降级：摆位-only 的老工作行本体用已发布（首次写入即补全 pack）；界面状态缺键用已发布版的画布包后备。 */
 export async function readWorkingCopy(env: EngineEnv, workspace: string, config: OntologyConfig, version: number): Promise<DraftState> {
-  const saved = await env.meta.getWorkingPack(workspace);
+  const saved = await env.meta.getDraftPack(workspace);
   // 界面状态的后备：最近已发布版的画布包（老行可能只有 yaml，那就空着，画布走 dagre）
   const pubPack = unpackCanvas((await env.meta.versionCanvas(workspace, version)) ?? {});
   const fallback = { layout: pubPack.layout ?? {}, edgeBends: pubPack.edgeBends ?? {}, edgePins: pubPack.edgePins ?? {} };

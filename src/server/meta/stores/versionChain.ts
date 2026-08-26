@@ -35,7 +35,7 @@ export class VersionChainStore extends ConcernStore {
   }
 
   /** 该版发布时的画布快照（对象 + 线 + 摆位）。旧行可能没有。
-   *  坏 JSON 按「没有画布包」降级（本体不丢、摆位走 dagre）——与 getWorkingPack 的硬炸不对称是刻意的：
+   *  坏 JSON 按「没有画布包」降级（本体不丢、摆位走 dagre）——与 getDraftPack 的硬炸不对称是刻意的：
    *  历史版本的界面状态丢了能活，当前工作副本读不回来不能活；降级留服务端诊断一行。 */
   async versionCanvas(workspace: string, version: number): Promise<unknown | undefined> {
     const id = await this.wsId(workspace);
@@ -78,7 +78,7 @@ export class VersionChainStore extends ConcernStore {
       [json, step, id, expectedRev]
     );
     if (updated > 0) return expectedRev + step;
-    const row = await this.backend.get(`SELECT id, rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
+    const row = await this.backend.get(`SELECT rev FROM onto_version WHERE workspace_id = ? AND version IS NULL`, [id]);
     if (!row) {
       try {
         await this.backend.run(`INSERT INTO onto_version (workspace_id, version, yaml, canvas_json, rev, origin) VALUES (?, NULL, '', ?, ?, 'publish')`, [id, json, expectedRev]);

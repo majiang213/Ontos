@@ -3,7 +3,8 @@
 // ③ 画布路径（无 base_rev）冲突自动重读重试：双方改动都在（合并）；④ UI 态 op 与内容 op 并发：内容推进 rev、UI 态重试成功。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupRuntime, setupRuntime, testEnv } from "./helpers";
+import { dump } from "js-yaml";
+import { cleanupRuntime, setupRuntime, testEnv, unwrap } from "./helpers";
 
 const WS = "test";
 
@@ -111,6 +112,71 @@ describe("无状态化（跨实例语义）", () => {
     // 草稿干净、已发布版本是新的
     expect((await getDraft(envA, WS)).dirty).toBe(false);
     expect((await getPublishedOf(envA)).version).toBe(before + 1);
+  });
+
+  it("发布撞版本号唯一且内容一致：按成功收尾，版本链无幽灵行", async () => {
+    const envA = testEnv();
+    const { editDraft } = await import("../server/features/ontology/editDraft");
+    const { publish } = await import("../server/features/ontology/versions");
+    const { getDraft } = await import("../server/features/ontology/current");
+
+    expect((await editDraft(envA, { op: "create_object", name: "vendor", kind: "thing" }, WS)).code).toBe(200);
+    const state = await getDraft(envA, WS);
+    const version = (await envA.meta.latestVersion(WS, "")).version + 1; // 与 publish 内部同一算法
+    // 模拟并发赢家：在我们插行前，先由「另一个实例」把同一份内容插成 N+1（publish 的 insertVersion 会撞 UNIQUE）
+    const meta = envA.meta;
+    const realInsert = meta.insertVersion.bind(meta);
+    let injected = false;
+    (meta as never as { insertVersion: typeof realInsert }).insertVersion = async (ws, v, yaml, origin, canvas) => {
+      if (!injected) {
+        injected = true;
+        await realInsert(ws, v, yaml, origin, canvas); // 赢家先落行
+      }
+      return realInsert(ws, v, yaml, origin, canvas); // 我们的插行撞 UNIQUE
+    };
+    const r = await publish(envA, WS);
+    expect(injected).toBe(true);
+    expect(r.code).toBe(200); // 内容一致 → 按成功收尾
+    expect(unwrap(r).version).toBe(version);
+    const versions = await envA.meta.listVersions(WS);
+    expect(versions.length).toBe(version); // 只前进一版，无幽灵行
+    expect((await getDraft(envA, WS)).dirty).toBe(false);
+  });
+
+  it("发布撞版本号唯一但内容已分叉（夹层写入）：422 草稿已变，不谎报已发布", async () => {
+    const envA = testEnv();
+    const { editDraft } = await import("../server/features/ontology/editDraft");
+    const { publish } = await import("../server/features/ontology/versions");
+    const { getDraft } = await import("../server/features/ontology/current");
+
+    expect((await editDraft(envA, { op: "create_object", name: "vendor", kind: "thing" }, WS)).code).toBe(200);
+    expect((await editDraft(envA, { op: "add_property", object: "vendor", name: "note", type: "string" }, WS)).code).toBe(200);
+    const state = await getDraft(envA, WS);
+    expect(state.draft.object_types.vendor.properties.note).toBeDefined(); // 我们的草稿：有 note
+    const version = (await envA.meta.latestVersion(WS, "")).version + 1;
+    // 模拟夹层写入：赢家落的是「旧内容」（没有 note）——yaml 与 canvas 一致地旧，我们的草稿已在此之后被编辑过
+    const divergent = structuredClone(state.draft);
+    delete divergent.object_types.vendor.properties.note;
+    const meta = envA.meta;
+    const realInsert = meta.insertVersion.bind(meta);
+    let injected = false;
+    (meta as never as { insertVersion: typeof realInsert }).insertVersion = async (ws, v, yaml, origin, canvas) => {
+      if (!injected) {
+        injected = true;
+        await realInsert(ws, v, dump(divergent), origin, { ...(canvas as object), config: divergent });
+      }
+      return realInsert(ws, v, yaml, origin, canvas);
+    };
+    const r = await publish(envA, WS);
+    expect(r.code).toBe(422);
+    expect(r.message).toMatch(/草稿已变/);
+    // 重读重发：草稿还在（内容未丢），重试发布成功且不覆盖赢家的版本行
+    expect((await getDraft(envA, WS)).draft.object_types.vendor.properties.note).toBeDefined(); // 我们编辑后的内容仍在草稿
+    const retry = await publish(envA, WS);
+    expect(retry.code).toBe(200);
+    expect(unwrap(retry).version).toBe(version + 1);
+    const versions = await envA.meta.listVersions(WS);
+    expect(versions.length).toBe(version + 1); // 赢家的 N+1 + 我们的 N+2，无幽灵行
   });
 });
 

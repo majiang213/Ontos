@@ -10,6 +10,7 @@ import { DEFAULT_WORKSPACE, seedYamlFor } from "../../infra/workspace";
 import { applyPack, canvasSnapshot, persistWorkingCopy, unpackCanvas } from "./canvasPack";
 import { commitDraft, validateFull } from "./commit";
 import { getDraft, getPublished, getRev } from "./current";
+import { sameConfig } from "./sameConfig";
 import { validateSemantics } from "./validate";
 
 export async function publish(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<Result<{ version: number }>> {
@@ -26,15 +27,22 @@ export async function publish(env: EngineEnv, workspace: string = DEFAULT_WORKSP
     const version = (await env.meta.latestVersion(workspace, seedYamlFor(workspace))).version + 1; // 版本号以库里的链为准
     state.baseVersion = version;
     // CAS 先赢、版本行后落：失败的发布不进链（否则 422 的发布已推进 MAX(version)，重试还留幽灵行）。
-    const saved = await commitDraft(env, workspace, state, expectedRev, true); // 已并进版本链：dirty 重算为 false，工作副本随之清空
+    // 此刻 dirty 对旧已发布重算仍为 true；版本行插完后读方按新已发布重算即 false（dirty 不落库、读时重算）。
+    const saved = await commitDraft(env, workspace, state, expectedRev, true); // 工作副本随之清空（CAS 消耗掉这一版）
     if (!saved) throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
     try {
       await env.meta.insertVersion(workspace, version, dump(config, { lineWidth: 120, noRefs: true }), "publish", canvasSnapshot(state)); // YAML 给问数；canvas_json 给画布回到这版
     } catch (e) {
-      // 并发双发布：两方先后都 CAS 成功，但只有一方能插 N+1。撞版本号唯一 = 另一方已把同一份草稿插成 N+1
-      //（双方都从同一工作行读出，内容必然相同）——按成功收尾，不回滚已消耗的工作行。非撞唯一则原样上抛。
+      // 并发发布撞版本号唯一：CAS 赢家只有一个能插行。撞上 = 另一方已把 N+1 插进链。
+      // 不能直接按成功收尾：夹层写入会让「我们发布的内容」与「版本行里的内容」分叉（对方插行后有人再编辑，
+      // 我们以新内容 CAS 获胜却撞上旧内容的版本行）——逐字比对，一致才按成功收尾，不一致则 422 让调用方重读重发。
       const latest = (await env.meta.latestVersion(workspace, seedYamlFor(workspace))).version;
       if (latest < version) throw e;
+      const snap = await env.meta.versionCanvas(workspace, version);
+      const rowConfig = snap !== undefined ? unpackCanvas(snap).config : undefined;
+      if (rowConfig === undefined || !sameConfig(rowConfig, state.draft)) {
+        throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
+      }
     }
     await fillDecisionVersions(env, version, workspace); // 裁决留痕的生效版本随发布回填
     return { code: 200, message: MSG.resultPublished(version), value: { version } };

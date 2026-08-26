@@ -64,7 +64,7 @@ describe("配置存储（工作副本与发布）", () => {
     // 绕过 editDraft 写坏草稿（无状态化后 getDraft 每次水合，必须显式落库），验证发布闸
     const state = await s.getDraft(WORKSPACE);
     state.draft.object_types.vendor.identity = "ghost";
-    await (await meta()).saveWorkingPack(WORKSPACE, { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins }, await s.getRev(WORKSPACE), false);
+    await (await meta()).saveDraftPack(WORKSPACE, { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins }, await s.getRev(WORKSPACE), false);
     await expectRejected(s.publish(WORKSPACE));
   });
 
@@ -186,7 +186,7 @@ describe("配置存储（工作副本与发布）", () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE);
     const store = await meta();
-    const saved = await store.getWorkingPack(WORKSPACE);
+    const saved = await store.getDraftPack(WORKSPACE);
     expect(saved).toBeDefined();
     expect(JSON.stringify(saved)).toContain("vendor");
     expect((saved as { pack: { config: unknown } }).pack.config).toBeDefined(); // pack 里是 config 对象，不是 YAML 文本
@@ -226,17 +226,17 @@ describe("配置存储（工作副本与发布）", () => {
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE);
     await s.editDraft({ op: "add_property", object: "vendor", name: "vendor_no", type: "string" }, WORKSPACE);
     await s.editDraft({ op: "set_identity", object: "vendor", name: "vendor_no" }, WORKSPACE);
-    expect(JSON.stringify(await store.getWorkingPack(WORKSPACE))).toContain("vendor");
+    expect(JSON.stringify(await store.getDraftPack(WORKSPACE))).toContain("vendor");
     await s.publish(WORKSPACE);
     expect(await store.versionYaml(WORKSPACE, 2)).toMatch(/vendor:/); // 发布才有 YAML
     // 工作行永存：发布后内容与已发布一致（可变头 = 最新内容）
-    expect(JSON.stringify(await store.getWorkingPack(WORKSPACE))).toContain("vendor");
+    expect(JSON.stringify(await store.getDraftPack(WORKSPACE))).toContain("vendor");
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(false);
 
     await s.editDraft({ op: "create_object", name: "ghost", kind: "thing" }, WORKSPACE);
-    expect(JSON.stringify(await store.getWorkingPack(WORKSPACE))).toContain("ghost");
+    expect(JSON.stringify(await store.getDraftPack(WORKSPACE))).toContain("ghost");
     await s.discard(WORKSPACE);
-    expect(JSON.stringify(await store.getWorkingPack(WORKSPACE))).not.toContain("ghost");
+    expect(JSON.stringify(await store.getDraftPack(WORKSPACE))).not.toContain("ghost");
     await restartRuntime(tmp);
     expect((await s.getDraft(WORKSPACE)).draft.object_types.ghost).toBeUndefined();
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(false);
@@ -337,7 +337,7 @@ describe("配置存储（工作副本与发布）", () => {
     state.draft.object_types.equipment.actions!.bad = {
       effect: [{ update: { object: "ghost_class", filter: { x: 1 }, properties: { y: 2 } } }],
     };
-    await (await meta()).saveWorkingPack(WORKSPACE, { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins }, await s.getRev(WORKSPACE), false);
+    await (await meta()).saveDraftPack(WORKSPACE, { config: state.draft, layout: state.layout, edgeBends: state.edgeBends, edgePins: state.edgePins }, await s.getRev(WORKSPACE), false);
     await expectRejected(s.publish(WORKSPACE), "不存在的类");
   });
 });
