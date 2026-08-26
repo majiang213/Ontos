@@ -178,6 +178,31 @@ describe("无状态化（跨实例语义）", () => {
     const versions = await envA.meta.listVersions(WS);
     expect(versions.length).toBe(version + 1); // 赢家的 N+1 + 我们的 N+2，无幽灵行
   });
+  it("发布撞版本号唯一且赢家行是旧格式（无画布包）：退 yaml 比对，内容一致仍按成功收尾", async () => {
+    const envA = testEnv();
+    const { editDraft } = await import("../server/features/ontology/editDraft");
+    const { publish } = await import("../server/features/ontology/versions");
+    const { getDraft } = await import("../server/features/ontology/current");
+
+    expect((await editDraft(envA, { op: "create_object", name: "vendor", kind: "thing" }, WS)).code).toBe(200);
+    const version = (await envA.meta.latestVersion(WS, "")).version + 1;
+    // 模拟旧格式赢家：插的版本行只有 yaml（内容与草稿一致），canvas_json 为空——守卫读不到画布包，退 yaml 比对
+    const meta = envA.meta;
+    const realInsert = meta.insertVersion.bind(meta);
+    let injected = false;
+    (meta as never as { insertVersion: typeof realInsert }).insertVersion = async (ws, v, yaml, origin, canvas) => {
+      if (!injected) {
+        injected = true;
+        await realInsert(ws, v, yaml, origin, undefined); // 旧格式：没有画布包
+      }
+      return realInsert(ws, v, yaml, origin, canvas);
+    };
+    const r = await publish(envA, WS);
+    expect(r.code).toBe(200); // yaml 一致 → 按成功收尾（不产生假 422）
+    expect(unwrap(r).version).toBe(version);
+    expect((await envA.meta.listVersions(WS)).length).toBe(version);
+    expect((await getDraft(envA, WS)).dirty).toBe(false);
+  });
 });
 
 async function getPublishedOf(env: ReturnType<typeof testEnv>): Promise<{ version: number }> {

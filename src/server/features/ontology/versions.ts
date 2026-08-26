@@ -7,7 +7,7 @@ import { configSchema, type OntologyConfig } from "../../schema/config";
 import { DraftReject, MSG, codeOf, type Result } from "../../errors";
 import type { EngineEnv } from "../env";
 import { DEFAULT_WORKSPACE, seedYamlFor } from "../../infra/workspace";
-import { applyPack, canvasSnapshot, persistWorkingCopy, unpackCanvas } from "./canvasPack";
+import { applyPack, canvasSnapshot, persistWorkingCopy, versionCanvasPack } from "./canvasPack";
 import { commitDraft, validateFull } from "./commit";
 import { getDraft, getPublished, getRev } from "./current";
 import { sameConfig } from "./sameConfig";
@@ -38,8 +38,14 @@ export async function publish(env: EngineEnv, workspace: string = DEFAULT_WORKSP
       // 我们以新内容 CAS 获胜却撞上旧内容的版本行）——逐字比对，一致才按成功收尾，不一致则 422 让调用方重读重发。
       const latest = (await env.meta.latestVersion(workspace, seedYamlFor(workspace))).version;
       if (latest < version) throw e;
-      const snap = await env.meta.versionCanvas(workspace, version);
-      const rowConfig = snap !== undefined ? unpackCanvas(snap).config : undefined;
+      // 逐字比对版本行内容：一致才按成功收尾，分叉则 422 让调用方重读重发（不谎报已发布）。
+      // 老版本行可能没有画布包（只有 yaml），退到 yaml 比对——消除「无画布包必 422」的假冲突类。
+      const rowPack = await versionCanvasPack(env, workspace, version);
+      let rowConfig = rowPack.config;
+      if (rowConfig === undefined) {
+        const rowYaml = await env.meta.versionYaml(workspace, version);
+        rowConfig = rowYaml !== undefined ? load(rowYaml) : undefined;
+      }
       if (rowConfig === undefined || !sameConfig(rowConfig, state.draft)) {
         throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
       }
@@ -85,8 +91,7 @@ export async function rollbackTo(env: EngineEnv, version: number, workspace: str
     const expectedRev = await getRev(env, workspace);
     const yaml = await env.meta.versionYaml(workspace, version);
     if (yaml === undefined) throw new DraftReject(MSG.versionNotFound(version));
-    const snap = await env.meta.versionCanvas(workspace, version);
-    const pack = snap !== undefined ? unpackCanvas(snap) : { config: undefined }; // 老行没有 canvas_json：config 从 yaml 解
+    const pack = await versionCanvasPack(env, workspace, version); // 老行没有 canvas_json：config 从 yaml 解（pack.config 缺省 undefined）
     let config: OntologyConfig;
     try {
       config = configSchema.parse(pack.config ?? load(yaml));

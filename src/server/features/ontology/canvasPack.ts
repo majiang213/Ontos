@@ -67,12 +67,19 @@ export async function persistWorkingCopy(env: EngineEnv, workspace: string, stat
   return env.meta.saveDraftPack(workspace, canvasSnapshot(state), expectedRev, bump);
 }
 
+/** 某编号行发布时的画布包（老行可能只有 yaml，没有画布包 → 返回空对象，config 缺省 undefined，调用方按键降级）。读回校验坏键当没有。
+ *  注意：缺失必须返回 {} 而不是 unpackCanvas({})——空对象会被旧格式分支当成「整包即 config」返回 { config: {} }。 */
+export async function versionCanvasPack(env: EngineEnv, workspace: string, version: number) {
+  const raw = await env.meta.versionCanvas(workspace, version);
+  return raw === undefined ? {} : unpackCanvas(raw);
+}
+
 /** 读工作行并水合成 DraftState；还没有工作行就从已发布造一行并落库——「空间恒有可变头」这个不变量由本函数维持。
  *  迁移降级：摆位-only 的老工作行本体用已发布（首次写入即补全 pack）；界面状态缺键用已发布版的画布包后备。 */
 export async function readWorkingCopy(env: EngineEnv, workspace: string, config: OntologyConfig, version: number): Promise<DraftState> {
   const saved = await env.meta.getDraftPack(workspace);
   // 界面状态的后备：最近已发布版的画布包（老行可能只有 yaml，那就空着，画布走 dagre）
-  const pubPack = unpackCanvas((await env.meta.versionCanvas(workspace, version)) ?? {});
+  const pubPack = await versionCanvasPack(env, workspace, version);
   const fallback = { layout: pubPack.layout ?? {}, edgeBends: pubPack.edgeBends ?? {}, edgePins: pubPack.edgePins ?? {} };
   if (saved === undefined) {
     const state: DraftState = { draft: structuredClone(config), baseVersion: version, dirty: false, layout: {}, edgeBends: {}, edgePins: {} };
