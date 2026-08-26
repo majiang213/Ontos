@@ -22,6 +22,7 @@ export default function SchemaDrawer({
   onGenerate: (tables: { connection: string; table: string }[]) => void;
 }) {
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
+  const allKeys = schema?.sources.flatMap((s) => s.tables.map((t) => `${s.connection}.${t.name}`)) ?? [];
   const generate = () => {
     const tables = [...selectedTables].map((key) => {
       const dot = key.indexOf("."); // 只切第一个点：连接名/表名里再有点不炸
@@ -32,12 +33,15 @@ export default function SchemaDrawer({
   };
   return (
     <div className="drawer">
-      {selectedTables.size > 0 && (
-        <div style={{ position: "sticky", top: 0, zIndex: 5, paddingBottom: 10, background: "var(--bg-deep)" }}>
-          <button className="btn-cta" style={{ fontSize: 13, padding: "6px 8px 6px 16px" }} onClick={generate}>
-            生成对象（{selectedTables.size} 张表）
-          </button>
-          <button className="btn" style={{ marginLeft: 8 }} onClick={() => setSelectedTables(new Set())}>清空选择</button>
+      {allKeys.length > 0 && (
+        <div style={{ position: "sticky", top: 0, zIndex: 5, paddingBottom: 10, display: "flex", gap: 8, width: "fit-content" }}>
+          {selectedTables.size > 0 && (
+            <button className="btn-cta" style={{ fontSize: 13, padding: "6px 8px 6px 16px" }} onClick={generate}>
+              生成对象（{selectedTables.size} 张表）
+            </button>
+          )}
+          <button className="btn" onClick={() => setSelectedTables(new Set(allKeys))}>全选（{allKeys.length} 张表）</button>
+          {selectedTables.size > 0 && <button className="btn" onClick={() => setSelectedTables(new Set())}>清空选择</button>}
         </div>
       )}
       {schema?.sources.map((s) => (

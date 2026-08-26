@@ -1,5 +1,8 @@
-// 自动分层布局 —— dagre 按有向边分层：被引用的根对象在上，引用它们的在下，边顺一个方向。
-// 自环（转化关系）不参与分层，只画线。
+// 自动布局 —— 一个算法按层铺排：层由 dagre 算（有向边 目标→来源 反向进图，被引用方在上），
+// 每层按 dagre 的 order 从左到右等距，一层超过列数就折行。无边的图只有一层，折行即均匀网格——
+// 不需要为「没线」另开一套布局。自环（转化关系）不参与分层；没线的对象自成一尾层排在最下，
+// 不混进根层。三种形态（全孤立 / 部分有线 / 全有线）走同一段铺排循环。
+// 「整理布局」与未存摆位的新节点共用同一份计算。
 // 画布的两个输入类型也住这里（layout 是它们的唯一下游定义点，组件不反向依赖组件）。
 
 import dagre from "@dagrejs/dagre";
@@ -35,24 +38,50 @@ function estimateHeight(o: CanvasObject): number {
   return 92 + o.properties.length * 21 + tags;
 }
 
-export function layoutObjects(objects: CanvasObject[], links: CanvasLink[]): Map<string, { x: number; y: number }> {
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 90, marginx: 40, marginy: 40 });
-  g.setDefaultEdgeLabel(() => ({}));
+/** 铺排参数：列数（单层折行时等于网格列数）、列距、行距。 */
+const GAP_X = 80;
+const GAP_Y = 90;
 
+export function layoutObjects(objects: CanvasObject[], links: CanvasLink[]): Map<string, { x: number; y: number }> {
+  // 自环不参与分层（只画线）；「有线」只认两端不同的边
+  const realLinks = links.filter((l) => l.from !== l.to);
+  const connected = new Set(realLinks.flatMap((l) => [l.from, l.to]));
+
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 90 });
+  g.setDefaultEdgeLabel(() => ({}));
   for (const o of objects) g.setNode(o.name, { width: NODE_W, height: estimateHeight(o) });
   // 边按 目标→来源 反向进图：被引用多的对象（设备、部门、人员）排在最上层
-  for (const l of links) {
-    if (l.from === l.to) continue; // 自环不参与分层
-    g.setEdge(l.to, l.from);
-  }
-
+  for (const l of realLinks) g.setEdge(l.to, l.from);
   dagre.layout(g);
 
-  const out = new Map<string, { x: number; y: number }>();
+  // 层分配：有线的用 dagre 的 rank；没线的自成一尾层（dagre 会把孤立节点并进最上行，混进根层）
+  const connectedRanks = new Map<string, number>();
   for (const o of objects) {
-    const n = g.node(o.name);
-    out.set(o.name, { x: n.x - NODE_W / 2, y: n.y - estimateHeight(o) / 2 }); // dagre 给的是中心点
+    if (connected.has(o.name)) connectedRanks.set(o.name, g.node(o.name)?.rank ?? 0);
+  }
+  const isolateRank = (connectedRanks.size ? Math.max(...connectedRanks.values()) : -1) + 1;
+
+  // 统一铺排：按层从上到下，层内按 order 从左到右等距；一层超过列数折行（无边的单层图折成网格）
+  const cols = Math.max(1, Math.ceil(Math.sqrt(objects.length)));
+  const byRank = new Map<number, { name: string; order: number; height: number }[]>();
+  for (const o of objects) {
+    const rank = connected.has(o.name) ? connectedRanks.get(o.name)! : isolateRank;
+    const entry = { name: o.name, order: g.node(o.name)?.order ?? 0, height: estimateHeight(o) };
+    byRank.set(rank, [...(byRank.get(rank) ?? []), entry]);
+  }
+
+  const out = new Map<string, { x: number; y: number }>();
+  let y = 0;
+  for (const rank of [...byRank.keys()].sort((a, b) => a - b)) {
+    const nodes = byRank.get(rank)!.sort((a, b) => a.order - b.order);
+    const rows = Math.ceil(nodes.length / cols);
+    for (let r = 0; r < rows; r++) {
+      const slice = nodes.slice(r * cols, (r + 1) * cols);
+      const rowH = Math.max(...slice.map((s) => s.height));
+      slice.forEach((s, i) => out.set(s.name, { x: i * (NODE_W + GAP_X), y }));
+      y += rowH + GAP_Y;
+    }
   }
   return out;
 }

@@ -11,6 +11,7 @@ import { engineEnv } from "@/server/runtime";
 import { getDraft, getPublished, getRev } from "@/server/features/ontology/current";
 import { getDriverRegistry } from "@/server/infra/connections";
 import { BadRequest, internalErrorMessage, requireWriteAuth, workspaceOf } from "@/app/api/_shared";
+import { logReject } from "@/server/errors";
 import { TOOLS, type ToolContext } from "./tools";
 
 const rpcOk = (id: unknown, result: unknown) => NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result });
@@ -83,11 +84,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ workspa
     const out = await tool.handler(ctx, args);
     return rpcOk(id, toolResult(out.payload, out.isError));
   } catch (e) {
-    if (e instanceof ZodError) return rpcErr(id, -32602, MSG.zodRequestShape); // 与 REST 同一文案（同一失败两种说法是协议瑕疵）
-    if (e instanceof BadRequest) return rpcErr(id, -32602, e.message);
-    if (e instanceof EngineReject) return rpcErr(id, -32000, e.message);
-    if (e instanceof DraftReject) return rpcErr(id, -32000, e.message); // 与 EngineReject 同档（REST 侧是 422）
+    if (e instanceof ZodError) {
+      logReject(e);
+      return rpcErr(id, -32602, MSG.zodRequestShape); // 与 REST 同一文案（同一失败两种说法是协议瑕疵）
+    }
+    if (e instanceof BadRequest) {
+      logReject(e);
+      return rpcErr(id, -32602, e.message);
+    }
+    if (e instanceof EngineReject) {
+      logReject(e);
+      return rpcErr(id, -32000, e.message);
+    }
+    if (e instanceof DraftReject) {
+      logReject(e);
+      return rpcErr(id, -32000, e.message); // 与 EngineReject 同档（REST 侧是 422）
+    }
     // 兜底不透内部细节：驱动 SQL 报错含表名/主机/连接细节——闸与 REST 同一处（_shared.internalErrorMessage）
+    logReject(e);
     return rpcErr(id, -32603, internalErrorMessage(e));
   }
 }

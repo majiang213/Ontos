@@ -3,19 +3,20 @@
 // 单例挂运行态：Next dev 下各路由包各有模块实例，挂全局才能保证即时生效。
 // 本文件在 infra 层，不上指 draft：「连接是否被已发布引用」由调用方注入（refs.connectionInUse 是纯函数）。
 
-import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import type { ConnectionRec } from "../meta/types";
 import { metaStore } from "../meta/store";
 import { runtime } from "../runtime";
 import { SqliteFixtureDriver } from "./fixture";
 import { SqliteDriver } from "./sqliteDriver";
-import { readSidecarComments } from "./demoSystems";
+import { readSidecarComments, DEMO_SYSTEMS, DEMO_DIR_REL } from "./demoSystems";
 import { DriverRegistry } from "./registry";
 import { makeSqlDriver } from "./sqlDriver";
 import { ConnectionReject, MSG, toResult, type Result } from "../errors";
 import { DEFAULT_WORKSPACE, TEST_WORKSPACE } from "./workspace";
 import type { TableInfo } from "./driver";
+import { NAME_RE } from "../schema/ops";
 
 // 注册表按工作空间键控，挂运行态（runtime.ts）：Next dev 多模块实例共享，测试换运行态即隔离
 function registries(): Map<string, DriverRegistry> {
@@ -56,6 +57,24 @@ export function registerSaved(registry: DriverRegistry, rec: ConnectionRec): voi
   } else {
     registry.register(rec.name, makeSqlDriver({ type: rec.type, host: rec.host, port: rec.port, db_name: rec.db_name, ro_user: rec.ro_user, ro_pass: rec.ro_pass, rw_user: rec.rw_user, rw_pass: rec.rw_pass }));
   }
+}
+
+/** 连接表单的文件选择器数据源：列出演示库目录里可连接的 .db 文件与建议连接名。
+ *  DEMO_SYSTEMS 命中优先（title + 规范连接名）；未命中的按文件名推（小写、非法字符归一为下划线），
+ *  推不出合法连接名（NAME_RE）或与前面撞名的文件不列——那个文件还能走表单的手动指定路径。 */
+export function listSqliteFiles(dir: string): { file: string; path: string; title?: string; connection: string }[] {
+  if (!existsSync(dir)) return [];
+  const seen = new Set<string>();
+  const out: { file: string; path: string; title?: string; connection: string }[] = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".db")) continue;
+    const sys = DEMO_SYSTEMS.find((s) => s.file === ent.name);
+    const name = sys?.connection ?? basename(ent.name).replace(/\.db$/i, "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!NAME_RE.test(name) || seen.has(name)) continue;
+    seen.add(name);
+    out.push({ file: ent.name, path: join(DEMO_DIR_REL, ent.name), ...(sys ? { title: sys.title } : {}), connection: name });
+  }
+  return out;
 }
 
 /** 保存连接：先注册再测，通过才落库。失败还回旧驱动。test=true 时空库不落库。 */

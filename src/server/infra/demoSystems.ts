@@ -11,7 +11,7 @@ import { basename, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 /** 演示库目录（相对仓库根）：gitignored，播种命令打印绝对路径。 */
-const DEMO_DIR_REL = ".ontos-demo";
+export const DEMO_DIR_REL = ".ontos-demo";
 
 /** 十二套演示系统：给人看的名字（title）、连接表单该填的连接名（snake_case）、库文件名。 */
 export const DEMO_SYSTEMS = [

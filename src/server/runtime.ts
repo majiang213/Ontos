@@ -29,7 +29,7 @@ export interface OntosRuntime {
   clock?: () => number;
   /** 测试注入假 uuid 源；缺省真实 v7（引擎不碰 crypto，只有这一处实现）。 */
   uuid?: () => string;
-  /** 测试注入固定雪花实例 id（0–1023）；缺省 ONTOS_INSTANCE_ID 或随机派生。 */
+  /** 测试注入固定雪花实例 id（0–1023）；缺省 ONTOS_SNOWFLAKE_INSTANCE_ID 或随机派生。 */
   instanceId?: number;
   /** 测试注入假雪花号源；缺省按 clock + instanceId 组真实雪花（闭包缓存在运行态：每实例一个，跨请求递增不撞号）。 */
   snowflake?: () => string;
@@ -55,17 +55,18 @@ function realUuidV7(): string {
   return `${h.slice(0, 4).join("")}-${h.slice(4, 6).join("")}-${h.slice(6, 8).join("")}-${h.slice(8, 10).join("")}-${h.slice(10, 16).join("")}`;
 }
 
-/** 雪花实例 id：ONTOS_INSTANCE_ID（0–1023）优先；未分配时随机——部署必须分配，随机碰撞概率极低但存在。 */
+/** 雪花实例 id：ONTOS_SNOWFLAKE_INSTANCE_ID（0–1023）优先；未分配时随机——部署必须分配，随机碰撞概率极低但存在。 */
 function instanceIdOf(rt: OntosRuntime): number {
   if (rt.instanceId !== undefined) return rt.instanceId & 0x3ff;
-  const fromEnv = Number(process.env.ONTOS_INSTANCE_ID);
+  const fromEnv = Number(process.env.ONTOS_SNOWFLAKE_INSTANCE_ID);
   if (Number.isInteger(fromEnv) && fromEnv >= 0 && fromEnv <= 1023) return fromEnv;
   return Math.floor(Math.random() * 1024);
 }
 
 /** 槽位选择：有 OPENAI_API_KEY 走真模型（OpenAI 兼容协议，通用键同 Claude Code / Codex），实例缓存在运行态上；
  *  否则离线回退（CannedSlot：问数只覆盖演示剧本，逆向建模与候选对建议是通用启发式，各空间都能用）。
- *  模型必须显式指定 OPENAI_MODEL，不设默认；接入点用 OPENAI_BASE_URL，不设走 SDK 默认端点。 */
+ *  模型必须显式指定 OPENAI_MODEL，不设默认；接入点用 OPENAI_BASE_URL（填基址，SDK 自己拼 /chat/completions），
+ *  不设走 SDK 默认端点。走 chat completions 而非 Responses API：OpenAI 兼容网关普遍只实现前者（后者会 404）。 */
 export function getSlot(): LlmSlot {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return new CannedSlot();
@@ -74,7 +75,7 @@ export function getSlot(): LlmSlot {
     const model = process.env.OPENAI_MODEL;
     if (!model) throw new Error(MSG.openaiModelMissing);
     const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
-    rt.llmSlot = new AiSdkSlot(xai.responses(model));
+    rt.llmSlot = new AiSdkSlot(xai.chat(model));
   }
   return rt.llmSlot;
 }

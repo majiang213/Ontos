@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { DraftReject, EngineReject, ConnectionReject, WorkspaceReject, MSG } from "@/server/errors";
+import { DraftReject, EngineReject, ConnectionReject, WorkspaceReject, MSG, logReject } from "@/server/errors";
 import { isWorkspaceName } from "@/server/infra/workspace";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
@@ -25,6 +25,7 @@ export function internalErrorMessage(e: unknown): string {
 
 /** 统一的 500 形状：固定文案；detail（内部错误细节）只在非生产环境给，生产不透。 */
 export function internalError(e: unknown): NextResponse {
+  logReject(e);
   const detail = e instanceof Error ? e.message : String(e);
   return NextResponse.json({ error: MSG.internalError, ...(process.env.NODE_ENV === "production" ? {} : { detail }) }, { status: 500 });
 }
@@ -40,14 +41,22 @@ export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status
     return out instanceof NextResponse ? out : NextResponse.json(out);
   } catch (e) {
     if (e instanceof ZodError) {
+      logReject(e);
       const z = opts.zod ?? { status: 400, error: MSG.zodRequestShape };
       return NextResponse.json({ error: z.error, issues: e.issues }, { status: z.status });
     }
-    if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof BadRequest) {
+      logReject(e);
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     if (e instanceof ConnectionReject) {
+      logReject(e);
       return NextResponse.json({ error: e.message }, { status: e.kind === "bad_request" ? 400 : 422 });
     }
-    if (e instanceof DraftReject || e instanceof EngineReject || e instanceof WorkspaceReject) return NextResponse.json({ error: e.message }, { status: 422 });
+    if (e instanceof DraftReject || e instanceof EngineReject || e instanceof WorkspaceReject) {
+      logReject(e);
+      return NextResponse.json({ error: e.message }, { status: 422 });
+    }
     return internalError(e);
   }
 }

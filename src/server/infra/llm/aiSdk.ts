@@ -1,4 +1,6 @@
-// 真模型槽位 —— Vercel AI SDK + xAI：三个槽位同构 generateText({ model, output: Output.object({ schema }), prompt })。
+// 真模型槽位 —— Vercel AI SDK + xAI chat completions：三个槽位同构 generateText({ model, prompt }) → 文本抠 JSON。
+// 形状只走提示词（z.toJSONSchema），完全不下发 response_format：兼容网关普遍只实现 chat completions
+//（Responses API 直接 404），带投机解码的模型连 json_object 都当语法约束拒绝（400）。
 // 提示词工程住这里（唯一住所）；模型当顾问不当计算器：出槽前再过一道 Zod（模型乱说话 = 拒绝，不进引擎）。
 // 失败落盘：generateText 抛错或出槽 parse 失败时，原始产出写 os.tmpdir()/ontos-llm-fail/（key 字面值打码），
 // 进程 console.error 一行路径——不绑任何测试门闩（走查就是生产路径）；罐头槽位不写。
@@ -7,7 +9,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { generateText, Output, type LanguageModel } from "ai";
+import { generateText, type LanguageModel } from "ai";
+import { MSG } from "../../errors";
 import type { QueryRequest } from "../../schema/request";
 import { queryRequestSchema } from "../../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../../schema/config";
@@ -27,6 +30,28 @@ const pairsSchema = z.object({
     reason: z.string(),
   })),
 });
+
+/** 输出形状的提示词片段：response_format 完全不下发，形状只靠提示词给（zod → JSON Schema 的唯一渲染处）。 */
+function shapeOf(schema: z.ZodType): string {
+  return `只输出 JSON，形状按这份 JSON Schema：${JSON.stringify(z.toJSONSchema(schema))}`;
+}
+
+/** 输出 token 上限：网关默认上限会截断长草稿（多表 JSON 写一半就断，如 proposeObjects），显式放宽留足余量。 */
+const MAX_OUTPUT_TOKENS = 8192;
+
+/** 从模型文本里抠 JSON：兼容 ```json 围栏与前后闲话；抠不出或不是合法 JSON 都归一个文案（原始文本走失败落盘）。 */
+function extractJson(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenced ? fenced[1] : text;
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error(MSG.noJsonInModelOutput);
+  try {
+    return JSON.parse(body.slice(start, end + 1));
+  } catch {
+    throw new Error(MSG.noJsonInModelOutput);
+  }
+}
 
 /** 失败落盘：槽位名 / 实现名 / 输入摘要 / 原始产出或异常，写临时目录 JSON；OPENAI_API_KEY 字面值打码。
  *  落盘失败不挡原错误抛出（调试设施不能变成新故障源）。 */
@@ -58,14 +83,15 @@ export class AiSdkSlot implements LlmSlot {
     this.name = `ai-sdk:${typeof model === "string" ? model : model.modelId}`;
   }
 
-  /** 三槽位同一条失败闸：跑 run + parse，抛错或出槽校验失败都把原始产出落盘再原样抛出（parse 失败时能看见原文）。 */
-  private async runWithFailureDump<T>(slot: string, input: unknown, run: () => Promise<{ output: unknown }>, parse: (output: unknown) => T): Promise<T> {
-    let output: unknown;
+  /** 三槽位同一条失败闸：跑 run → 文本抠 JSON → parse；抛错或出槽校验失败都把原始文本落盘再原样抛出。 */
+  private async runWithFailureDump<T>(slot: string, input: unknown, run: () => Promise<{ text: string }>, parse: (output: unknown) => T): Promise<T> {
+    let raw: unknown;
     try {
-      output = (await run()).output;
-      return parse(output);
+      const { text } = await run();
+      raw = text;
+      return parse(extractJson(text));
     } catch (e) {
-      dumpFailure(slot, this.name, input, output, e);
+      dumpFailure(slot, this.name, input, raw, e);
       throw e;
     }
   }
@@ -89,8 +115,8 @@ export class AiSdkSlot implements LlmSlot {
       () =>
         this.gen({
           model: this.model,
-          output: Output.object({ schema: queryRequestSchema }),
-          prompt: `你是本体平台的问数编译器。把自然语言问题编译成结构化查询 JSON（schema 已约束形状）。
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          prompt: `你是本体平台的问数编译器。把自然语言问题编译成结构化查询 JSON。${shapeOf(queryRequestSchema)}
 本体：${JSON.stringify(classes)}
 规则：object 必须是上面的类名；filter 的键是属性名（派生属性可过滤），枚举属性给了 values——过滤值只能取 values 里的字面量（原样照抄，不要翻成中文）；
 $link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开用 expand: [{ relation: 关系名, properties: [...] }]；聚合用 aggregate: { group_by: [...], metrics: [{ count: "*" }] }。
@@ -107,8 +133,8 @@ $link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开�
       () =>
         this.gen({
           model: this.model,
-          output: Output.object({ schema: draftSchema }),
-          prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。${shapeOf(draftSchema)}
 规则：类名=表名的小写下划线形；kind 默 "thing"（记录事件的表用 "event"）；${IDENTITY_COL_RULE}；
 properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
 列带 comment 时把它的意思写进属性的 description（中文白话，别抄英文列名）。
@@ -127,8 +153,8 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
       () =>
         this.gen({
           model: this.model,
-          output: Output.object({ schema: pairsSchema }),
-          prompt: `你是本体平台的整合顾问。下面是来自不同源的对象（名字、来源连接集合、字段名）。
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          prompt: `你是本体平台的整合顾问。下面是来自不同源的对象（名字、来源连接集合、字段名）。${shapeOf(pairsSchema)}
 找出跨源疑似同义的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。有共同连接的不成对；字段和名字都不像的不进候选。
 对象：${JSON.stringify(classes)}`,
         }),

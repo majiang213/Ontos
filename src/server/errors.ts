@@ -40,6 +40,14 @@ function codeOf(e: unknown): 400 | 422 | null {
   return null;
 }
 
+/** 业务拒绝落服务端日志（message + 堆栈）：拒绝是定案不是吞错，但排查要能看见是哪条规则、哪一步拒的。
+ *  REST 与 MCP 的收尾（toResult / respond / internalError / mcp 路由的 catch）都走这一处，不各写一遍。 */
+export function logReject(e: unknown): void {
+  const message = e instanceof Error ? e.message : String(e);
+  const stack = e instanceof Error && e.stack ? `\n${e.stack}` : "";
+  console.error(`[ontos] 业务拒绝：${message}${stack}`);
+}
+
 /** 边界入口的统一收尾（唯一出处）：跑 fn，成功包 200 + 成功文案；域拒绝按 codeOf 收成失败 Result；
  *  意外异常原样上抛（不进 Result，respond 兜 500「内部错误」）。各入口不再自写 try/catch 阶梯。 */
 export async function toResult<T>(fn: () => Promise<T>, ok: (value: T) => string): Promise<Result<T>> {
@@ -48,7 +56,10 @@ export async function toResult<T>(fn: () => Promise<T>, ok: (value: T) => string
     return { code: 200, message: ok(value), value };
   } catch (e) {
     const code = codeOf(e);
-    if (code !== null) return { code, message: e instanceof Error ? e.message : String(e) };
+    if (code !== null) {
+      logReject(e);
+      return { code, message: e instanceof Error ? e.message : String(e) };
+    }
     throw e;
   }
 }
@@ -234,6 +245,7 @@ export const MSG = {
   cannedWsOnly: "离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   cannedScriptOnly: "离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   openaiModelMissing: "OPENAI_MODEL 未设置：接真模型必须显式指定模型名",
+  noJsonInModelOutput: "模型产出里没有 JSON 对象",
   noSuchConnection: "没有这个连接",
   connectionReadFailed: "连接失败或读取表结构失败",
 

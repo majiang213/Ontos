@@ -264,3 +264,33 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
     expect((await meta.listDecisions(TEST))[0].verdict).toBe(Verdict.Skip);
   });
 });
+
+describe("list_sqlite_files：连接表单的 sqlite 文件选择器", () => {
+  it("列演示目录里的 .db 文件：建议连接名（DEMO_SYSTEMS 优先）、相对路径、已连接标记；推不出合法名的文件不列", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { DatabaseSync } = await import("node:sqlite");
+    const demo = join(tmp, ".ontos-demo");
+    mkdirSync(demo, { recursive: true });
+    const mk = (file: string, sql: string) => {
+      const db = new DatabaseSync(join(demo, file));
+      db.exec(sql);
+      db.close();
+    };
+    mk("purchase.db", "CREATE TABLE po_item (po_id INTEGER PRIMARY KEY, item_name TEXT)");
+    mk("my_custom.db", "CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    writeFileSync(join(demo, "9x.db"), ""); // 推不出合法连接名（NAME_RE）：不列
+    writeFileSync(join(demo, "readme.txt"), "x"); // 非 .db：不列
+    const r1 = await get("list_sqlite_files");
+    expect(r1.status).toBe(200);
+    expect(r1.data.files).toEqual([
+      { file: "my_custom.db", path: ".ontos-demo/my_custom.db", connection: "my_custom", connected: false },
+      { file: "purchase.db", path: ".ontos-demo/purchase.db", title: "采购系统", connection: "purchase_sys", connected: false },
+    ]);
+    // 保存一个后：已连接标记翻转
+    await post("connections", JSON.stringify({ name: "purchase_sys", type: "sqlite", db_name: ".ontos-demo/purchase.db", test: false }));
+    const r2 = await get("list_sqlite_files");
+    expect(r2.status).toBe(200);
+    const purchase = r2.data.files.find((f: { file: string }) => f.file === "purchase.db");
+    expect(purchase.connected).toBe(true);
+  });
+});

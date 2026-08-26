@@ -400,7 +400,7 @@ export default function CanvasPage() {
 
       {/* 连接数据源卡（左上） */}
       {card?.kind === "connect" && (
-        <div className="float-card float-tl" style={{ top: 120, width: 320 }}>
+        <div className="float-card float-tl" style={{ top: 120, width: 420, maxWidth: "calc(100vw - 24px)" }}>
           <Bezel>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>连接数据源</div>
             <ConnectForm

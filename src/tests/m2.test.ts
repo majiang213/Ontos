@@ -48,10 +48,13 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
   it("合法产出过闸；乱说话的产出被 Zod 拒绝（模型当顾问不当计算器）", async () => {
     const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
     const good = { object: "equipment", filter: { status: "in_service" }, properties: ["name"] };
-    const slot = new AiSdkSlot(fakeModel, (async () => ({ output: good })) as never);
+    // 围栏 + 闲话的文本也抠得出 JSON（真模型常这么回）
+    const slot = new AiSdkSlot(fakeModel, (async () => ({ text: `结果如下：\n\`\`\`json\n${JSON.stringify(good)}\n\`\`\`` })) as never);
     expect((await slot.nlToQuery("在役设备", config, "test")).object).toBe("equipment");
-    const bad = new AiSdkSlot(fakeModel, (async () => ({ output: { object: 123 } })) as never);
+    const bad = new AiSdkSlot(fakeModel, (async () => ({ text: JSON.stringify({ object: 123 }) })) as never);
     await expect(bad.nlToQuery("x", config, "test")).rejects.toThrow();
+    const prose = new AiSdkSlot(fakeModel, (async () => ({ text: "这个问题我答不了。" })) as never);
+    await expect(prose.nlToQuery("x", config, "test")).rejects.toThrow(/JSON/);
   });
 
   it("getSlot：没 OPENAI_API_KEY 回退罐头；有 key 没指定模型报错；有 key 有模型走真模型", async () => {
@@ -108,7 +111,7 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     let seen = "";
     const slot = new AiSdkSlot(fakeModel, (async (args: { prompt: string }) => {
       seen = args.prompt;
-      return { output: { object: "equipment" } };
+      return { text: JSON.stringify({ object: "equipment" }) };
     }) as never);
     await slot.nlToQuery("在役设备", config, "test");
     expect(seen).toContain('"type"');

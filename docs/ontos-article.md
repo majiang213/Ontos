@@ -1314,7 +1314,7 @@ actions:
 | `description` | 给人 / Agent 读 |
 | `values` | `enum` 的可取值；只列出有规则能算出的值 |
 | `derived` | 有它就是派生属性，禁止再出现在任何源的 `fields` 里 |
-| `generate` | 可选。列表，按顺序拼成该属性的值。项为：字面量；与效应相同的取值；`{ date: now/d, format: yyyyMMdd }`（UTC，记号 `yyyy` `MM` `dd` `HH` `mm` `ss`）；`{ snowflake: true }`（64 位雪花号十进制串：41 位毫秒时间戳 + 10 位实例 + 12 位序列，实例位来自 `ONTOS_INSTANCE_ID` 或随机派生）；`{ uuid: v7 }`。效应写 `{ from: generated }` |
+| `generate` | 可选。列表，按顺序拼成该属性的值。项为：字面量；与效应相同的取值；`{ date: now/d, format: yyyyMMdd }`（UTC，记号 `yyyy` `MM` `dd` `HH` `mm` `ss`）；`{ snowflake: true }`（64 位雪花号十进制串：41 位毫秒时间戳 + 10 位实例 + 12 位序列，实例位来自 `ONTOS_SNOWFLAKE_INSTANCE_ID` 或随机派生）；`{ uuid: v7 }`。效应写 `{ from: generated }` |
 
 `derived` 按形状区分，没有第三种专用键。
 
