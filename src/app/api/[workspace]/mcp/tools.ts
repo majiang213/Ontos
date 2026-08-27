@@ -1,4 +1,4 @@
-// MCP 工具注册表 —— 九个工具的名字、说明、inputSchema、space 与令牌闸、handler 全部只在这里登记一份。
+// MCP 工具注册表 —— 十个工具的名字、说明、inputSchema、space 与令牌闸、handler 全部只在这里登记一份。
 // tools/list 与 tools/call 都读这张表；加/改工具只动这一个文件。
 // inputSchema 一律从 zod 派生（z.toJSONSchema），不与运行期校验双轨手写。
 
@@ -12,6 +12,7 @@ import { runAction } from "@/server/features/action/action";
 import { DraftReject, EngineReject } from "@/server/errors";
 import { actionSkeletonFor } from "@/server/features/ontology/skeletons";
 import { proposeObjectsFor } from "@/server/infra/llm/slot";
+import { listCandidates } from "@/server/features/integrate/candidates";
 import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/features/ontology/views";
 import { listTables } from "@/server/infra/tables";
 import type { DriverRegistry } from "@/server/infra/registry";
@@ -67,7 +68,7 @@ const editDraftInputSchema = {
 
 const json = (s: z.ZodType) => z.toJSONSchema(s) as Record<string, unknown>;
 
-/** 顺序即 tools/list 顺序（测试钉死）：query → run_action → propose_* → 三个发现 → list_tables → edit_draft。 */
+/** 顺序即 tools/list 顺序（测试钉死）：query → run_action → propose_* → 发现 → list_candidates → list_tables → edit_draft。 */
 export const TOOLS: ToolDef[] = [
   {
     name: "query",
@@ -119,7 +120,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "list_classes",
-    description: "列出类的名字和说明。缺省看已发布；要看画布上还没发布的草稿，必须传 space: \"draft\"（返回里带 outlets——告知要发去的系统名列表）。入参：{ space? }。",
+    description: "列出类的名字和说明。缺省看已发布；要看画布上还没发布的草稿，必须传 space: \"draft\"（返回里带 outlets、每个类已定的唯一键字段名 identity）。入参：{ space? }。",
     inputSchema: json(z.object({ space: spaceField })),
     space: true,
     handler: async (ctx) => {
@@ -151,6 +152,16 @@ export const TOOLS: ToolDef[] = [
     inputSchema: json(z.object({ text: z.string(), space: spaceField })),
     space: true,
     handler: async (ctx, args) => ({ payload: search(await ctx.config(), String(args.text ?? "")) }),
+  },
+  {
+    name: "list_candidates",
+    description: "列出草稿里等着人裁的疑似重复（只看、不定案）。每条带两个类名、机器倾向和一句依据。入参无。不接受 space。",
+    inputSchema: json(z.object({})),
+    handler: async (ctx) => {
+      const r = await listCandidates(ctx.env, ctx.workspace);
+      if (r.code !== 200) throw new EngineReject(r.message);
+      return { payload: { candidates: r.value } };
+    },
   },
   {
     name: "list_tables",

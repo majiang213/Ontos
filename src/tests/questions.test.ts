@@ -6,6 +6,7 @@ import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../se
 import { QUESTION_PACKS } from "../server/features/acceptance/questionPacks";
 import type { QueryRequest } from "../server/schema/request";
 import type { LlmSlot } from "../server/infra/llm/slot";
+import { Verdict } from "../server/schema/verdict";
 import { cleanupRuntime, draftEngine, setupRuntime, testEnv, unwrap } from "./helpers";
 
 describe("期望结果写法", () => {
@@ -79,6 +80,7 @@ describe("跑批失败分阶段（假槽位）", () => {
     nlToQuery,
     proposeObjects: async () => ({}),
     proposePairs: async () => [],
+    proposePair: async ({ class_a, class_b }) => ({ class_a: class_a.name, class_b: class_b.name, tendency: Verdict.NameSimilar, reason: "" }),
   });
 
   it("模型没产出记编译失败；查询过不了引擎记执行出错；原因都落库", async () => {
@@ -119,6 +121,7 @@ describe("跑批比对口径（假槽位，真引擎）", () => {
     nlToQuery: async () => queryReq,
     proposeObjects: async () => ({}),
     proposePairs: async () => [],
+    proposePair: async ({ class_a, class_b }) => ({ class_a: class_a.name, class_b: class_b.name, tendency: Verdict.NameSimilar, reason: "" }),
   });
 
   it("聚合题比合计：count:* 按部门分组的行合计对期望；实得不符给「期望合计」白话", async () => {

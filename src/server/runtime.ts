@@ -71,6 +71,7 @@ export function getSlot(): LlmSlot {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return new CannedSlot();
   const rt = runtime();
+  if (rt.llmSlot && typeof rt.llmSlot.proposePair !== "function") rt.llmSlot = undefined; // 热更留下的旧实例没有新方法，丢掉重做
   if (!rt.llmSlot) {
     const model = process.env.OPENAI_MODEL;
     if (!model) throw new Error(MSG.openaiModelMissing);

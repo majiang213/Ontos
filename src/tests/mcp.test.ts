@@ -1,4 +1,4 @@
-// MCP 工具端点测试：JSON-RPC 信封、九个工具的形状与纪律（从 m4m6.test.ts 拆出）。
+// MCP 工具端点测试：JSON-RPC 信封、十个工具的形状与纪律（从 m4m6.test.ts 拆出）。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
@@ -26,7 +26,7 @@ describe("MCP 工具端点", () => {
   }
   const call = (name: string, args: Record<string, unknown>, headers?: Record<string, string>) => rpc("tools/call", { name, arguments: args }, undefined, headers);
 
-  it("initialize 握手 + tools/list 列出九个工具（顺序钉死）+ id 回显", async () => {
+  it("initialize 握手 + tools/list 列出十个工具（顺序钉死）+ id 回显", async () => {
     const init = await rpc("initialize");
     expect(init.id).toBe(7);
     expect(init.result.serverInfo.name).toBe("ontos");
@@ -39,6 +39,7 @@ describe("MCP 工具端点", () => {
       "list_classes",
       "read_class",
       "search",
+      "list_candidates",
       "list_tables",
       "edit_draft",
     ]);
@@ -100,6 +101,7 @@ describe("MCP 工具端点", () => {
     expect((await call("query", { query: { object: "equipment" }, space: "draft" })).error?.code).toBe(-32602);
     expect((await call("run_action", { action: "convert", object: "equipment", identity: "SN-40217", space: "draft" })).error?.code).toBe(-32602);
     expect((await call("propose_objects", { tables: [{ connection: "device_sys", table: "department" }], space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("list_candidates", { space: "draft" })).error?.code).toBe(-32602);
   });
 
   it("space=draft 看见未发布类（带状态与 rev）；缺省看不见；query/propose_action 不受草稿影响", async () => {
@@ -116,7 +118,9 @@ describe("MCP 工具端点", () => {
     expect(sc.rev).toBe(await s.getRev("test"));
     expect(sc.base_version).toBe(1);
     expect(sc.classes.find((c: { name: string }) => c.name === "vendor").state).toBe("new");
+    expect(sc.classes.find((c: { name: string }) => c.name === "vendor").identity).toBeUndefined();
     expect(sc.classes.find((c: { name: string }) => c.name === "equipment").state).toBe("same");
+    expect(sc.classes.find((c: { name: string }) => c.name === "equipment").identity).toBe("serial_no");
     // read_class 草稿视图带来源对照；已发布视图不带
     const rd = await call("read_class", { name: "equipment", space: "draft" });
     expect(rd.result.structuredContent.state).toBe("same");
@@ -141,6 +145,7 @@ describe("MCP 工具端点", () => {
     expect(ad.inputSchema.required).toContain("base_rev");
     expect((await call("edit_draft", { op: "create_object", name: "vendor", kind: "thing", base_rev: 0, space: "draft" })).error?.code).toBe(-32602);
     expect((await call("list_tables", { space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("list_candidates", { space: "draft" })).error?.code).toBe(-32602);
   });
 
   it("edit_draft：信封校验（缺 base_rev / 字符串 base_rev）-32602；save_layout -32602", async () => {
@@ -218,6 +223,29 @@ describe("MCP 工具端点", () => {
     const ghost = await call("list_tables", { connection: "ghost_db" });
     expect(ghost.error).toBeUndefined();
     expect(ghost.result.structuredContent.sources).toEqual([{ connection: "ghost_db", tables: [], error: "没有这个连接" }]);
+  });
+
+  it("list_candidates：只看草稿里的疑似重复，不定案", async () => {
+    const s = await draftEngine();
+    const rev = (await call("list_classes", { space: "draft" })).result.structuredContent.rev as number;
+    const imp = await call("edit_draft", {
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+      base_rev: rev,
+    });
+    expect(imp.error).toBeUndefined();
+    const r = await call("list_candidates", {});
+    expect(r.error).toBeUndefined();
+    const pairs = r.result.structuredContent.candidates as { class_a: string; class_b: string; tendency: string; reason: string }[];
+    const hit = pairs.filter((p) => (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a"));
+    expect(hit).toHaveLength(1);
+    expect(hit[0].tendency).toBeTruthy();
+    expect(hit[0].reason).toBeTruthy();
+    expect((await s.getDraft("test")).draft.object_types.po_a).toBeDefined();
+    expect((await s.getDraft("test")).draft.object_types.po_b).toBeDefined(); // 只看，没把两并成一个
   });
 
   it("set_action 经 edit_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {

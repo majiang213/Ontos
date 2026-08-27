@@ -74,33 +74,104 @@ export class CannedSlot implements LlmSlot {
     return out;
   }
 
-  async proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
+  async proposePairs(classes: ClassShot[]): Promise<PairAdvice[]> {
     const pairs: PairAdvice[] = [];
     for (let i = 0; i < classes.length; i++) {
       for (let j = i + 1; j < classes.length; j++) {
-        const a = classes[i];
-        const b = classes[j];
-        if (a.sources.some((s) => b.sources.includes(s))) continue; // 有共同连接不成对
-        const shared = a.fields.filter((f) => b.fields.includes(f));
-        const ratio = shared.length / Math.max(a.fields.length, b.fields.length, 1);
-        const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
-        if (ratio < 0.4 && !nameLike) continue; // 字段对不上、名字也不像，不进候选
-        if (ratio < 0.4 && nameLike) {
-          pairs.push({ class_a: a.name, class_b: b.name, tendency: Verdict.NameSimilar, reason: `名字相近（${a.name} / ${b.name}），字段对不上` });
-          continue;
-        }
-        const hasStage = [...a.fields, ...b.fields].some((f) => /status|state|阶段|状态/.test(f));
-        const tendency: Tendency = ratio > 0.8 ? Verdict.Same : hasStage ? Verdict.Stage : Verdict.Overlap;
-        pairs.push({
-          class_a: a.name,
-          class_b: b.name,
-          tendency,
-          reason: `字段重合 ${shared.length}/${Math.max(a.fields.length, b.fields.length)}（${shared.join("、")}）${hasStage ? "；含状态字段" : ""}`,
-        });
+        const advice = schemaAdvice(classes[i], classes[j]);
+        if (advice) pairs.push(advice);
       }
     }
     return pairs;
   }
+
+  async proposePair(input: {
+    class_a: ClassShot;
+    class_b: ClassShot;
+    overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
+  }): Promise<PairAdvice> {
+    const base = schemaAdvice(input.class_a, input.class_b) ?? {
+      class_a: input.class_a.name,
+      class_b: input.class_b.name,
+      tendency: Verdict.NameSimilar,
+      reason: `名字和字段都不像（${input.class_a.name} / ${input.class_b.name}）`,
+    };
+    return reviseWithOverlap(base, input.class_a, input.class_b, input.overlap);
+  }
+}
+
+type ClassShot = { name: string; sources: string[]; fields: string[] };
+
+function hasStageField(a: ClassShot, b: ClassShot): boolean {
+  return [...a.fields, ...b.fields].some((f) => /status|state|阶段|状态/.test(f));
+}
+
+/** 只看名字和字段的倾向：列表建议与看过交集率之后的修订共用。同源 / 字段名字都不像 = 不成对。 */
+function schemaAdvice(a: ClassShot, b: ClassShot): PairAdvice | null {
+  if (a.sources.some((s) => b.sources.includes(s))) return null; // 有共同连接不成对
+  const shared = a.fields.filter((f) => b.fields.includes(f));
+  const ratio = shared.length / Math.max(a.fields.length, b.fields.length, 1);
+  const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
+  if (ratio < 0.4 && !nameLike) return null; // 字段对不上、名字也不像，不进候选
+  if (ratio < 0.4 && nameLike) {
+    return { class_a: a.name, class_b: b.name, tendency: Verdict.NameSimilar, reason: `名字相近（${a.name} / ${b.name}），字段对不上` };
+  }
+  const hasStage = hasStageField(a, b);
+  const tendency: Tendency = ratio > 0.8 ? Verdict.Same : hasStage ? Verdict.Stage : Verdict.Overlap;
+  return {
+    class_a: a.name,
+    class_b: b.name,
+    tendency,
+    reason: `字段重合 ${shared.length}/${Math.max(a.fields.length, b.fields.length)}（${shared.join("、")}）${hasStage ? "；含状态字段" : ""}`,
+  };
+}
+
+function pct(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
+/** 硬证据修订：有一侧没行则比率说话不算数，沿用字段倾向；两边都有行才按比率改口。 */
+function reviseWithOverlap(
+  base: PairAdvice,
+  a: ClassShot,
+  b: ClassShot,
+  overlap: { rate: number; count_a: number; count_b: number; count_hit: number }
+): PairAdvice {
+  const counts = `${overlap.count_hit} 条对得上号（${overlap.count_a} / ${overlap.count_b}）`;
+  if (overlap.count_a === 0 || overlap.count_b === 0) {
+    return {
+      class_a: a.name,
+      class_b: b.name,
+      tendency: base.tendency,
+      reason: `有一侧还没有行（${overlap.count_a} / ${overlap.count_b}），交集率 ${pct(overlap.rate)} 说明不了是不是同一批。按字段看：${base.reason}`,
+    };
+  }
+  if (overlap.rate < 0.1) {
+    return {
+      class_a: a.name,
+      class_b: b.name,
+      tendency: Verdict.NameSimilar,
+      reason: `交集率 ${pct(overlap.rate)}（${counts}），两边都有行但对不上号，多半不相干。`,
+    };
+  }
+  if (overlap.rate >= 0.8) {
+    return {
+      class_a: a.name,
+      class_b: b.name,
+      tendency: Verdict.Same,
+      reason: `交集率 ${pct(overlap.rate)}（${counts}），多半是同一批东西。`,
+    };
+  }
+  const tendency = hasStageField(a, b) ? Verdict.Stage : Verdict.Overlap;
+  return {
+    class_a: a.name,
+    class_b: b.name,
+    tendency,
+    reason:
+      tendency === Verdict.Stage
+        ? `交集率 ${pct(overlap.rate)}（${counts}），对得上一部分，又有状态字段，倾向阶段。`
+        : `交集率 ${pct(overlap.rate)}（${counts}），对得上一部分，倾向部分重叠。`,
+  };
 }
 
 /* ---------- 演示问数剧本（test 空间离线回退的编译脚本） ----------

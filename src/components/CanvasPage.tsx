@@ -325,18 +325,18 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         onLayoutChange={saveLayout}
       />
 
-      {/* 左上一条工具条：品牌和入口同一行。顺序是连接 → 待确认 → 发布；关卡用按钮，其余用文字。 */}
+      {/* 左上一条工具条：品牌和入口同一行。顺序是连接 → 待确认 → 发布。入口一律 btn，发布有改动时用 btn-cta。 */}
       <div className="float-card float-tl dock">
         <Bezel pad="6px 8px">
           <div className="dock-bar">
             <div className="dock-brand">{brand}</div>
             <i className="dock-split" aria-hidden />
-            <button className={`dock-link${card?.kind === "connect" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "connect" ? null : { kind: "connect" })}>连接数据源</button>
-            <button className={`dock-link${card?.kind === "create" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "create" ? null : { kind: "create" })}>新建对象</button>
+            <button className={`btn${card?.kind === "connect" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "connect" ? null : { kind: "connect" })}>连接数据源</button>
+            <button className={`btn${card?.kind === "create" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "create" ? null : { kind: "create" })}>新建对象</button>
             <i className="dock-split" aria-hidden />
             <button className={`btn${panelOpen ? " is-on" : ""}`} onClick={() => setPanelOpen((v) => !v)}>待确认</button>
             <i className="dock-split" aria-hidden />
-            <button className={`dock-link${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })}>
+            <button className={`btn${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })}>
               {ont ? versionLabel(ont) : "已发布 v…"} ▾
             </button>
             {ont?.dirty ? (
@@ -350,7 +350,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
               <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>
             )}
             <i className="dock-split" aria-hidden />
-            <button className={`dock-link${card?.kind === "questions" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "questions" ? null : { kind: "questions" })}>验收问题集</button>
+            <button className={`btn${card?.kind === "questions" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "questions" ? null : { kind: "questions" })}>验收问题集</button>
           </div>
         </Bezel>
       </div>

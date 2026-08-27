@@ -1,4 +1,5 @@
 // LLM 槽位 —— 「模型在哪几个槽位出现、没 key 怎么办」（《ontos-article.md》§4、§5.3）。
+// 整合槽位两次出场：proposePairs 只看名字和字段；proposePair 看过交集率再给倾向。
 // 接口 + 组合原语；槽位选择（有 OPENAI_API_KEY 走真模型，否则罐头离线回退）收在组合根 runtime.ts，
 // 边界经 EngineEnv.llm 下传——本文件不摸进程级单例。
 // 实现在同目录：罐头 canned.ts（离线确定性 + 演示剧本），真模型 aiSdk.ts（提示词工程）。
@@ -21,6 +22,12 @@ export interface LlmSlot {
   proposeObjects(tables: { connection: string; table: TableInfo }[], occupied?: string[]): Promise<Record<string, ObjectType>>;
   /** 跨源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合（跨源判定在实现里做）。 */
   proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
+  /** 看过交集率之后，对这一对再给倾向（仍是整合槽位）。比率由调用方算好传入，槽位不当计算器。 */
+  proposePair(input: {
+    class_a: { name: string; sources: string[]; fields: string[] };
+    class_b: { name: string; sources: string[]; fields: string[] };
+    overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
+  }): Promise<PairAdvice>;
 }
 
 /** 「表结构 → 对象建议」的组合原语：按连接内省定位 + 槽位产草稿。REST 与 MCP 的 propose_objects 共用；

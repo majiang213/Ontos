@@ -115,11 +115,18 @@ export function search(config: OntologyConfig, text: string): { classes: string[
 
 export interface DraftClassListItem extends ClassListItem {
   state: ClassState;
+  /** 已定的唯一键字段名；还没定就不写这个键。 */
+  identity?: string;
 }
 
-/** 草稿版「列出类」：每个类带相对已发布的状态。 */
+/** 草稿版「列出类」：每个类带相对已发布的状态、已定的唯一键。 */
 export function listClassesDraft(draft: OntologyConfig, published: OntologyConfig): DraftClassListItem[] {
-  return Object.entries(draft.object_types).map(([name, t]) => ({ name, description: t.description, state: classState(draft, published, name) }));
+  return Object.entries(draft.object_types).map(([name, t]) => ({
+    name,
+    description: t.description,
+    state: classState(draft, published, name),
+    ...(t.identity ? { identity: t.identity } : {}),
+  }));
 }
 
 /** 草稿版「列出类」的整包（MCP list_classes space=draft 的 payload 形状单源）：

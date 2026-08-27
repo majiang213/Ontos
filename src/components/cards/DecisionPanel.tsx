@@ -58,77 +58,83 @@ export default function DecisionPanel({
   const ready = rows.length > 0 && rows.every((r) => Boolean(sel[r.name])); // 空画布或还有「未设置」都不放行——键没定就裁会得出错的关系
   const unlocked = identityDone && ready; // 面板开着时新对象进卡，ready 变 false，② 收回
   return (
-    <div className="float-card float-bc decide">
+    <div className={`float-card float-bc decide${unlocked ? " is-pairs" : ""}`}>
       <Bezel pad={0}>
         <div className="decide-head">
-          <span className="decide-title">待确认</span>
-          <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
+          <span className="decide-title">{unlocked ? "疑似重复" : "待确认"}</span>
+          <span className="decide-head-actions">
+            {unlocked && (
+              <button className="chip" onClick={() => setIdentityDone(false)}>改唯一键</button>
+            )}
+            <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
+          </span>
         </div>
 
-        <div className="decide-body">
-          <div className="decide-kicker">① 唯一键（{rows.length} 个对象）</div>
-          {rows.length === 0 && <div className="decide-empty">画布上还没有对象，先去生成或新建。</div>}
-          <div className="decide-grid">
-            {rows.map((r) => {
-              const v = sel[r.name] ?? "";
-              const suggested = Boolean(r.current) && v === r.current;
-              return (
-                <label key={r.name} className="decide-cell">
-                  <div className="decide-cell-top">
-                    <span className="decide-obj">{r.name}</span>
-                    {suggested ? <span className="decide-hint">模型建议</span> : null}
-                  </div>
-                  <span className="decide-select">
-                    <select
-                      className="ctl"
-                      value={v}
-                      onChange={(e) => {
-                        setSel((prev) => ({ ...prev, [r.name]: e.target.value }));
-                        if (identityDone) setIdentityDone(false); // 改了键，②里按旧键算的候选对作废
-                      }}
-                    >
-                      <option value="">未设置</option>
-                      {r.fields.map((f) => (
-                        <option key={f.name} value={f.name}>{fieldLabel(f)}</option>
-                      ))}
-                    </select>
-                  </span>
-                </label>
-              );
-            })}
+        {!unlocked ? (
+          <>
+            <div className="decide-body">
+              <div className="decide-kicker">① 唯一键（{rows.length} 个对象）</div>
+              {rows.length === 0 && <div className="decide-empty">画布上还没有对象，先去生成或新建。</div>}
+              <div className="decide-list">
+                {rows.map((r) => {
+                  const v = sel[r.name] ?? "";
+                  const suggested = Boolean(r.current) && v === r.current;
+                  return (
+                    <label key={r.name} className="decide-row">
+                      <span className="decide-obj">{r.name}</span>
+                      <span className="decide-select">
+                        <select
+                          className="ctl"
+                          value={v}
+                          onChange={(e) => {
+                            setSel((prev) => ({ ...prev, [r.name]: e.target.value }));
+                            if (identityDone) setIdentityDone(false); // 改了键，②里按旧键算的候选对作废
+                          }}
+                        >
+                          <option value="">未设置</option>
+                          {r.fields.map((f) => (
+                            <option key={f.name} value={f.name}>{fieldLabel(f)}</option>
+                          ))}
+                        </select>
+                      </span>
+                      <span className="decide-hint">{suggested ? "模型建议" : ""}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="decide-lock">
+              <div className="decide-lock-title">② 疑似重复</div>
+              <div className="decide-lock-note">先确认①唯一键，这里才展开。</div>
+            </div>
+            <div className="decide-foot">
+              <button
+                className="btn-cta"
+                disabled={busy || !ready}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    if (await onConfirmIdentity(sel)) setIdentityDone(true);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                确认唯一键
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="decide-body decide-pairs-body">
+            {pairs.length === 0 && <div className="decide-empty">没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
+            {pairs.length > 0 && (
+              <>
+                {pairs.length > 1 && <div className="decide-kicker">还剩 {pairs.length} 对，先裁这一对</div>}
+                <PairCard key={`${pairs[0].class_a}|${pairs[0].class_b}`} pair={pairs[0]} onDone={onPairDone} />
+              </>
+            )}
           </div>
-        </div>
-
-        <div className={`decide-lock${unlocked ? " is-open" : ""}`}>
-          <div className="decide-lock-title">② 疑似重复</div>
-          {!unlocked ? (
-            <div className="decide-lock-note">先确认①唯一键，这里才展开。</div>
-          ) : (
-            <>
-              {pairs.length === 0 && <div className="decide-empty">没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
-              {pairs.map((p) => (
-                <PairCard key={`${p.class_a}|${p.class_b}`} pair={p} onDone={onPairDone} />
-              ))}
-            </>
-          )}
-        </div>
-
-        <div className="decide-foot">
-          <button
-            className="btn-cta"
-            disabled={busy || !ready}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                if (await onConfirmIdentity(sel)) setIdentityDone(true);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            确认唯一键
-          </button>
-        </div>
+        )}
       </Bezel>
     </div>
   );

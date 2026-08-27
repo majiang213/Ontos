@@ -10,6 +10,7 @@ import { overlapRate } from "../server/features/integrate/overlap";
 import { applyVerdict } from "../server/features/integrate/applyVerdict";
 import { Verdict } from "../server/schema/verdict";
 import { listCandidates } from "../server/features/integrate/candidates";
+import { proposePair } from "../server/features/integrate/advise";
 import { computeOverlap } from "../server/features/integrate/overlap";
 import { decide } from "../server/features/integrate/decide";
 import { EngineReject } from "../server/errors";
@@ -257,6 +258,38 @@ describe("裁决流水线", () => {
     expect((await s.getDraft()).draft.object_types.po_b).toBeDefined();
   });
 
+  it("listCandidates：槽位把同一对写两遍或对调两端，只出一条", async () => {
+    const s = await draftEngine();
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+    });
+    const one: { class_a: string; class_b: string; tendency: Verdict.Same; reason: string } = {
+      class_a: "po_a",
+      class_b: "po_b",
+      tendency: Verdict.Same,
+      reason: "字段重合",
+    };
+    const list = unwrap(
+      await listCandidates({
+        ...s.env,
+        llm: {
+          name: "dup",
+          nlToQuery: async () => ({ object: "po_a" }),
+          proposeObjects: async () => ({}),
+          proposePairs: async () => [one, one, { ...one, class_a: "po_b", class_b: "po_a" }],
+          proposePair: async () => one,
+        },
+      })
+    );
+    const isPair = (p: { class_a: string; class_b: string }) =>
+      (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a");
+    expect(list.filter(isPair)).toHaveLength(1);
+  });
+
   it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
     const s = await draftEngine();
     await s.editDraft({
@@ -274,6 +307,30 @@ describe("裁决流水线", () => {
     expect(r.recorded).toBe(true);
     expect(JSON.stringify((await s.getDraft()).draft)).toBe(before);
     expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(false);
+  });
+
+  it("proposePair：看过交集率后改口；空表不因 0% 改口；无源/同源拒绝", async () => {
+    const s = await draftEngine();
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+    });
+    const miss = unwrap(await proposePair(s.env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 80, count_hit: 0 }));
+    expect(miss.tendency).toBe(Verdict.NameSimilar);
+    const empty = unwrap(await proposePair(s.env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
+    expect(empty.tendency).toBe(Verdict.Same);
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
+    expect((await proposePair(s.env, "default", "po_a", "vendor", { rate: 0, count_a: 1, count_b: 1, count_hit: 0 })).code).toBe(422);
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        po_c: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sc: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
+      },
+    });
+    expect((await proposePair(s.env, "default", "po_a", "po_c", { rate: 0.5, count_a: 2, count_b: 2, count_hit: 1 })).code).toBe(422);
   });
 
   it("computeOverlap：无源类、同源对拒绝", async () => {

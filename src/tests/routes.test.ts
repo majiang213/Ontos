@@ -82,6 +82,14 @@ describe("错误分层：400 / 422 / 500", () => {
     expect((await post("compute_overlap", JSON.stringify({ class_a: "equipment", class_b: "equipment" }), undefined, TEST)).status).toBe(400);
   });
 
+  it("propose_pair：自配对 400；看过交集率后给出倾向", async () => {
+    expect((await post("propose_pair", JSON.stringify({ class_a: "equipment", class_b: "equipment", rate: 0, count_a: 1, count_b: 1, count_hit: 0 }), undefined, TEST)).status).toBe(400);
+    const r = await post("propose_pair", JSON.stringify({ class_a: "equipment", class_b: "person", rate: 0, count_a: 100, count_b: 0, count_hit: 0 }), undefined, TEST);
+    expect(r.status).toBe(200);
+    expect(r.data.tendency).toBeTruthy();
+    expect(r.data.reason).toBeTruthy();
+  });
+
   it("overlap：无源类 422（幻影 rate 不产）；同源对 422（不全列扫）", async () => {
     const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源

@@ -1,9 +1,8 @@
-// 疑似重复面板里的一对：建议 + 依据 + 交集率（按需计算）+ 五种结论。失败留在面板里可重试。
-// 「对调两端」：同一留下乘号前的类、阶段的晚源看乘号后的类——模型给反了人在这里对调（POST 的 class_a/class_b 跟着换）；
-// 已算的交集率按类名对齐条数，对齐不上就清掉让人再算（不换标题糊弄）。
+// 疑似重复里的一对：先选结论；「同一」再问留下谁，「阶段」再问谁早谁晚。
+// 顺序进 POST 的 class_a/class_b：「同一」留下 a 并把 b 并进去；「阶段」a 早 b 晚。
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PairAdvice } from "../../server/schema/verdict";
 import { VERDICTS, VERDICT_LABELS, Verdict } from "../../server/schema/verdict";
 import { apiPost } from "../workspaceClient";
@@ -26,148 +25,230 @@ function alignRate(r: OverlapResp, order: [string, string]): OverlapResp | null 
   return null;
 }
 
+const HINTS: Record<Verdict, string> = {
+  [Verdict.Same]: "就是同一批东西。合并成一个对象，挂多个来源。点了之后还要选留下谁。",
+  [Verdict.Overlap]: "有一部分重合。公共字段立一个公共对象，各自特有的字段留下。",
+  [Verdict.Stage]: "同一批东西的不同时期（如在途设备到在役设备）。并成一个对象，自动加状态字段和「转为晚阶段」动作。点了之后还要选谁早、谁晚。",
+  [Verdict.NameSimilar]: "只是名字像，其实不相干。各自独立。",
+  [Verdict.Skip]: "这次不判，先放着。",
+};
+
 export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (msg: string) => void }) {
-  const [order, setOrder] = useState<[string, string]>([pair.class_a, pair.class_b]); // 当前乘号两端（对调只改这里）
-  const [rate, setRate] = useState<OverlapResp | null>(null); // 存的是按当前 order 对齐后的结果
+  const [order, setOrder] = useState<[string, string]>([pair.class_a, pair.class_b]);
+  const [rate, setRate] = useState<OverlapResp | null>(null);
+  const [advice, setAdvice] = useState<PairAdvice>(pair);
+  const [seenOverlap, setSeenOverlap] = useState(false);
   const [stage, setStage] = useState({ from: "", to: "" });
+  const [step, setStep] = useState<null | "same" | "stage">(null);
   const [busy, setBusy] = useState(false);
   const [rateBusy, setRateBusy] = useState(false);
+  const [adviseBusy, setAdviseBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const stageFromRef = useRef<HTMLInputElement>(null);
 
-  const decide = async (verdict: Verdict) => {
+  useEffect(() => {
+    setOrder([pair.class_a, pair.class_b]);
+    setRate(null);
+    setAdvice(pair);
+    setSeenOverlap(false);
+    setStage({ from: "", to: "" });
+    setStep(null);
+    setRateBusy(false);
+    setAdviseBusy(false);
+    setError(null);
+  }, [pair.class_a, pair.class_b, pair.tendency, pair.reason]);
+
+  const applyOrder = (keep: string): [string, string] => {
+    const next: [string, string] = keep === order[0] ? order : [order[1], order[0]];
+    setOrder(next);
+    if (rate) setRate(alignRate(rate, next));
+    return next;
+  };
+
+  const decide = async (verdict: Verdict, ord: [string, string] = order, stageNames = stage) => {
     setBusy(true);
     setError(null);
     try {
       const data = await apiPost<{ recorded?: boolean }>("/api/decide", {
-        class_a: order[0],
-        class_b: order[1],
+        class_a: ord[0],
+        class_b: ord[1],
         verdict,
-        stage_names: verdict === Verdict.Stage && stage.from && stage.to ? stage : undefined,
-        llm_advice: `${VERDICT_LABELS[pair.tendency]}：${pair.reason}`,
-        evidence: rate ?? undefined, // 证据快照：归一化规则、样本量、交集数、比率
+        stage_names: verdict === Verdict.Stage && stageNames.from && stageNames.to ? stageNames : undefined,
+        llm_advice: `${VERDICT_LABELS[advice.tendency]}：${advice.reason}`,
+        evidence: rate ?? undefined,
       });
       onDone(
         verdict === Verdict.Stage
-          ? `已裁决 ${order[0]} × ${order[1]}：并成一个对象，加了状态字段和「转为${stage.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+          ? `已裁决 ${ord[0]} × ${ord[1]}：并成一个对象，加了状态字段和「转为${stageNames.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
           : verdict === Verdict.Same || verdict === Verdict.Overlap
-            ? `已裁决 ${order[0]} × ${order[1]}：${VERDICT_LABELS[verdict]}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
-            : "" // 仅名称相似/跳过：不动草稿，条目从面板消失即是反馈，不弹提示
+            ? `已裁决 ${ord[0]} × ${ord[1]}：${VERDICT_LABELS[verdict]}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
+            : ""
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e)); // 留在面板里，能重试
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  // 五种结论的白话说明：名字是定案术语（VERDICT_LABELS），解释是给用户扫一眼的
-  const HINTS: Record<Verdict, string> = {
-    [Verdict.Same]: "就是同一批东西——合并成一个对象，挂多个来源",
-    [Verdict.Overlap]: "有一部分重合——公共字段立一个公共对象，各自特有的字段留下",
-    [Verdict.Stage]: "同一批东西的不同时期（如在途设备 → 在役设备）——并成一个对象，自动加状态字段和「转为晚阶段」动作",
-    [Verdict.NameSimilar]: "只是名字像，其实不相干——各自独立",
-    [Verdict.Skip]: "这次不判，先放着",
+  const pick = (v: Verdict) => {
+    if (busy) return;
+    if (v === Verdict.Same) {
+      setStep("same");
+      return;
+    }
+    if (v === Verdict.Stage) {
+      setStep("stage");
+      return;
+    }
+    setStep(null);
+    void decide(v);
   };
-  const options: { v: Verdict; label: string; hint: string }[] = VERDICTS.map((v) => ({ v, label: VERDICT_LABELS[v], hint: HINTS[v] }));
 
   return (
-    <div style={{ borderTop: "1px solid var(--hairline)", padding: "14px 0 4px" }}>
-      {/* 候选对 + 对调 + AI 软证据 */}
-      <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span>
-          <code>{order[0]}</code> × <code>{order[1]}</code>
-        </span>
-        <button
-          className="chip"
-          style={{ fontSize: 11 }}
-          title="乘号顺序有讲究：「同一」留下乘号前的对象，「阶段」按两端来源定早晚。模型给反了就点我"
-          onClick={() => {
-            const next: [string, string] = [order[1], order[0]];
-            setOrder(next);
-            if (rate) setRate(alignRate(rate, next)); // 已算的交集率跟着类走；对齐不上就清掉，重新算
-          }}
-        >
-          对调两端
-        </button>
+    <div className="pair">
+      <div className="pair-names">
+        <code>{pair.class_a}</code>
+        <span className="pair-and">和</span>
+        <code>{pair.class_b}</code>
       </div>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6 }}>
-        AI 建议「{VERDICT_LABELS[pair.tendency]}」，依据：{pair.reason}。
-        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>建议只是参考——起名像不像会骗人，定夺要看真实数据和你。</div>
+      <div className="pair-ev">
+        <span className="pair-ev-k">{adviseBusy ? "正在看" : seenOverlap ? "看过交集率" : "AI 建议"}</span>
+        <div className="pair-ev-v">
+          <span className="pair-ev-badge">{VERDICT_LABELS[advice.tendency]}</span>
+          {adviseBusy ? "正看着交集率，等它改口或坚持。" : advice.reason}
+        </div>
       </div>
-      {/* 交集率：硬证据，按需算；注解跟在同一行 */}
-      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 12, color: "var(--ink-2)", marginTop: 8 }}>
-        {rate ? (
-          <span>
-            交集率 <strong>{(rate.rate * 100).toFixed(0)}%</strong>（{order[0]} {rate.count_a} 条、{order[1]} {rate.count_b} 条，其中 {rate.count_hit} 条对得上号）
-            {rate.count_hit === 0 ? "——完全对不上，多半不相干" : rate.rate >= 0.5 ? "——多半是同一批" : ""}
-          </span>
-        ) : (
-          <button
-            className="chip"
-            disabled={rateBusy}
-            onClick={async () => {
-              if (rateBusy) return; // 交集是内存集合运算，连点没意义
-              setRateBusy(true);
-              setError(null);
-              try {
-                const r = await apiPost<OverlapResp>("/api/compute_overlap", { class_a: order[0], class_b: order[1] });
-                setRate(alignRate(r, order)); // 按当前两端对齐；类名对不上（草稿变了）就清掉让人再点
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              } finally {
-                setRateBusy(false);
-              }
-            }}
-          >
-            {rateBusy ? "算着…" : "算一算交集率"}
-          </button>
-        )}
-        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>交集率 = 两边唯一键的取值有多少对得上号（内存里算，不搬数据出库）。</span>
-      </div>
-      {/* 结论：整宽行卡，名字在左、说明跟随，整行可点 */}
-      <div style={{ fontSize: 12, color: "var(--ink-2)", margin: "14px 0 6px" }}>是同一批现实对象吗？选一个结论：</div>
-      <div style={{ borderTop: "1px solid var(--hairline)" }}>
-        {options.map((o) => {
-          const incomplete = o.v === Verdict.Stage && (!stage.from || !stage.to); // 阶段缺参数：不置灰（输入框在行里），点击改成聚焦
-          return (
-            <div
-              key={o.v}
-              className="verdict-row"
-              role="button"
-              tabIndex={0}
-              aria-disabled={busy}
-              onClick={() => {
-                if (busy) return;
-                if (incomplete) {
-                  stageFromRef.current?.focus();
-                  return;
+      <div
+        className={`pair-ev${
+          !rate ? " is-mid" : rate.count_hit === 0 ? " is-low" : rate.rate >= 0.5 ? " is-high" : " is-mid"
+        }`}
+      >
+        <span className="pair-ev-k">交集率</span>
+        <div className="pair-ev-v">
+          {rate ? (
+            <>
+              <span className="pair-ev-num">{(rate.rate * 100).toFixed(0)}%</span>
+              {rate.count_hit} 条对得上号
+              {rate.count_a === 0 || rate.count_b === 0
+                ? "，有一侧还没有行"
+                : rate.count_hit === 0
+                  ? "，多半不相干"
+                  : rate.rate >= 0.5
+                    ? "，多半是同一批"
+                    : ""}
+            </>
+          ) : (
+            <button
+              className="chip"
+              disabled={rateBusy || adviseBusy}
+              onClick={async () => {
+                if (rateBusy || adviseBusy) return;
+                setRateBusy(true);
+                setError(null);
+                try {
+                  const r = await apiPost<OverlapResp>("/api/compute_overlap", { class_a: order[0], class_b: order[1] });
+                  const aligned = alignRate(r, order);
+                  setRate(aligned);
+                  setRateBusy(false);
+                  if (!aligned) return;
+                  setAdviseBusy(true);
+                  try {
+                    const next = await apiPost<PairAdvice>("/api/propose_pair", {
+                      class_a: aligned.class_a,
+                      class_b: aligned.class_b,
+                      rate: aligned.rate,
+                      count_a: aligned.count_a,
+                      count_b: aligned.count_b,
+                      count_hit: aligned.count_hit,
+                    });
+                    setAdvice(next);
+                    setSeenOverlap(true);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setAdviseBusy(false);
+                  }
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                  setRateBusy(false);
                 }
-                void decide(o.v);
-              }}
-              onKeyDown={(e) => {
-                if (busy || incomplete) return;
-                if (e.key === "Enter" || e.key === " ") void decide(o.v);
               }}
             >
-              <span className="verdict-name">{o.label}</span>
-              <span className="verdict-hint">{o.hint}</span>
-              {o.v === Verdict.Stage && (
-                <span className="verdict-stage" onClick={(e) => e.stopPropagation()}>
-                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>填两个时期的名字（英文小写，问数按这里填的字过滤）：</span>
-                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>早</span>
-                    <input ref={stageFromRef} placeholder="in_transit" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--panel-2)" }} />
-                    <span style={{ color: "var(--ink-3)" }}>→</span>
-                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>晚</span>
-                    <input placeholder="in_service" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} style={{ width: 96, fontSize: 12, padding: "4px 8px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--panel-2)" }} />
-                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>，再点本行定案</span>
-                </span>
-              )}
-            </div>
-          );
-        })}
+              {rateBusy ? "算着…" : "算一算交集率"}
+            </button>
+          )}
+        </div>
       </div>
-      {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
+
+      <div className="pair-q">它们是什么关系？</div>
+      <div>
+        {VERDICTS.map((v) => (
+          <div
+            key={v}
+            className={`verdict-row${(step === "same" && v === Verdict.Same) || (step === "stage" && v === Verdict.Stage) ? " is-on" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-disabled={busy}
+            onClick={() => pick(v)}
+            onKeyDown={(e) => {
+              if (busy) return;
+              if (e.key === "Enter" || e.key === " ") pick(v);
+            }}
+          >
+            <span className="verdict-name">{VERDICT_LABELS[v]}</span>
+            {!adviseBusy && v === advice.tendency && <span className="verdict-suggest">建议</span>}
+            <span className="verdict-hint">{HINTS[v]}</span>
+          </div>
+        ))}
+      </div>
+
+      {step === "same" && (
+        <div className="pair-next">
+          <div className="pair-next-q">留下哪一个？另一个并进来。</div>
+          {[pair.class_a, pair.class_b].map((name) => (
+            <button
+              key={name}
+              className="btn"
+              disabled={busy}
+              onClick={() => void decide(Verdict.Same, applyOrder(name))}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "stage" && (
+        <div className="pair-next">
+          <div className="pair-next-q">哪个时期更早？</div>
+          {[pair.class_a, pair.class_b].map((name) => (
+            <button
+              key={name}
+              className={`btn${order[0] === name ? " is-on" : ""}`}
+              disabled={busy}
+              onClick={() => applyOrder(name)}
+            >
+              {name}
+            </button>
+          ))}
+          <div className="pair-stage-fields">
+            <span>早</span>
+            <input className="ctl" placeholder="in_transit" value={stage.from} onChange={(e) => setStage({ ...stage, from: e.target.value })} />
+            <span>晚</span>
+            <input className="ctl" placeholder="in_service" value={stage.to} onChange={(e) => setStage({ ...stage, to: e.target.value })} />
+            <button
+              className="btn-cta"
+              disabled={busy || !stage.from || !stage.to}
+              onClick={() => void decide(Verdict.Stage)}
+            >
+              定案
+            </button>
+          </div>
+          <div className="pair-hint">时期名用英文小写，问数按这里填的字过滤。</div>
+        </div>
+      )}
+
+      {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

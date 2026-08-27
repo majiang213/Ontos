@@ -297,6 +297,7 @@ export const MSG = {
   rpcNoSpace: "这个工具不接受 space",
   rpcSpaceValues: "space 只认 published 或 draft",
   pairSelfDecide: "class_a 与 class_b 不能是同一个类",
+  pairSelfAdvise: "自己和自己不用再建议",
 
   // Result 成功提示（边界入口的 message：白话、准确；失败文案在上面各节）
   resultQueryRows: (n: number) => `查到 ${n} 行`,
@@ -307,6 +308,7 @@ export const MSG = {
   resultDecided: (label: string) => `已记录裁决：${label}`,
   resultOverlap: (rate: number) => `交集率 ${Math.round(rate * 100)}%`,
   resultCandidates: (n: number) => `找到 ${n} 个疑似重复`,
+  resultPairAdvice: (label: string) => `建议「${label}」`,
   resultRunDone: (n: number) => `跑批完成：${n} 条`,
   resultProposed: (n: number) => `生成 ${n} 个对象建议`,
   resultConnectionSaved: "连接已保存",

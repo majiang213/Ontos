@@ -24,10 +24,15 @@ export async function listCandidates(env: EngineEnv, workspace: string = DEFAULT
       }));
     const byName = new Map(Object.entries(d.object_types));
     const advices = await env.llm.proposePairs(classes);
+    const seen = new Set<string>();
     return advices.filter((p) => {
       const a = byName.get(p.class_a);
       const b = byName.get(p.class_b);
-      return Boolean(a && b && pairEligible(a, b, decided, p.class_a, p.class_b));
+      if (!a || !b || !pairEligible(a, b, decided, p.class_a, p.class_b)) return false;
+      const k = pairKey(p.class_a, p.class_b); // 模型会把同一对写两遍或对调两端，无序键只留先到的
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
     });
   }, (v) => MSG.resultCandidates(v.length));
 }

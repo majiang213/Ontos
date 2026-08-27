@@ -22,13 +22,14 @@ import type { LlmSlot } from "./slot";
 type Gen = typeof generateText;
 
 const draftSchema = z.object({ object_types: z.record(z.string(), objectTypeSchema) });
+const pairAdviceSchema = z.object({
+  class_a: z.string(),
+  class_b: z.string(),
+  tendency: z.enum(TENDENCIES),
+  reason: z.string(),
+});
 const pairsSchema = z.object({
-  pairs: z.array(z.object({
-    class_a: z.string(),
-    class_b: z.string(),
-    tendency: z.enum(TENDENCIES),
-    reason: z.string(),
-  })),
+  pairs: z.array(pairAdviceSchema),
 });
 
 /** 输出形状的提示词片段：response_format 完全不下发，形状只靠提示词给（zod → JSON Schema 的唯一渲染处）。 */
@@ -159,6 +160,30 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
 对象：${JSON.stringify(classes)}`,
         }),
       (output) => pairsSchema.parse(output).pairs
+    );
+  }
+
+  async proposePair(input: {
+    class_a: { name: string; sources: string[]; fields: string[] };
+    class_b: { name: string; sources: string[]; fields: string[] };
+    overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
+  }): Promise<PairAdvice> {
+    const labels = TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、");
+    return this.runWithFailureDump(
+      "proposePair",
+      { class_a: input.class_a.name, class_b: input.class_b.name, overlap: input.overlap },
+      () =>
+        this.gen({
+          model: this.model,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          prompt: `你是本体平台的整合顾问。下面这一对已经算过交集率（唯一键洗过之后，两边对得上号的比例）。请综合字段、名字和这个硬证据，给出一个倾向与一句白话依据。${shapeOf(pairAdviceSchema)}
+倾向枚举：${labels}。class_a / class_b 必须用下面给的两个类名。
+怎么看交集率：两边都有不少行、比率接近 0 → 仅名称相似；接近全交 → 同一或部分重叠（看特有字段再分）；卡在中间、且有状态或日期字段 → 阶段。
+有一侧行数是 0：交集率说明不了是不是同一批（可能是空表），不要只因为 0% 就判仅名称相似；按字段和名字判断是不是同一类东西挂多个来源。
+不要因为表主键不同、关联不同就判不相干。依据写一句人话，不要列编号。
+对象：${JSON.stringify({ class_a: input.class_a, class_b: input.class_b, overlap: input.overlap })}`,
+        }),
+      (output) => pairAdviceSchema.parse(output)
     );
   }
 }
