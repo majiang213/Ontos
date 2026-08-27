@@ -1,6 +1,7 @@
-// 裁决留痕与交集计数：adj_decision（含版本回填/放弃标记）与 adj_overlap（按对更新，值集合不落库）。
+// 裁决留痕、交集计数与候选快照：adj_decision（含版本回填/放弃标记）、adj_overlap（按对更新，值集合不落库）
+// 与 adj_candidates（按草稿内容哈希一份快照，同一内容只问一次模型）。
 
-import type { DecisionRec, OverlapRec } from "../types";
+import type { CandidateSnapshotRec, DecisionRec, OverlapRec } from "../types";
 import { ConcernStore, upsertSql } from "./base";
 
 export class AdjudicationStore extends ConcernStore {
@@ -49,5 +50,26 @@ export class AdjudicationStore extends ConcernStore {
   async listOverlaps(workspace: string): Promise<(OverlapRec & { id: number; created_at: string })[]> {
     const id = await this.wsId(workspace);
     return (await this.datasource.all(`SELECT * FROM adj_overlap WHERE workspace_id = ? ORDER BY id DESC`, [id])) as never[];
+  }
+
+  /** 读候选快照：没有过快照返回 null。 */
+  async readCandidateSnapshot(workspace: string): Promise<CandidateSnapshotRec | null> {
+    const id = await this.wsId(workspace);
+    const rows = await this.datasource.all(`SELECT shot_hash, proposals FROM adj_candidates WHERE workspace_id = ?`, [id]);
+    if (rows.length === 0) return null;
+    return { shot_hash: String(rows[0].shot_hash), proposals: JSON.parse(String(rows[0].proposals)) };
+  }
+
+  /** 写候选快照：每空间一行，方言 upsert（并发重算同一内容，败者覆盖同值，无害）。 */
+  async writeCandidateSnapshot(workspace: string, snap: CandidateSnapshotRec): Promise<void> {
+    const id = await this.wsId(workspace);
+    const sql = upsertSql(
+      this.datasource.dialect,
+      "adj_candidates",
+      ["workspace_id", "shot_hash", "proposals"],
+      ["workspace_id"],
+      ["shot_hash", "proposals"]
+    );
+    await this.datasource.run(sql, [id, snap.shot_hash, JSON.stringify(snap.proposals)]);
   }
 }

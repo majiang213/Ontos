@@ -312,6 +312,23 @@ input { font-family: inherit; outline: none; }
   color: var(--accent-ink);
   background: var(--accent-soft);
 }
+/* 按钮内计数牌：等着人处理的条数（「待确认」上的疑似重复对数 + 没定唯一键对象数）。暖黄与 tag-warn / 新节点虚线同语义 */
+.btn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
 
 .btn-cta {
   display: inline-flex;
@@ -485,7 +502,7 @@ input { font-family: inherit; outline: none; }
   background: var(--hairline-strong);
   flex-shrink: 0;
 }
-.dock-bar .btn { padding: 6px 12px; font-size: 12px; }
+.dock-bar .btn { padding: 6px 12px; font-size: 12px; display: inline-flex; align-items: center; } /* inline-flex：计数牌与文字垂直对齐 */
 .dock-bar .btn-cta { font-size: 12px; padding: 6px 12px; }
 .float-bc { bottom: 18px; left: 50%; translate: -50% 0; max-width: calc(100vw - 24px); } /* translate 属性居中，与 transform 入场动画解耦；窄屏不溢出 */
 

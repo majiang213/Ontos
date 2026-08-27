@@ -19,6 +19,7 @@ import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type 
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/features/ontology/lineage";
 import { definedPinEnds } from "../server/features/ontology/canvasState";
+import { isUiStateOp } from "../server/schema/ops";
 import type { PairAdvice } from "../server/schema/verdict";
 import type { ObjectType } from "../server/schema/config";
 
@@ -82,6 +83,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
     onFrame: (data) => {
       const prev = ontRef.current;
       applyOnt(data);
+      if (prev) reloadPairs(); // 外部改动（MCP agent 改草稿）跟着刷新计数：快照命中不过模型；首轮由挂载 effect 负责
       // 开着的对象卡对应类已不在草稿里：收卡（策略在 ontFrame）
       const open = cardRef.current;
       if (open?.kind === "object" && shouldCloseObjectCard(open.name, data)) {
@@ -110,11 +112,19 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
     const data = await apiGet<{ candidates?: PairAdvice[] }>("/api/list_candidates");
     setPairs(data.candidates ?? []);
   }, []);
+  /** 静默补拉待裁计数：失败吞掉——主写已落库，计数只是工具条上的提示，开面板时必重拉补上。 */
+  const reloadPairs = useCallback(() => loadPairs().catch(() => {}), [loadPairs]);
+  // 首轮加载：本体、表结构、待裁计数（依赖已列全，只跑挂载这一次）
   useEffect(() => {
     refresh().catch(netErr); // 首轮加载失败也要说
     apiGet<IntrospectResp>("/api/list_tables").then(setSchema).catch(netErr);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载时跑一次
-  }, [refresh, netErr]);
+    loadPairs().catch(netErr); // 工具条「待确认」计数的首轮
+  }, [refresh, netErr, loadPairs]);
+
+  // 开面板必重拉：面板与计数都要当前草稿算出的候选对（快照命中不过模型，这一下基本免费）
+  useEffect(() => {
+    if (panelOpen) loadPairs().catch(netErr);
+  }, [panelOpen, loadPairs, netErr]);
 
   /** 本页一切写路径的唯一入口：写期间 localBusy 置位，轮询不动作也不 toast 成「外部改动」。
    *  finally 里一定放下——失败也放（写成功但 refresh 失败同样放，让下一轮轮询把已落地的草稿拉回来）。 */
@@ -140,8 +150,10 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
       withLocalWrite(async () => {
         await apiPost("/api/edit_draft", body);
         await refresh();
+        // 界面状态 op（摆位/弯折）跟着鼠标走且不改类集，不拉计数；其余编辑都可能改变候选对，补拉
+        if (!isUiStateOp(String(body.op))) await reloadPairs();
       }),
-    [withLocalWrite, refresh]
+    [withLocalWrite, refresh, reloadPairs]
   );
 
   /** 待确认面板「确认唯一键」：有改动的对象逐个 set_identity，落草稿后重拉疑似重复；失败返回 false（面板不解锁）。 */
@@ -193,6 +205,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         showToast(await run());
         if (opts?.closeCard) setCard(null);
         await refresh();
+        await reloadPairs(); // 发布/放弃/回滚都会换草稿内容，计数跟着补
       });
     } finally {
       setPublishing(false);
@@ -248,6 +261,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）。点「待确认」定唯一键`);
         setDrawerOpen(false);
         await refresh();
+        await reloadPairs(); // 新对象上画布，疑似重复计数立刻就位
       });
     } finally {
       setGenerating(false);
@@ -297,6 +311,15 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
 
   const sel: ObjectType | null = card?.kind === "object" ? ((ont?.object_types?.[card.name] as ObjectType | undefined) ?? null) : null;
 
+  // 「待确认」计数 = 疑似重复对数 + 没定唯一键的对象数（面板①②两段的活）；都没有不出牌
+  // ①的待办与面板同一把尺：identityRows 里 current 为空的行（全派生字段的对象面板不收，这里也不数）
+  const pendingIdentity = identityRows(ont?.object_types ?? {}, Object.keys(ont?.object_types ?? {})).filter((r) => !r.current).length;
+  const pendingCount = pairs.length + pendingIdentity;
+  const pendingTip = [
+    pairs.length > 0 ? `${pairs.length} 对疑似重复等着裁` : "",
+    pendingIdentity > 0 ? `${pendingIdentity} 个对象没定唯一键` : "",
+  ].filter(Boolean);
+
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
       <OntologyCanvas
@@ -334,7 +357,13 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
             <button className={`btn${card?.kind === "connect" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "connect" ? null : { kind: "connect" })}>连接数据源</button>
             <button className={`btn${card?.kind === "create" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "create" ? null : { kind: "create" })}>新建对象</button>
             <i className="dock-split" aria-hidden />
-            <button className={`btn${panelOpen ? " is-on" : ""}`} onClick={() => setPanelOpen((v) => !v)}>待确认</button>
+            <button
+              className={`btn${panelOpen ? " is-on" : ""}`}
+              title={pendingTip.length > 0 ? `还有 ${pendingTip.join("、")}` : "没有等着确认的事"}
+              onClick={() => setPanelOpen((v) => !v)}
+            >
+              待确认{pendingCount > 0 && <span className="btn-badge">{pendingCount}</span>}
+            </button>
             <i className="dock-split" aria-hidden />
             <button className={`btn${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })}>
               {ont ? versionLabel(ont) : "已发布 v…"} ▾

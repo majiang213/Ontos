@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS adj_overlap (      -- 交集计算记录：机器算�
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (workspace_id, class_a, class_b)     -- 按对一行（并发重算不双行，upsert 落点）
 );
+CREATE TABLE IF NOT EXISTS adj_candidates (   -- 候选对快照：模型提的，可重算；同一草稿内容只问一次模型
+  workspace_id INTEGER PRIMARY KEY REFERENCES onto_workspace(id), -- 每空间恰一份快照
+  shot_hash TEXT NOT NULL,                    -- 投喂形状（类名/连接集/字段名）的哈希：变了才重算
+  proposals TEXT NOT NULL,                    -- 过筛后的候选对 JSON（PairAdvice[]；定案过滤在读时套）
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS ont_question (     -- 验收问题集
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id INTEGER NOT NULL REFERENCES onto_workspace(id),

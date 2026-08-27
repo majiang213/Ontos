@@ -1,5 +1,7 @@
 // 元库记录类型 —— 各关切 store 与调用方共用的行形状。
 
+import type { PairAdvice } from "../schema/verdict";
+
 export interface ConnectionRec {
   name: string;
   type: "mysql" | "pg" | "sqlite";
@@ -33,6 +35,12 @@ export interface OverlapRec {
   count_b: number;
   count_hit: number;
   rate: number;
+}
+
+/** 候选对快照（adj_candidates 一行）：shot_hash 是投喂形状的哈希，proposals 是过筛后的候选对。 */
+export interface CandidateSnapshotRec {
+  shot_hash: string;
+  proposals: PairAdvice[];
 }
 
 export interface QueryLogRec {

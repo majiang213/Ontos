@@ -10,7 +10,7 @@
 -- ⑥ COMMENT 子句是本文件的注释载体（SQLite 无此语法）；
 -- ⑦ 每表 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4（中文字段在非 utf8mb4 库上乱码）；
 -- 另：TEXT 的默认值只许表达式形态 DEFAULT ('...')（8.0.13+），字面量形态 MySQL 拒收（错误 1101）。
--- 多语句发包靠 MysqlDatasource 建池开 multipleStatements（datasource.ts）——八个 CREATE TABLE 一次下发。
+-- 多语句发包靠 MysqlDatasource 建池开 multipleStatements（datasource.ts）——九个 CREATE TABLE 一次下发。
 
 CREATE TABLE IF NOT EXISTS onto_workspace (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '空间 id',
@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS adj_overlap (
   UNIQUE (workspace_id, class_a, class_b),
   FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='交集计算记录：机器算的，可重算；只落计数，标识值集合不落盘';
+CREATE TABLE IF NOT EXISTS adj_candidates (
+  workspace_id BIGINT PRIMARY KEY COMMENT '所属空间（每空间恰一份快照）',
+  shot_hash VARCHAR(191) NOT NULL COMMENT '投喂形状（类名/连接集/字段名）的哈希：变了才重算',
+  proposals TEXT NOT NULL COMMENT '过筛后的候选对 JSON（PairAdvice[]；定案过滤在读时套）',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  FOREIGN KEY (workspace_id) REFERENCES onto_workspace(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='候选对快照：模型提的，可重算；同一草稿内容只问一次模型';
 CREATE TABLE IF NOT EXISTS ont_question (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '行 id',
   workspace_id BIGINT NOT NULL COMMENT '所属空间',

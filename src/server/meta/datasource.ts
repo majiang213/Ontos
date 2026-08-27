@@ -86,7 +86,7 @@ export class MysqlDatasource implements MetaDatasource {
   readonly dialect = "mysql" as const;
   private pool: mysql.Pool;
   constructor(dsn: string) {
-    // multipleStatements 必须开：mysql.sql 八个 CREATE TABLE 一次下发（不开 mysql2 默认拒多语句，ready 永远 reject）
+    // multipleStatements 必须开：mysql.sql 九个 CREATE TABLE 一次下发（不开 mysql2 默认拒多语句，ready 永远 reject）
     this.pool = mysql.createPool({ uri: dsn, connectionLimit: 4, namedPlaceholders: false, multipleStatements: true });
     this.ready = this.pool.query(ddlOf("mysql")).then(() => undefined);
   }

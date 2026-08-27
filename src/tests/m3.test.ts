@@ -290,6 +290,57 @@ describe("裁决流水线", () => {
     expect(list.filter(isPair)).toHaveLength(1);
   });
 
+  it("候选快照：同一草稿只问一次模型；投喂形状变了才重算；定案读时过滤", async () => {
+    const s = await draftEngine();
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+    });
+    let calls = 0;
+    const one: { class_a: string; class_b: string; tendency: Verdict.Same; reason: string } = {
+      class_a: "po_a",
+      class_b: "po_b",
+      tendency: Verdict.Same,
+      reason: "字段重合",
+    };
+    const env = {
+      ...s.env,
+      llm: {
+        name: "count",
+        nlToQuery: async () => ({ object: "po_a" }),
+        proposeObjects: async () => ({}),
+        proposePairs: async () => {
+          calls++;
+          return [one];
+        },
+        proposePair: async () => one,
+      },
+    };
+    const isPair = (p: { class_a: string; class_b: string }) =>
+      (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a");
+    expect(unwrap(await listCandidates(env)).some(isPair)).toBe(true);
+    expect(unwrap(await listCandidates(env)).some(isPair)).toBe(true);
+    expect(calls).toBe(1); // 第二次读的是快照，没再问模型
+    await s.editDraft({ op: "set_identity", object: "po_a", name: "name" }); // 唯一键不在投喂形状里
+    unwrap(await listCandidates(env));
+    expect(calls).toBe(1);
+    await s.editDraft({ op: "save_layout", positions: { po_a: { x: 1, y: 2 } } }); // 摆位也不在
+    unwrap(await listCandidates(env));
+    expect(calls).toBe(1);
+    await s.editDraft({ op: "add_property", object: "po_a", name: "extra", type: "string" }); // 字段变 = 形状变
+    unwrap(await listCandidates(env));
+    expect(calls).toBe(2); // 重算一次
+    unwrap(await decide(env, { class_a: "po_a", class_b: "po_b", verdict: Verdict.Skip }));
+    expect(unwrap(await listCandidates(env)).some(isPair)).toBe(false); // 定案读时过滤，跳过立即不见
+    expect(calls).toBe(2); // 不问模型
+    await env.meta.abandonPendingDecisions("default"); // 放弃草稿：未绑版本的裁决作废
+    expect(unwrap(await listCandidates(env)).some(isPair)).toBe(true); // 对回来了
+    expect(calls).toBe(2); // 草稿内容没变，仍不重算
+  });
+
   it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
     const s = await draftEngine();
     await s.editDraft({

@@ -11,7 +11,7 @@ import { LogsStore } from "./stores/logs";
 import { QuestionsStore } from "./stores/questions";
 import { VersionChainStore } from "./stores/versionChain";
 import { WorkspacesStore } from "./stores/workspaces";
-import type { ActionLogRec, ConnectionRec, DecisionRec, OverlapRec, QueryLogRec } from "./types";
+import type { ActionLogRec, CandidateSnapshotRec, ConnectionRec, DecisionRec, OverlapRec, QueryLogRec } from "./types";
 
 export class MetaStore {
   private workspaces: WorkspacesStore;
@@ -94,6 +94,12 @@ export class MetaStore {
   }
   listOverlaps(workspace: string) {
     return this.adjudication.listOverlaps(workspace);
+  }
+  readCandidateSnapshot(workspace: string) {
+    return this.adjudication.readCandidateSnapshot(workspace);
+  }
+  writeCandidateSnapshot(workspace: string, snap: CandidateSnapshotRec) {
+    return this.adjudication.writeCandidateSnapshot(workspace, snap);
   }
 
   /* 验收问题集 */
