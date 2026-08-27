@@ -11,6 +11,7 @@ export interface CanvasObject {
   name: string;
   description?: string;
   kind: "thing" | "event";
+  identity?: string; // 唯一键字段名：节点在对应字段旁画钥匙记号
   properties: { name: string; type: string; derived: boolean; values?: (string | number)[]; description?: string }[];
   sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
   actions: string[];

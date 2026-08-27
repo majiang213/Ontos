@@ -3,6 +3,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Key } from "@phosphor-icons/react";
 import {
   Background,
   ConnectionMode,
@@ -69,7 +70,14 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
         <div className="node-props">
           {data.properties.map((p) => (
             <div key={p.name} className="node-prop">
-              <code>{p.name}</code>
+              <span className="node-prop-name">
+                <code>{p.name}</code>
+                {data.identity === p.name && (
+                  <span className="node-key" title="唯一键" role="img" aria-label="唯一键">
+                    <Key size={11} weight="bold" />
+                  </span>
+                )}
+              </span>
               <span className="t" style={{ maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {p.type}
                 {p.derived ? " · 派生" : ""}

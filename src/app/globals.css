@@ -434,6 +434,8 @@ input { font-family: inherit; outline: none; }
 .node-props { border-top: 1px solid var(--hairline); padding-top: 6px; }
 .node-prop { display: flex; justify-content: space-between; gap: 8px; line-height: 1.75; font-size: 12px; }
 .node-prop code { font-family: var(--font-mono); font-size: 11.5px; }
+.node-prop-name { display: inline-flex; align-items: center; gap: 4px; } /* 名字与钥匙记号同组，不被 space-between 拆开 */
+.node-key { display: inline-flex; color: var(--ink-3); } /* 唯一键记号：安静可查，不抢眼 */
 .node-prop .t { color: var(--ink-3); font-size: 11px; }
 .node-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 

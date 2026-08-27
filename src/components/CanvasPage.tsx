@@ -274,6 +274,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         name,
         description: t.description,
         kind: t.kind,
+        identity: t.identity,
         properties: Object.entries(t.properties).map(([p, d]: [string, any]) => ({
           name: p,
           type: d.type,
