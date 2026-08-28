@@ -27,6 +27,7 @@ import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
+import { ORIGIN_COLOR, isOriginEdge, originLinksOf, originTriples } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import { beginSession, currentSession, dropSession, endSession, fireSession, trackSession, xyDragArgs } from "./connectSession";
@@ -127,12 +128,18 @@ export default function OntologyCanvas(props: CanvasProps) {
   );
 }
 
-/** 边色一处判：点中 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn 同值——SVG marker 不吃 CSS var，故常量单源）。
+/** 边色一处判：点中 > 由来 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn 同值——SVG marker 不吃 CSS var，故常量单源）。
  *  默认边也必须显式给 marker 颜色：color 缺省时不渲染箭头（marker 不继承边的描边色）。 */
 const EDGE_ACCENT = "#3b36b0"; // = var(--accent)
 const EDGE_WARN = "#8a5f0b"; // = var(--warn)
 const EDGE_DEFAULT = "#b1b1b7"; // = xyflow 默认边色（.react-flow__edge-path 的默认 stroke）
 function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["style"]; markerEnd: Edge["markerEnd"] } {
+  if (l.kind === "origin") {
+    return {
+      style: { stroke: ORIGIN_COLOR, strokeDasharray: "3 5" },
+      markerEnd: { type: MarkerType.ArrowClosed, color: ORIGIN_COLOR, width: 14, height: 14 },
+    };
+  }
   const selected = l.name === selectedLink;
   const transition = l.kind === "transition";
   return {
@@ -142,15 +149,21 @@ function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["s
 }
 
 function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange }: CanvasProps) {
+  // 由来边只活在画布：进分层把三元组拉到一起，不进配置。
+  const viewLinks = useMemo(
+    () => [...links, ...originLinksOf(originTriples(objects.map((o) => o.name)))],
+    [objects, links]
+  );
+
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
-    const pos = layoutObjects(objects, links);
+    const pos = layoutObjects(objects, viewLinks);
     return objects.map((o) => ({
       id: o.name,
       type: "obj",
       position: layout?.[o.name] ?? pos.get(o.name) ?? { x: 0, y: 0 }, // 已存摆位优先
       data: { ...o, label: o.name },
     }));
-  }, [objects, links, layout]);
+  }, [objects, viewLinks, layout]);
 
   // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
   const [nodes, setNodes] = useNodesState(initialNodes);
@@ -208,12 +221,12 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
   };
   /** 一键理顺：重跑分层布局并取景、记住新摆位。导入一批新表、或拖乱了之后用。 */
   const tidy = useCallback(() => {
-    const pos = layoutObjects(objects, links);
+    const pos = layoutObjects(objects, viewLinks);
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
     onLayoutChange?.(Object.fromEntries(pos));
     // 双帧后取景：等节点重新测量完
     requestAnimationFrame(() => requestAnimationFrame(() => rf.fitView({ padding: 0.2 })));
-  }, [objects, links, setNodes, rf, onLayoutChange]);
+  }, [objects, viewLinks, setNodes, rf, onLayoutChange]);
 
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null); // 悬停的边：露出弯折捏点与改接锚点
   // 全部节点矩形：边的绕障路由吃这份（节点拖动时每帧重算，边跟着重绕）
@@ -223,35 +236,44 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
   );
   const edges: Edge[] = useMemo(
     () =>
-      links.map((l) => ({
-        id: l.name,
-        type: "floating",
-        source: l.from,
-        target: l.to,
-        // 线上标注两行：主行关系描述（没有退英文名），副行「源对象 → 目标对象」中文名——谓语的论元与方向都在线上
-        label: (
-          <>
-            <span>{l.description ?? (l.inverse ? `${l.name} / ${l.inverse}` : l.name)}</span>
-            <span className="edge-label-sub">
-              {l.fromLabel} → {l.toLabel}
-            </span>
-          </>
-        ),
-        ...edgeTone(l, selectedLink), // 边色与箭头一处判定
-        interactionWidth: 20, // 线的点击热区放宽，细线也好点
-        data: {
-          bend: edgeBends?.[l.name],
-          pins: edgePins?.[l.name],
-          obstacles,
-          showKnob: hoveredEdge === l.name || selectedLink === l.name,
-          commitBend: onBendChange,
-          // 改接走 update_link 改 from/to（配对字段由服务端跟着新端点修）；被拖的那头按落点钉新钉点
-          commitReconnect: (name: string, from: string, to: string, movedEnd: "source" | "target") => {
-            onReconnectLink?.(name, from, to, { end: movedEnd, pin: pinAt(movedEnd === "source" ? from : to, currentSession()?.last) });
-          },
-        },
-      })),
-    [links, selectedLink, edgeBends, edgePins, hoveredEdge, onBendChange, onReconnectLink, obstacles]
+      viewLinks.map((l) => {
+        const origin = l.kind === "origin";
+        return {
+          id: l.name,
+          type: "floating" as const,
+          className: origin ? "is-origin" : undefined,
+          source: l.from,
+          target: l.to,
+          // 由来边只标「公共部分」；配置关系两行：主行描述，副行「源对象 → 目标对象」
+          label: origin ? (
+            <span className="edge-label-origin">{l.description}</span>
+          ) : (
+            <>
+              <span>{l.description ?? (l.inverse ? `${l.name} / ${l.inverse}` : l.name)}</span>
+              <span className="edge-label-sub">
+                {l.fromLabel} → {l.toLabel}
+              </span>
+            </>
+          ),
+          ...edgeTone(l, selectedLink), // 边色与箭头一处判定
+          interactionWidth: origin ? 0 : 20, // 由来边不可点；配置关系热区放宽
+          selectable: !origin,
+          data: origin
+            ? { obstacles }
+            : {
+                bend: edgeBends?.[l.name],
+                pins: edgePins?.[l.name],
+                obstacles,
+                showKnob: hoveredEdge === l.name || selectedLink === l.name,
+                commitBend: onBendChange,
+                // 改接走 update_link 改 from/to（配对字段由服务端跟着新端点修）；被拖的那头按落点钉新钉点
+                commitReconnect: (name: string, from: string, to: string, movedEnd: "source" | "target") => {
+                  onReconnectLink?.(name, from, to, { end: movedEnd, pin: pinAt(movedEnd === "source" ? from : to, currentSession()?.last) });
+                },
+              },
+        };
+      }),
+    [viewLinks, selectedLink, edgeBends, edgePins, hoveredEdge, onBendChange, onReconnectLink, obstacles]
   );
 
   // 首批对象到达后才取景（挂载时 nodes 恒为空，fitView 等于白做）
@@ -283,8 +305,14 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
       deleteKeyCode={null} // 删除只走编辑卡/详情卡：键盘删节点不过草稿，状态会乱
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}
-      onEdgeClick={(_, edge) => onSelectLink?.(edge.id)}
-      onEdgeMouseEnter={(_, edge) => setHoveredEdge(edge.id)}
+      onEdgeClick={(_, edge) => {
+        if (isOriginEdge(edge.id)) return; // 由来边不打开关系详情（它不活在配置里）
+        onSelectLink?.(edge.id);
+      }}
+      onEdgeMouseEnter={(_, edge) => {
+        if (isOriginEdge(edge.id)) return;
+        setHoveredEdge(edge.id);
+      }}
       onEdgeMouseLeave={() => setHoveredEdge(null)}
       onConnectStart={(e, params) => {
         // 改接拖拽的会话在 FloatingEdge 捏点 pointerdown 时已开（XYHandle 的 onConnectStart 经 store 转发也会到这里）：

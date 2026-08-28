@@ -1,6 +1,7 @@
 // 画布自动布局：无关系时均匀网格（别排成一条线），有关系时 dagre 分层（被引用方在上）。
 import { describe, expect, it } from "vitest";
 import { layoutObjects, NODE_W, type CanvasLink, type CanvasObject } from "../components/canvas/layout";
+import { originLinksOf, originTriples } from "../components/canvas/sharedOrigin";
 
 const obj = (name: string): CanvasObject => ({
   name,
@@ -55,5 +56,12 @@ describe("有关系布局（dagre 分层）", () => {
     expect(pos.get("e")!.y).toBeGreaterThan(maxConnectedY);
     expect(pos.get("f")!.y).toBe(pos.get("e")!.y);
     expect(pos.get("f")!.x).toBeGreaterThan(pos.get("e")!.x + NODE_W);
+  });
+
+  it("由来边把公共对象排到两个原类之上", () => {
+    const names = ["asset", "device", "shared_asset_device"];
+    const pos = layoutObjects(names.map(obj), originLinksOf(originTriples(names)));
+    expect(pos.get("shared_asset_device")!.y).toBeLessThan(pos.get("asset")!.y);
+    expect(pos.get("shared_asset_device")!.y).toBeLessThan(pos.get("device")!.y);
   });
 });

@@ -26,7 +26,7 @@ export interface CanvasLink {
   description?: string; // 线身主标注：关系的白话描述（没有才退英文名）
   fromLabel?: string; // 线身副标注：源对象的中文名（没有退对象名）
   toLabel?: string; // 线身副标注：目标对象的中文名
-  kind: "match" | "transition";
+  kind: "match" | "transition" | "origin"; // origin = 公共对象由来，只活在画布，不进配置
 }
 
 /** 节点尺寸的未测量回退（唯一出处）：dagre 分层、FloatingEdge.rectOf、OntologyCanvas 的 obstacles 构造共用。 */
