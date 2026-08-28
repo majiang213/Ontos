@@ -67,6 +67,7 @@ export async function toResult<T>(fn: () => Promise<T>, ok: (value: T) => string
 /* ---------- 用户看得见的错误文案（唯一出处） ----------
    按域分节：草稿编辑 op / 引用 trail / 校验 / 执行 / 查询 / 基础设施 / 路由。
    规则：文案字节级稳定（测试按子串断言）；新增报错一律加在这里，不在调用点现写。 */
+
 export const MSG = {
   // 草稿编辑 op（draft/ops、editDraft、versions、canvasPack）
   classNotFound: (name: string) => `类不存在：${name}`,
@@ -107,7 +108,7 @@ export const MSG = {
   trailDerived: (cls: string, prop: string) => `派生字段 ${cls}.${prop}`,
   trailDerivedProp: (prop: string) => `派生字段 ${prop}`,
   trailAction: (cls: string, act: string) => `动作 ${cls}.${act}`,
-  sharedSources: (shared: string[]) => `这两个对象有共同来源（${shared.join("、")}），不算疑似重复`,
+
   tableNotFound: (connection: string, table: string) => `表不存在：${connection}.${table}`,
 
   // 校验 validate 与取值规约（draft/validate、schema/spec）——一律「配置不合法：」前缀
@@ -174,7 +175,7 @@ export const MSG = {
   stageStatusClash: (a: string) => `阶段裁决需要立派生字段 status，但 ${a} 上已有同名字段——先把它改名或删掉`,
   stageLinkNameClash: (name: string) => `关系名 ${name} 已存在——换个阶段名再裁`,
   stageActionNameClash: (name: string) => `动作名 ${name} 已存在——换个阶段名再裁`,
-  overlapNoCommon: "两类没有公共字段（唯一键除外），立不了上位对象",
+
   pairNoSources: "无源对象不算疑似重复（先给它挂来源）",
   pairNoIdentity: "两边对不上号：有类没设唯一键",
   identityColumnTooBig: (cls: string, max: number) => `${cls} 的唯一键列超过 ${max} 行，交集算不了（先收窄范围）`,

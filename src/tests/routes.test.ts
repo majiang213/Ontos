@@ -72,10 +72,9 @@ describe("错误分层：400 / 422 / 500", () => {
     expect(r.data.error).toBe("内部错误");
   });
 
-  it("decisions：自配对 400；同源对 422", async () => {
+  it("decisions：自配对 400；同一库两张表可以定案", async () => {
     expect((await post("decide", JSON.stringify({ class_a: "equipment", class_b: "equipment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(400);
-    // repair 与 assignment 都来自 device_sys：同源，不是跨源候选对
-    expect((await post("decide", JSON.stringify({ class_a: "repair", class_b: "assignment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(422);
+    expect((await post("decide", JSON.stringify({ class_a: "repair", class_b: "assignment", verdict: Verdict.Skip }), undefined, TEST)).status).toBe(200);
   });
 
   it("overlap：自配对 400", async () => {
@@ -90,12 +89,11 @@ describe("错误分层：400 / 422 / 500", () => {
     expect(r.data.reason).toBeTruthy();
   });
 
-  it("overlap：无源类 422（幻影 rate 不产）；同源对 422（不全列扫）", async () => {
+  it("overlap：无源类 422（幻影 rate 不产）；同一库两张表可以算", async () => {
     const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源
     expect((await post("compute_overlap", JSON.stringify({ class_a: "equipment", class_b: "vendor" }), undefined, TEST)).status).toBe(422);
-    // repair 与 assignment 都来自 device_sys：同源不算疑似重复
-    expect((await post("compute_overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }), undefined, TEST)).status).toBe(422);
+    expect((await post("compute_overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }), undefined, TEST)).status).toBe(200);
   });
 
   it("connections：相对路径 sqlite 按运行态 cwd 解析（不读 process.cwd）", async () => {

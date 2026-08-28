@@ -1,5 +1,5 @@
 // 候选对：GET /api/list_candidates
-// 机器只在已上画布的对象之间找跨源候选对（《ontos-article.md》§3.2）。
+// 机器在已上画布、有来源的对象之间找候选对（《ontos-article.md》§3.2）。同一库两张表也可以成对。
 // 薄适配：空间 → 裁决流水线 listCandidates。
 
 import { engineEnv } from "@/server/runtime";

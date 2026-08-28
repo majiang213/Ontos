@@ -89,13 +89,17 @@ export class CannedSlot implements LlmSlot {
     class_a: ClassShot;
     class_b: ClassShot;
     overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
+    base?: { tendency: Tendency; reason: string };
   }): Promise<PairAdvice> {
-    const base = schemaAdvice(input.class_a, input.class_b) ?? {
-      class_a: input.class_a.name,
-      class_b: input.class_b.name,
-      tendency: Verdict.NameSimilar,
-      reason: `名字和字段都不像（${input.class_a.name} / ${input.class_b.name}）`,
-    };
+    // 锚：调用方给的第一版建议（清单快照的同一裁判）优先；没给才用本地字段判定推一个
+    const base = input.base
+      ? { class_a: input.class_a.name, class_b: input.class_b.name, tendency: input.base.tendency, reason: input.base.reason }
+      : (schemaAdvice(input.class_a, input.class_b) ?? {
+          class_a: input.class_a.name,
+          class_b: input.class_b.name,
+          tendency: Verdict.NameSimilar,
+          reason: `名字和字段都不像（${input.class_a.name} / ${input.class_b.name}）`,
+        });
     return reviseWithOverlap(base, input.class_a, input.class_b, input.overlap);
   }
 }
@@ -106,9 +110,8 @@ function hasStageField(a: ClassShot, b: ClassShot): boolean {
   return [...a.fields, ...b.fields].some((f) => /status|state|阶段|状态/.test(f));
 }
 
-/** 只看名字和字段的倾向：列表建议与看过交集率之后的修订共用。同源 / 字段名字都不像 = 不成对。 */
+/** 只看名字和字段的倾向：列表建议与看过交集率之后的修订共用。同一库两张表也可以成对；字段名字都不像才不成对。 */
 function schemaAdvice(a: ClassShot, b: ClassShot): PairAdvice | null {
-  if (a.sources.some((s) => b.sources.includes(s))) return null; // 有共同连接不成对
   const shared = a.fields.filter((f) => b.fields.includes(f));
   const ratio = shared.length / Math.max(a.fields.length, b.fields.length, 1);
   const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
@@ -130,7 +133,7 @@ function pct(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-/** 硬证据修订：有一侧没行则比率说话不算数，沿用字段倾向；两边都有行才按比率改口。 */
+/** 按三问改口：命中为零不支持部分重叠、不能否定同一；命中大于零不支持仅名称相似。 */
 function reviseWithOverlap(
   base: PairAdvice,
   a: ClassShot,
@@ -138,20 +141,16 @@ function reviseWithOverlap(
   overlap: { rate: number; count_a: number; count_b: number; count_hit: number }
 ): PairAdvice {
   const counts = `${overlap.count_hit} 条对得上号（${overlap.count_a} / ${overlap.count_b}）`;
-  if (overlap.count_a === 0 || overlap.count_b === 0) {
+  const empty = overlap.count_a === 0 || overlap.count_b === 0;
+  if (overlap.count_hit === 0) {
+    const tendency = base.tendency === Verdict.Overlap ? Verdict.Same : base.tendency;
     return {
       class_a: a.name,
       class_b: b.name,
-      tendency: base.tendency,
-      reason: `有一侧还没有行（${overlap.count_a} / ${overlap.count_b}），交集率 ${pct(overlap.rate)} 说明不了是不是同一批。按字段看：${base.reason}`,
-    };
-  }
-  if (overlap.rate < 0.1) {
-    return {
-      class_a: a.name,
-      class_b: b.name,
-      tendency: Verdict.NameSimilar,
-      reason: `交集率 ${pct(overlap.rate)}（${counts}），两边都有行但对不上号，多半不相干。`,
+      tendency,
+      reason: empty
+        ? `有一侧还没有行（${overlap.count_a} / ${overlap.count_b}），交集率说明不了是不是同一批，也不能据此否定同一。${base.reason}`
+        : `交集率 ${pct(overlap.rate)}（${counts}），现在不是同一批个体；命中为零，数据不支持部分重叠，也不能据此否定同一。${base.reason}`,
     };
   }
   if (overlap.rate >= 0.8) {
@@ -159,7 +158,7 @@ function reviseWithOverlap(
       class_a: a.name,
       class_b: b.name,
       tendency: Verdict.Same,
-      reason: `交集率 ${pct(overlap.rate)}（${counts}），多半是同一批东西。`,
+      reason: `交集率 ${pct(overlap.rate)}（${counts}），现在多半是同一批个体，倾向同一。`,
     };
   }
   const tendency = hasStageField(a, b) ? Verdict.Stage : Verdict.Overlap;
@@ -169,8 +168,8 @@ function reviseWithOverlap(
     tendency,
     reason:
       tendency === Verdict.Stage
-        ? `交集率 ${pct(overlap.rate)}（${counts}），对得上一部分，又有状态字段，倾向阶段。`
-        : `交集率 ${pct(overlap.rate)}（${counts}），对得上一部分，倾向部分重叠。`,
+        ? `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是全交，又有状态字段，倾向阶段。`
+        : `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是同一批，倾向部分重叠。`,
   };
 }
 

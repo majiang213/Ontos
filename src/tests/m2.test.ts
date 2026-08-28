@@ -119,22 +119,29 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen).toContain("in_service"); // equipment.status 的枚举值进了 prompt
   });
 
-  it("proposePair 的 prompt 带交集率，且空表不要只因 0% 判仅名称相似", async () => {
+  it("proposePair 的 prompt 带交集率与判定顺序，零温度固定种子，空表不要只因 0% 判仅名称相似", async () => {
     const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
     const fakeModel = { modelId: "test-model" } as never;
-    let seen = "";
-    const slot = new AiSdkSlot(fakeModel, (async (args: { prompt: string }) => {
-      seen = args.prompt;
+    let seen: { prompt?: string; temperature?: number; seed?: number } = {};
+    const slot = new AiSdkSlot(fakeModel, (async (args: { prompt: string; temperature?: number; seed?: number }) => {
+      seen = args;
       return { text: JSON.stringify({ class_a: "device", class_b: "asset", tendency: "same", reason: "空表不算不相干" }) };
     }) as never);
     const advice = await slot.proposePair({
       class_a: { name: "device", sources: ["device_sys"], fields: ["sn"] },
       class_b: { name: "asset", sources: ["asset_sys"], fields: ["sn"] },
       overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 },
+      base: { tendency: Verdict.Overlap, reason: "字段部分重合" },
     });
     expect(advice.tendency).toBe(Verdict.Same);
-    expect(seen).toContain("交集率");
-    expect(seen).toContain("有一侧行数是 0");
+    expect(seen.temperature).toBe(0); // 同一对同一份证据，答案必须唯一：采样方差压没
+    expect(seen.seed).toBe(42);
+    expect(seen.prompt).toContain("交集率");
+    expect(seen.prompt).toContain("有一侧取不出取值");
+    expect(seen.prompt).toContain("判定顺序");
+    expect(seen.prompt).toContain("第一版建议");
+    expect(seen.prompt).toContain("命中大于零不许给仅名称相似");
+    expect(seen.prompt).toContain("命中为零不许给部分重叠");
   });
 
   it("AiSdkSlot 失败落盘：原始产出写临时目录，OPENAI_API_KEY 字面值打码", async () => {
@@ -237,31 +244,43 @@ describe("LLM 槽位离线回退", () => {
     expect(free.customer).toBeTruthy(); // 不占用：不乱加前缀
   });
 
-  it("候选对建议：跨源且字段重合才成对，同源不成对", async () => {
+  it("候选对建议：字段重合才成对；同一库两张表也可以成对", async () => {
     const pairs = await slot.proposePairs([
       { name: "a", sources: ["s1"], fields: ["sn", "name"] },
       { name: "b", sources: ["s2"], fields: ["sn", "name", "status"] },
-      { name: "c", sources: ["s1"], fields: ["sn", "name"] }, // 与 a 同源
+      { name: "c", sources: ["s1"], fields: ["sn", "name"] }, // 与 a 同一连接、不同类
       { name: "d", sources: ["s2"], fields: ["xyz"] },
     ]);
-    // a-b 与 b-c：跨源且字段重合过半；a-c 同源不成对；d 字段对不上
-    expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "b-c"]);
-    expect(pairs[0].tendency).toBe(Verdict.Stage); // 含状态字段
+    // a-b、b-c 跨源字段重合；a-c 同一库也可以成对；d 字段对不上
+    expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "a-c", "b-c"]);
+    expect(pairs.find((p) => p.class_a === "a" && p.class_b === "b")?.tendency).toBe(Verdict.Stage); // 含状态字段
   });
 
-  it("看过交集率再建议：两边都有行且对不上改口仅名称相似；有一侧没行沿用字段倾向", async () => {
+  it("看过交集率再建议：命中为零不改口仅名称相似；空表不否定同一", async () => {
     const a = { name: "device", sources: ["device_sys"], fields: ["sn", "name"] };
     const b = { name: "asset", sources: ["asset_sys"], fields: ["sn", "name"] };
     const empty = await slot.proposePair({ class_a: a, class_b: b, overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 } });
-    expect(empty.tendency).toBe(Verdict.Same); // 字段几乎全交，空表不因 0% 改口
+    expect(empty.tendency).toBe(Verdict.Same);
     expect(empty.reason).toContain("还没有行");
     const miss = await slot.proposePair({ class_a: a, class_b: b, overlap: { rate: 0, count_a: 100, count_b: 80, count_hit: 0 } });
-    expect(miss.tendency).toBe(Verdict.NameSimilar);
+    expect(miss.tendency).toBe(Verdict.Same); // 不是同一批，但不能据此否定同一
+    expect(miss.reason).toContain("不是同一批");
     const mid = await slot.proposePair({
       class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] },
       class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] },
       overlap: { rate: 0.33, count_a: 121, count_b: 100, count_hit: 40 },
     });
     expect(mid.tendency).toBe(Verdict.Stage);
+  });
+
+  it("看过交集率再建议：命中为零则数据不支持部分重叠，空表改口同一", async () => {
+    const advice = await slot.proposePair({
+      class_a: { name: "asset", sources: ["asset_sys"], fields: ["asset_id", "sn"] },
+      class_b: { name: "device", sources: ["device_sys"], fields: ["dev_id", "serial_no"] },
+      overlap: { rate: 0, count_a: 0, count_b: 100, count_hit: 0 },
+      base: { tendency: Verdict.Overlap, reason: "第一版按语义对应给的" },
+    });
+    expect(advice.tendency).toBe(Verdict.Same);
+    expect(advice.reason).toContain("还没有行");
   });
 });

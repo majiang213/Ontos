@@ -7,7 +7,7 @@
 import type { QueryRequest } from "../../schema/request";
 import type { ObjectType, OntologyConfig } from "../../schema/config";
 import type { TableInfo } from "../../infra/driver";
-import type { PairAdvice } from "../../schema/verdict";
+import type { PairAdvice, Tendency } from "../../schema/verdict";
 import type { DriverRegistry } from "../../infra/registry";
 import { resolveTableInfos } from "../../infra/tables";
 import { MSG, toResult, type Result } from "../../errors";
@@ -20,13 +20,15 @@ export interface LlmSlot {
   nlToQuery(question: string, config: OntologyConfig, workspace: string): Promise<QueryRequest>;
   /** 表结构 → 本体草稿（逆向建模槽位）。occupied = 草稿里已有的类名：撞名时实现按 {connection}_{table} 起名，不静默覆盖。 */
   proposeObjects(tables: { connection: string; table: TableInfo }[], occupied?: string[]): Promise<Record<string, ObjectType>>;
-  /** 跨源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合（跨源判定在实现里做）。 */
+  /** 有源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合；同一连接的两张表也可以成对。资格闸在 eligibility，实现里不做跨源判定。 */
   proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
-  /** 看过交集率之后，对这一对再给倾向（仍是整合槽位）。比率由调用方算好传入，槽位不当计算器。 */
+  /** 看过交集率之后，对这一对再给倾向（仍是整合槽位）。比率由调用方算好传入，槽位不当计算器。
+   *  base 是清单里的第一版建议（候选快照钉住的同一裁判）：第二版以它为锚——维持，或由证据驱动改口，不另起炉灶。 */
   proposePair(input: {
     class_a: { name: string; sources: string[]; fields: string[] };
     class_b: { name: string; sources: string[]; fields: string[] };
     overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
+    base?: { tendency: Tendency; reason: string };
   }): Promise<PairAdvice>;
 }
 

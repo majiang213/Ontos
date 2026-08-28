@@ -1,6 +1,6 @@
 // 定案应用 —— 把裁决结论变成配置变换（《ontos-article.md》§3.2 五种结论的处理）。
 // 同一：合并为一个对象、挂多源。阶段：收成一类 + 派生阶段 + 转化关系 + 转化动作。
-// 部分重叠：公共属性立上位对象（属性移上去，识别字段复制不移动）。仅名称相似/跳过：不动配置。
+// 部分重叠：同名公共属性立公共对象（移上去，识别字段复制不移动）；没有同名则公共对象只带唯一键。仅名称相似/跳过：不动配置。
 // 骨架（conversionAction / set_fields）的唯一构造点在 draft/skeletons.ts，这里只消费。
 
 import type { ActionDef, OntologyConfig, WhenRule } from "../../schema/config";
@@ -10,6 +10,7 @@ import { dropClass } from "../ontology/ops/editObject";
 import { mutateDraft } from "../ontology/editDraft";
 import { conversionAction, conversionActionName, removeFieldsUpdateKeys } from "../ontology/skeletons";
 import type { EngineEnv } from "../env";
+import { commonProperties } from "./eligibility";
 import { Verdict } from "../../schema/verdict";
 import { MSG } from "../../errors";
 
@@ -174,10 +175,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       const B = d.object_types[b];
       if (!A || !B) throw new Error(MSG.classPairNotFound(a, b));
       const idProps = new Set([A.identity, B.identity].filter(Boolean) as string[]);
-      const common = Object.keys(A.properties).filter(
-        (p) => p in B.properties && !A.properties[p].derived && !B.properties[p].derived && !idProps.has(p)
-      );
-      if (common.length === 0) throw new Error(MSG.overlapNoCommon);
+      const common = commonProperties(A, B); // 同名才上移；没有同名不挡——公共对象只带唯一键
       const parent = `shared_${a}_${b}`;
       // 上位对象的源：公共列 + 识别列（识别列是读公共属性的对齐齐）
       const parentSources: NonNullable<OntologyConfig["object_types"][string]["sources"]> = {};

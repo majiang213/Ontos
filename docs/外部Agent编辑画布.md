@@ -779,7 +779,7 @@ Skill 从一份 `skills/ontos/SKILL.md` 拆成四个目录，各自自包含（�
 |---|---|---|---|---|---|
 | `ontos-query`（查数） | **已发布** | 只读 | `search` / `list_classes` / `read_class`（缺省 published）/ `query` | 发现 → 组装 → 执行 → 纠错（现 skill 迁入，只留查数内容：删 `propose_objects` / `propose_action` / `run_action` 三行工具与动作语法、剧本二） | 不传 `space`；不碰草稿 |
 | `ontos-action-run`（执行已发布动作） | **已发布** | 写源库 | `run_action` / `read_class` / `query`（查询语法与 `ontos-query` 同文内嵌） | 先查前置 → 执行 → 复查 | 只执行已发布动作；不 `set_action`；前置不满足就停 |
-| `ontos-canvas`（改画布） | **草稿** | 读写 | `list_tables` / `propose_objects` / `list_classes` / `read_class` / `search`（必须 `space: "draft"`）/ `list_candidates`（只看）/ `edit_draft` | 发现草稿 → 组装 op → 应用 → 停下请人发布；跨源对象交人点「待确认」 | 不 `query` / `run_action`；不发布、不裁决、不放弃；`save_layout` 不存在 |
+| `ontos-canvas`（改画布） | **草稿** | 读写 | `list_tables` / `propose_objects` / `list_classes` / `read_class` / `search`（必须 `space: "draft"`）/ `list_candidates`（只看）/ `edit_draft` | 发现草稿 → 组装 op → 应用 → 停下请人发布；有来源的对象交人点「待确认」（同一库两张表也可能成对） | 不 `query` / `run_action`；不发布、不裁决、不放弃；`save_layout` 不存在 |
 | `ontos-action`（写动作定义） | **草稿** | 写 | `list_classes` / `read_class`（`space: "draft"`，含完整动作定义）/ `propose_action`（一律 `space: "draft"`）/ `apply_draft`（op 限 `set_action` / `remove_action`） | 看现有动作 → 取模板或读回 def → 完善 → 落地 → 请人发布 | 转化关系由裁决独占；`inform` 出站先查 `outlets`；覆盖前先读回；不发布 |
 
 拆成四个的理由：四个任务包，同一端点，工具全量可见——**skill 是提示不是沙箱**（红线靠模型守；引擎真没有的是发布/裁决等关卡工具）。拆开的理由是意图与触发词聚焦：问数、执行动作、改画布、写动作定义，各自的方法论与红线互不干扰，一份 SKILL.md 越长越容易串味。`run_action` 独立成 skill：它写源库，风险与纪律（前置核对、投影成败、部分失败不回滚、留痕）跟只读查询完全不同——查数任务不该加载写闸纪律，执行任务不该被查数的完整语法带偏。`ontos-query` 迁入时**必须删掉 `propose_objects` / `propose_action` 两行草稿世界工具**（归 `ontos-canvas` / `ontos-action`）**与 `run_action` 一行**（归 `ontos-action-run`），共删三行，否则拆分就白拆了。
@@ -795,7 +795,7 @@ Skill 从一份 `skills/ontos/SKILL.md` 拆成四个目录，各自自包含（�
 1. **发现（草稿）**：`list_classes` / `search` / `read_class` 必须带 `space: "draft"`。`query` 读的是已发布快照，不能当画布真相。需要表名时用 `list_tables`，不要编连接名。
 2. **组装**：严格按 `draftOpSchema` 拼一条 op。从某张表建新对象：先 `propose_objects`（不落地），检查类名是否已在草稿里。
 3. **应用**：`apply_draft`。带上刚读到的 `rev` 作为 `base_rev`。失败读 `-32000` 的 message，不要原样重发。
-4. **停下**：告诉人「草稿已改，请到画布上看；要问数/动作生效，请在画布上点发布」。若新建了跨源对象，先 `list_classes space=draft` 看唯一键、再 `list_candidates` 看疑似重复，把清单交人点「待确认」定案。**不要**寻找发布、放弃、裁决、回滚、算交集率工具——没有这些工具。
+4. **停下**：告诉人「草稿已改，请到画布上看；要问数/动作生效，请在画布上点发布」。若新建了有来源的对象（同一库两张表也可能成对），先 `list_classes space=draft` 看唯一键、再 `list_candidates` 看疑似重复，把清单交人点「待确认」定案。**不要**寻找发布、放弃、裁决、回滚、算交集率工具——没有这些工具。
 
 落地建议的分支（写进 `ontos-canvas`，避免 Agent 发明第三条路）。`replace_object.def` **只**取 `propose_objects` 的 `object_types[name]`，禁止把 `read_class` 塞回去：
 

@@ -256,7 +256,7 @@ function seedRecruitFile(db: DatabaseSync): void {
 }
 
 /** 办公账号 40 行：35 个对得上人事 P001…P035（姓名同人），5 个外包只有账号（对不上人事）。
- *  name 列必须有：部分重叠要求识别字段之外还有同名公共属性，否则引擎立不了上位对象。 */
+ *  name 列给部分重叠可上移的同名公共属性（没有同名也能裁，公共对象只带唯一键）。 */
 function seedOaFile(db: DatabaseSync): void {
   db.exec(`CREATE TABLE account (login TEXT PRIMARY KEY, person_no TEXT, email TEXT, is_contractor INTEGER, name TEXT)`);
   const ins = db.prepare(`INSERT INTO account (login, person_no, email, is_contractor, name) VALUES (?, ?, ?, ?, ?)`);

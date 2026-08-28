@@ -126,7 +126,7 @@ export default function DecisionPanel({
           </>
         ) : (
           <div className="decide-body decide-pairs-body">
-            {pairs.length === 0 && <div className="decide-empty">没有发现跨源疑似重复的对象。单源对象不用判，可以直接发布。</div>}
+            {pairs.length === 0 && <div className="decide-empty">没有发现疑似重复的对象，可以直接发布。</div>}
             {pairs.length > 0 && (
               <>
                 {pairs.length > 1 && <div className="decide-kicker">还剩 {pairs.length} 对，先裁这一对</div>}

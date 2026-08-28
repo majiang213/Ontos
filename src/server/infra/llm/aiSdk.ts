@@ -15,7 +15,7 @@ import type { QueryRequest } from "../../schema/request";
 import { queryRequestSchema } from "../../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../../schema/config";
 import type { TableInfo } from "../../infra/driver";
-import { TENDENCIES, VERDICT_LABELS, type PairAdvice } from "../../schema/verdict";
+import { TENDENCIES, VERDICT_LABELS, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { IDENTITY_COL_RULE } from "./identityHint";
 import type { LlmSlot } from "./slot";
 
@@ -39,6 +39,10 @@ function shapeOf(schema: z.ZodType): string {
 
 /** 输出 token 上限：网关默认上限会截断长草稿（多表 JSON 写一半就断，如 proposeObjects），显式放宽留足余量。 */
 const MAX_OUTPUT_TOKENS = 8192;
+
+/** 解码参数（单一住所）：零温度 + 固定种子——同一份输入必须给同一份答案（裁决建议、验收跑批都靠这个稳定）；
+ *  零温度把采样方差压没，种子让供应商侧尽力确定性解码；两者都不改模型能力，只关随机性。 */
+const DECODING = { temperature: 0, seed: 42 } as const;
 
 /** 从模型文本里抠 JSON：兼容 ```json 围栏与前后闲话；抠不出或不是合法 JSON 都归一个文案（原始文本走失败落盘）。 */
 function extractJson(text: string): unknown {
@@ -117,6 +121,7 @@ export class AiSdkSlot implements LlmSlot {
         this.gen({
           model: this.model,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
+          ...DECODING,
           prompt: `你是本体平台的问数编译器。把自然语言问题编译成结构化查询 JSON。${shapeOf(queryRequestSchema)}
 本体：${JSON.stringify(classes)}
 规则：object 必须是上面的类名；filter 的键是属性名（派生属性可过滤），枚举属性给了 values——过滤值只能取 values 里的字面量（原样照抄，不要翻成中文）；
@@ -135,6 +140,7 @@ $link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开�
         this.gen({
           model: this.model,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
+          ...DECODING,
           prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。${shapeOf(draftSchema)}
 规则：类名=表名的小写下划线形；kind 默 "thing"（记录事件的表用 "event"）；${IDENTITY_COL_RULE}；
 properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
@@ -155,8 +161,9 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
         this.gen({
           model: this.model,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
-          prompt: `你是本体平台的整合顾问。下面是来自不同源的对象（名字、来源连接集合、字段名）。${shapeOf(pairsSchema)}
-找出跨源疑似同义的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。有共同连接的不成对；字段和名字都不像的不进候选。
+          ...DECODING,
+          prompt: `你是本体平台的整合顾问。下面是已上画布、有来源的对象（名字、来源连接集合、字段名）。${shapeOf(pairsSchema)}
+找出可能描述同一种或同一批现实事物的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。同一连接上的两张表也可以成对（候选人表和员工表）。这是召回，不是判定：表可以是多行对多列，字段可以完全对不上，仍可能是同一。
 对象：${JSON.stringify(classes)}`,
         }),
       (output) => pairsSchema.parse(output).pairs
@@ -167,8 +174,10 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
     class_a: { name: string; sources: string[]; fields: string[] };
     class_b: { name: string; sources: string[]; fields: string[] };
     overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
+    base?: { tendency: Tendency; reason: string };
   }): Promise<PairAdvice> {
     const labels = TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、");
+    const base = input.base;
     return this.runWithFailureDump(
       "proposePair",
       { class_a: input.class_a.name, class_b: input.class_b.name, overlap: input.overlap },
@@ -176,11 +185,18 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
         this.gen({
           model: this.model,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
-          prompt: `你是本体平台的整合顾问。下面这一对已经算过交集率（唯一键洗过之后，两边对得上号的比例）。请综合字段、名字和这个硬证据，给出一个倾向与一句白话依据。${shapeOf(pairAdviceSchema)}
+          ...DECODING,
+          prompt: `你是本体平台的整合顾问。下面这一对已经算过交集率（唯一键洗过之后，两边对得上号的比例）。${shapeOf(pairAdviceSchema)}
 倾向枚举：${labels}。class_a / class_b 必须用下面给的两个类名。
-怎么看交集率：两边都有不少行、比率接近 0 → 仅名称相似；接近全交 → 同一或部分重叠（看特有字段再分）；卡在中间、且有状态或日期字段 → 阶段。
-有一侧行数是 0：交集率说明不了是不是同一批（可能是空表），不要只因为 0% 就判仅名称相似；按字段和名字判断是不是同一类东西挂多个来源。
-不要因为表主键不同、关联不同就判不相干。依据写一句人话，不要列编号。
+${base ? `第一版建议（只看字段和名字时给的）：「${VERDICT_LABELS[base.tendency]}」——${base.reason}
+现在的任务是看过硬证据后决定「维持」还是「改口」：以第一版为锚，不要从头重判，同一对、同一份计数，答案必须唯一。` : "这一对没有第一版建议（清单之外）。按下面的判定顺序给倾向与一句白话依据，不要自由发挥：同一对、同一份计数，答案必须唯一。"}
+按三问给倾向。第一问同一种事物：人定案；命中大于零是硬线索（对得上号的个体是同一个体），不许给仅名称相似。命中为零不能否定同一。第二问同一批个体：只看交集率。第三问不同时期：状态、日期只是线索。
+硬约束：命中大于零不许给仅名称相似；命中为零不许给部分重叠。表是多行还是多列、字段是否同名，不能当否决。
+判定顺序：
+1. 有一侧取不出取值：第二问沉默，证据不足以改口${base ? "——第一版若是部分重叠则改口同一（没有交集）" : "——倾向同一，不能定仅名称相似"}。依据写清一侧还没行。
+2. 两边都有取值、命中为零：现在不是同一批；不能定部分重叠；不能据此否定同一。第一版是仅名称相似可维持，否则倾向同一。
+3. 命中大于零、接近全交 → 同一；介于中间、有状态或日期 → 阶段；介于中间否则 → 部分重叠。依据必须带比率与对得上号的条数。
+4. 依据写一句人话，不要列编号。
 对象：${JSON.stringify({ class_a: input.class_a, class_b: input.class_b, overlap: input.overlap })}`,
         }),
       (output) => pairAdviceSchema.parse(output)

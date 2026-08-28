@@ -6,13 +6,13 @@ import type { SourceDriver } from "../../infra/driver";
 import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { mustCls, keyColumn, sourcesOf, type Cls } from "../query/individual";
 import { getDraft } from "../ontology/current";
-import { hasSources, isCrossSource, sharedSourcesMsg } from "./eligibility";
+import { hasSources } from "./eligibility";
 import { pickRule, normalizeWith } from "./normalize";
 import type { EngineEnv } from "../env";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 import type { MetaStore } from "../../meta/store";
 
-/** 两端识别字段归一化后的集合重合度。无源 / 同源 / 缺识别字段拒绝。不收已定案闸——证据允许重算。 */
+/** 两端识别字段归一化后的集合重合度。无源 / 缺识别字段拒绝。同一库两张表也算。不收已定案闸——证据允许重算。 */
 export async function computeOverlap(env: EngineEnv, workspace: string, class_a: string, class_b: string): Promise<Result<OverlapResult>> {
   return toResult(async () => {
     const d = (await getDraft(env, workspace)).draft;
@@ -20,9 +20,6 @@ export async function computeOverlap(env: EngineEnv, workspace: string, class_a:
     const b = mustCls(d, class_b);
     if (!hasSources(a.def) || !hasSources(b.def)) {
       throw new EngineReject(MSG.pairNoSources);
-    }
-    if (!isCrossSource(a.def, b.def)) {
-      throw new EngineReject(sharedSourcesMsg(a.def, b.def));
     }
     if (!a.def.identity || !b.def.identity) {
       throw new EngineReject(MSG.pairNoIdentity);
