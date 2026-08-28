@@ -1,7 +1,7 @@
 // 待确认面板：唯一键行派生（排除派生字段、标记模型建议、无候选不进行）+ 渲染冒烟（两段解锁）。
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
-import DecisionPanel, { identityRows } from "../components/cards/DecisionPanel";
+import DecisionPanel, { identityRows, mergeSelections } from "../components/cards/DecisionPanel";
 
 const t = (identity: string | undefined, props: Record<string, { derived?: boolean; description?: string }>) => ({
   identity,
@@ -37,6 +37,27 @@ describe("identityRows（待确认面板的唯一键行）", () => {
   it("按传入名字的顺序出卡；草稿里已不存在的名字跳过", () => {
     const rows = identityRows({ b: t("x", { x: {} }), a: t("y", { y: {} }) }, ["a", "gone", "b"]);
     expect(rows.map((r) => r.name)).toEqual(["a", "b"]);
+  });
+});
+
+describe("mergeSelections（面板开着时对象增删的选择同步）", () => {
+  const row = (name: string, current: string) => ({ name, current, fields: [{ name: current || "sn" }] });
+
+  it("新对象进卡补草稿当前键——部分重叠立公共对象后不打回①", () => {
+    const sel = { asset: "asset_id", device: "serial_no" };
+    const rows = [row("asset", "asset_id"), row("device", "serial_no"), row("shared_asset_device", "asset_id")];
+    expect(mergeSelections(sel, rows)).toEqual({ asset: "asset_id", device: "serial_no", shared_asset_device: "asset_id" });
+  });
+
+  it("用户改过的选择不被草稿值覆盖；消失的对象清掉", () => {
+    const sel = { asset: "serial_no", device: "serial_no" }; // asset 被用户改成 serial_no
+    const rows = [row("asset", "asset_id")]; // device 被并进 asset，消失
+    expect(mergeSelections(sel, rows)).toEqual({ asset: "serial_no" });
+  });
+
+  it("没有增删时原样返回（同一引用，不触发多余渲染）", () => {
+    const sel = { asset: "asset_id" };
+    expect(mergeSelections(sel, [row("asset", "asset_id")])).toBe(sel);
   });
 });
 

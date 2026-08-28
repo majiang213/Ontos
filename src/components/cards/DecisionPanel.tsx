@@ -4,7 +4,7 @@
 // 工具条入口、生成后不自动弹出（关掉可再进）；本卡替代原「唯一键抉择卡」与「疑似重复面板」两个入口。
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Bezel from "./Bezel";
 import PairCard from "./PairCard";
 import type { PairAdvice } from "../../server/schema/verdict";
@@ -39,6 +39,19 @@ function fieldLabel(f: IdentityField): string {
   return f.description ? `${f.name}（${f.description}）` : f.name;
 }
 
+/** 面板开着时对象有增删（裁「部分重叠」立公共对象、又生成新对象）时的选择同步：
+ *  新行用草稿里的当前键补上——公共对象的键裁时已复制好，不该显示「未设置」把人打回①；
+ *  用户已改的选择不动；从画布消失的对象清掉。纯函数，测试钉行为。 */
+export function mergeSelections(sel: Record<string, string>, rows: IdentityRow[]): Record<string, string> {
+  const names = new Set(rows.map((r) => r.name));
+  const grown = rows.some((r) => !(r.name in sel));
+  const shrank = Object.keys(sel).some((n) => !names.has(n));
+  if (!grown && !shrank) return sel;
+  const next: Record<string, string> = {};
+  for (const r of rows) next[r.name] = r.name in sel ? sel[r.name] : r.current;
+  return next;
+}
+
 export default function DecisionPanel({
   rows,
   pairs,
@@ -55,6 +68,7 @@ export default function DecisionPanel({
   const [sel, setSel] = useState<Record<string, string>>(() => Object.fromEntries(rows.map((r) => [r.name, r.current])));
   const [busy, setBusy] = useState(false);
   const [identityDone, setIdentityDone] = useState(false);
+  useEffect(() => setSel((prev) => mergeSelections(prev, rows)), [rows]); // 面板开着时对象增删（部分重叠立公共对象、又生成对象）：新行补草稿当前键，不打回①
   const ready = rows.length > 0 && rows.every((r) => Boolean(sel[r.name])); // 空画布或还有「未设置」都不放行——键没定就裁会得出错的关系
   const unlocked = identityDone && ready; // 面板开着时新对象进卡，ready 变 false，② 收回
   return (
