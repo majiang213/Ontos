@@ -37,10 +37,12 @@ export interface OverlapRec {
   rate: number;
 }
 
-/** 候选对快照（adj_candidates 一行）：shot_hash 是投喂形状的哈希，proposals 是过筛后的候选对。 */
+/** 候选对快照（adj_candidates 一行）：shot_hash 是投喂形状的哈希，proposals 是过筛后的候选对。
+ *  class_names 是拍快照时有源类名，哈希失配时用来分辨「并类/立公共对象」还是「加了新类/改了字段」。 */
 export interface CandidateSnapshotRec {
   shot_hash: string;
   proposals: PairAdvice[];
+  class_names?: string[];
 }
 
 export interface QueryLogRec {

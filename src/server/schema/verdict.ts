@@ -31,11 +31,13 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
   [Verdict.Skip]: "跳过",
 };
 
-/** 候选对建议：跨源疑似同义的两个类 + 机器倾向 + 理由。裁决权在人，这只是建议（LLM 槽位产出，
- *  /api/list_candidates 的响应形状，画布裁决面板消费）。 */
+/** 候选对建议：疑似同义的两个类 + 机器倾向 + 理由。可以是不同库，也可以是同一库的两张表。
+ *  裁决权在人，这只是建议（LLM 槽位产出，/api/list_candidates 的响应形状，画布裁决面板消费）。 */
 export interface PairAdvice {
   class_a: string;
   class_b: string;
   tendency: Tendency;
   reason: string;
+  /** 串改写来的待问：还没有针对这两个类的新建议，界面不标「建议」。 */
+  pending?: boolean;
 }

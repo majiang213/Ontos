@@ -26,10 +26,10 @@ function alignRate(r: OverlapResp, order: [string, string]): OverlapResp | null 
 }
 
 const HINTS: Record<Verdict, string> = {
-  [Verdict.Same]: "就是同一批东西。合并成一个对象，挂多个来源。点了之后还要选留下谁。",
-  [Verdict.Overlap]: "有一部分重合。公共字段立一个公共对象，各自特有的字段留下。",
-  [Verdict.Stage]: "同一批东西的不同时期（如在途设备到在役设备）。并成一个对象，自动加状态字段和「转为晚阶段」动作。点了之后还要选谁早、谁晚。",
-  [Verdict.NameSimilar]: "只是名字像，其实不相干。各自独立。",
+  [Verdict.Same]: "两个类描述同一种东西。写成一个对象，挂多个来源。点了之后还要选留下谁。",
+  [Verdict.Overlap]: "同一种东西里，个体有交集又不是同一批。要对得上号。会立一个公共对象。",
+  [Verdict.Stage]: "同一个体的不同时期（如在途设备到在役设备）。并成一个对象，自动加状态字段和「转为晚阶段」动作。点了之后还要选谁早、谁晚。",
+  [Verdict.NameSimilar]: "不是同一种东西。各自独立。对得上号的话，数据不支持这一条。",
   [Verdict.Skip]: "这次不判，先放着。",
 };
 
@@ -112,9 +112,11 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
         <code>{pair.class_b}</code>
       </div>
       <div className="pair-ev">
-        <span className="pair-ev-k">{adviseBusy ? "正在看" : seenOverlap ? "看过交集率" : "AI 建议"}</span>
+        <span className="pair-ev-k">
+          {adviseBusy ? "正在看" : seenOverlap ? (advice.tendency !== pair.tendency ? `改口（原建议${VERDICT_LABELS[pair.tendency]}）` : "看过交集率") : pair.pending ? "还该问" : "AI 建议"}
+        </span>
         <div className="pair-ev-v">
-          <span className="pair-ev-badge">{VERDICT_LABELS[advice.tendency]}</span>
+          {!pair.pending && <span className="pair-ev-badge">{VERDICT_LABELS[advice.tendency]}</span>}
           {adviseBusy ? "正看着交集率，等它改口或坚持。" : advice.reason}
         </div>
       </div>
@@ -130,12 +132,12 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
               <span className="pair-ev-num">{(rate.rate * 100).toFixed(0)}%</span>
               {rate.count_hit} 条对得上号
               {rate.count_a === 0 || rate.count_b === 0
-                ? "，有一侧还没有行"
+                ? "，有一侧还没有行，说明不了是不是同一批"
                 : rate.count_hit === 0
-                  ? "，多半不相干"
+                  ? "，现在不是同一批个体"
                   : rate.rate >= 0.5
-                    ? "，多半是同一批"
-                    : ""}
+                    ? "，现在多半是同一批个体"
+                    : "，同一批里只有一部分重合"}
             </>
           ) : (
             <button
@@ -196,7 +198,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
             }}
           >
             <span className="verdict-name">{VERDICT_LABELS[v]}</span>
-            {!adviseBusy && v === advice.tendency && <span className="verdict-suggest">建议</span>}
+            {!adviseBusy && !pair.pending && v === advice.tendency && <span className="verdict-suggest">建议</span>}
             <span className="verdict-hint">{HINTS[v]}</span>
           </div>
         ))}

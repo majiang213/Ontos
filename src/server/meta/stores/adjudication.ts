@@ -57,7 +57,10 @@ export class AdjudicationStore extends ConcernStore {
     const id = await this.wsId(workspace);
     const rows = await this.datasource.all(`SELECT shot_hash, proposals FROM adj_candidates WHERE workspace_id = ?`, [id]);
     if (rows.length === 0) return null;
-    return { shot_hash: String(rows[0].shot_hash), proposals: JSON.parse(String(rows[0].proposals)) };
+    const raw = JSON.parse(String(rows[0].proposals));
+    // 旧行是 PairAdvice[]；新行是 { pairs, names }，名字用来分辨并类还是加了新对象
+    if (Array.isArray(raw)) return { shot_hash: String(rows[0].shot_hash), proposals: raw };
+    return { shot_hash: String(rows[0].shot_hash), proposals: raw.pairs ?? [], class_names: raw.names };
   }
 
   /** 写候选快照：每空间一行，方言 upsert（并发重算同一内容，败者覆盖同值，无害）。 */
@@ -70,6 +73,6 @@ export class AdjudicationStore extends ConcernStore {
       ["workspace_id"],
       ["shot_hash", "proposals"]
     );
-    await this.datasource.run(sql, [id, snap.shot_hash, JSON.stringify(snap.proposals)]);
+    await this.datasource.run(sql, [id, snap.shot_hash, JSON.stringify({ pairs: snap.proposals, names: snap.class_names ?? [] })]);
   }
 }

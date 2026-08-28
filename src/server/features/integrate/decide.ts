@@ -1,10 +1,10 @@
-// 定案 —— 「人裁一对会怎样」：资格闸 → 写草稿（applyVerdict 经 mutateDraft 通道）→ 留痕。
+// 定案 —— 「人裁一对会怎样」：资格闸 → 写草稿（applyVerdict 经 mutateDraft 通道）→ 钉候选快照 → 留痕。
 // 先裁决后留痕，校验回退不留幻影记录。路由只做解析与 JSON。
 
 import type { EngineEnv } from "../env";
 import { getDraft } from "../ontology/current";
 import { adjudicate, type Verdict } from "./applyVerdict";
-import { syncCandidatesAfterVerdict } from "./candidates";
+import { pinCandidateSnapshot } from "./candidates";
 import { hasSources } from "./eligibility";
 import { VERDICT_LABELS } from "../../schema/verdict";
 import { EngineReject, MSG, toResult, type Result } from "../../errors";
@@ -40,7 +40,7 @@ export async function decide(env: EngineEnv, input: DecideInput, workspace: stri
     const source_a = sourceOf(input.class_a);
     const source_b = sourceOf(input.class_b);
     await adjudicate(env, { class_a: input.class_a, class_b: input.class_b }, input.verdict, input.stage_names, workspace);
-    await syncCandidatesAfterVerdict(env, workspace, input.class_a, input.class_b, input.verdict);
+    await pinCandidateSnapshot(env, workspace, input.class_a, input.class_b, input.verdict);
     let recorded = true;
     try {
       await env.meta.recordDecision(workspace, {

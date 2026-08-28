@@ -511,6 +511,61 @@ describe("裁决流水线", () => {
     expect(left.some(pairOf("b", "c"))).toBe(false);
     expect(left.some(pairOf("a", "d"))).toBe(false);
     expect(calls).toBe(1);
+    const ac = left.find(pairOf("a", "c"));
+    expect(ac?.pending).toBe(true);
+    expect(ac?.reason).toContain("还该问");
+    expect(ac?.reason).not.toBe("2");
+  });
+
+  it("疑似重复串：「阶段」之后 B–C 改问 A–C；不再问模型", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "import_objects", objects: { a: threeSourced.a, b: threeSourced.b, c: threeSourced.c } });
+    let calls = 0;
+    const env = {
+      ...s.env,
+      llm: stubLlm(() => {
+        calls++;
+        return [
+          { class_a: "a", class_b: "b", tendency: Verdict.Stage, reason: "1" },
+          { class_a: "b", class_b: "c", tendency: Verdict.Overlap, reason: "2" },
+        ];
+      }),
+    };
+    unwrap(await listCandidates(env));
+    unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Stage, stage_names: { from: "in_transit", to: "in_service" } }));
+    const left = unwrap(await listCandidates(env));
+    expect(left.some(pairOf("a", "c"))).toBe(true);
+    expect(left.some(pairOf("b", "c"))).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it("疑似重复串：钉快照失败也不把串外的 D 拉进来", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "import_objects", objects: threeSourced });
+    let calls = 0;
+    let writes = 0;
+    const env = {
+      ...s.env,
+      llm: stubLlm(() => {
+        calls++;
+        return [
+          { class_a: "a", class_b: "b", tendency: Verdict.Same, reason: "1" },
+          { class_a: "b", class_b: "c", tendency: Verdict.Overlap, reason: "2" },
+        ];
+      }),
+    };
+    const origWrite = env.meta.writeCandidateSnapshot.bind(env.meta);
+    env.meta.writeCandidateSnapshot = async (workspace, snap) => {
+      writes++;
+      if (writes > 1) throw new Error("pin fail");
+      return origWrite(workspace, snap);
+    };
+    unwrap(await listCandidates(env));
+    expect(calls).toBe(1);
+    unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Same }));
+    const left = unwrap(await listCandidates(env));
+    expect(left.some(pairOf("a", "d"))).toBe(false);
+    expect(calls).toBe(1);
   });
 
   it("疑似重复串：「部分重叠」之后 B–C 还在；公共对象不跟串里每个类成对；不再问模型", async () => {

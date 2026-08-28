@@ -32,7 +32,11 @@ export function rewriteAfterVerdict(
     const k = pairKey(a, b);
     if (seen.has(k) || decided.has(k)) continue;
     seen.add(k);
-    out.push(a === p.class_a && b === p.class_b ? p : { ...p, class_a: a, class_b: b });
+    if (a === p.class_a && b === p.class_b) {
+      out.push(p);
+      continue;
+    }
+    out.push({ class_a: a, class_b: b, tendency: p.tendency, reason: "并完之后还该问这一对，按三问定案", pending: true });
   }
   return out;
 }
