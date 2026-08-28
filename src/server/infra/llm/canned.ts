@@ -28,7 +28,7 @@ export class CannedSlot implements LlmSlot {
     // 不能靠「config 里有没有同名类」巧合放行，否则别的空间任何问法都会被静默编成演示查询（错答案比报错糟）
     if (workspace !== TEST_WORKSPACE) throw new EngineReject(MSG.cannedWsOnly);
     // 剧本在本文件 demoQueries（test 空间的演示数据）：正则顺序即优先级，末条兜底。
-    // 形状与 generateText + Output.object 产物一致，过同一道 Zod。
+    // 形状与真模型槽位出槽 JSON 一致（generateText 出文本抠 JSON，不下发 response_format），过同一道 Zod。
     // 无模型时问数没有通用编译法，剧本只对上了类才编；对不上说明不是演示问题，得配模型 Key
     const hit = demoQueries.find((q) => q.pattern.test(question))!;
     if (!config.object_types[hit.query.object]) {

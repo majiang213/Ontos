@@ -1,4 +1,4 @@
-// 归一化 —— 比对前把识别字段洗成统一格式（《ontos-article.md》§3.2 第二步）。
+// 归一化 —— 比对前把识别字段洗成统一格式（《ontos-article.md》§3.2 第二问）。
 // 只在内存，不改源值、不落库。规则按格式自动匹配，不涉模型。
 
 export interface NormRule {

@@ -10,7 +10,7 @@
 > V2.3.1 变更：DDL 定为 MySQL 8 方言（AUTO_INCREMENT、MEDIUMTEXT、ENGINE/CHARSET 后缀、ON UPDATE CURRENT_TIMESTAMP），PG/SQLite 适配见方言注记。
 > V2.4 变更：裁决分级——合并类永远人定案，仅名称相似类可升级为机器定案、人抽检，升级节奏由裁决接受率决定（§2、§3 M3）。
 > V2.5 变更：工作空间 B 方案落地，元库表清单定稿为 9 张（onto_workspace、onto_version、conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action、meta_seq）——onto_ontology 与 onto_draft 取消（当时草稿仍是进程内存态；本体锚点不再需要，版本链直接挂 workspace_id）。演示数据填充改到 `test` 空间（default 与新建空间一样空白起步，与是否配置 LLM Key 无关）。界面术语：「识别字段」改叫「唯一键」。
-> V2.6 变更（2026-08-24）：跟代码对账。工作副本落在 `onto_version` 的工作行（`version IS NULL` 的可变头，`canvas_json` 装本体+摆位+弯折+钉点），不再是进程内存态。源库方言增加 SQLite 文件。元库 DDL 按方言分文件（`src/server/meta/ddl/sqlite.ts` 与 `mysql.ts`），不做字符串替换。对外主入口是 MCP 九个工具（含 `edit_draft` 写工作副本）。告知：变更事件随动作结果返回，外发仍预留。验收问题集可对草稿试跑（不落记录）。
+> V2.6 变更（2026-08-24）：跟代码对账。工作副本落在 `onto_version` 的工作行（`version IS NULL` 的可变头，`canvas_json` 装本体+摆位+弯折+钉点），不再是进程内存态。源库方言增加 SQLite 文件。元库 DDL 按方言分文件（`src/server/meta/ddl/sqlite.sql`、`mysql.sql`、`pg.sql`），不做字符串替换。对外主入口是 MCP 十个工具（含 `edit_draft` 写工作副本）。告知：变更事件随动作结果返回，外发仍预留。验收问题集可对草稿试跑（不落记录）。
 > V2.7 变更（2026-08-26）：无状态化。拆掉全部单进程假设：进程内写队列、内存 rev、内存已发布/工作副本热缓存、`meta_seq` 计数器表全部删除。草稿修订号 `rev` 持久化在 `onto_version` 工作行（新列），「每空间恰一行工作行」改为 DB 级保证（生成列 `draft_key` + 唯一索引）；所有草稿写走 rev CAS（冲突 = 0 行，MCP 路径 422、画布路径自动重读重试）。发号器从 `{ sequence }` 计数器改为 `{ snowflake: true }` 雪花号（41 位毫秒 + 10 位实例 + 12 位序列，实例位来自 `ONTOS_SNOWFLAKE_INSTANCE_ID` 或随机派生；业务编号变为长数字串）。create 幂等从「队列串行」变为「源表 identity 列唯一索引 + 插入失败重查兜底」。元库表清单定为 8 张（`meta_seq` 删除）。多实例部署 = MySQL 元库 + 每实例分配 `ONTOS_SNOWFLAKE_INSTANCE_ID`，同一份元库下任意多实例行为一致；SQLite 单文件保留本地开发与单实例。演示 fixture 是实例本地态，多实例下对 `test` 空间的写会分叉（不承诺）。
 
 ## 1. 产品定位
@@ -242,7 +242,7 @@ link_types:
 | 连原库 | mysql2 / pg / node:sqlite | 问数只读连接；动作可写连接。源库接 MySQL、PG、SQLite 文件 |
 | LLM | Vercel AI SDK：`generateText` + `Output.object` + Zod | 三个槽：建模草稿、合并建议、自然语言 → 查询 JSON。不要 tool 循环，不要 Mastra；没有自然语言 → 动作的槽 |
 | 出码模板 | **本期不做** | Nunjucks / drizzle-kit migrations / @dataui/crud 从本期拿掉 |
-| 对外调用 | MCP（`POST /api/mcp`，九个工具）为主入口；另有 REST `POST /api/query` | Claude Code 等是调用方，循环不做进 Ontos |
+| 对外调用 | MCP（`POST /api/<空间名>/mcp`，十个工具）为主入口；另有 REST `POST /api/<空间名>/query` | Claude Code 等是调用方，循环不做进 Ontos |
 | 存储 | 只存平台元数据 | 表结构见下文「平台元数据库」。**不存业务行** |
 
 **留门**：信创要求后端换 Java 时，配置文本与前端不受影响；真要出码再另议，不倒逼本期架构。
@@ -427,7 +427,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 ```
 
 - **本体配置、版本链与画布状态同表入库**：`onto_version` 按 `(workspace_id, version)` 唯一；已发布版 = 该空间 `MAX(version)`。**工作副本是版本链上 `version IS NULL` 的工作行**：编辑画布、拖摆位、弯折、钉点都写它的 `canvas_json`；发布把工作行复制成编号行；点某个历史版本 = 用那一行覆盖工作行，不插入新行；要让问数也变成这版，再点发布。画布状态不再另有家——旧的 `onto_workspace.layout` / `draft_json` 两列已废。**草稿修订号 `rev` 持久化在工作行**：每次内容写与界面状态写都 CAS（`UPDATE … WHERE rev = ?`，0 行 = 冲突；冲突时 REST 路径 422「草稿已变」、MCP 路径 JSON-RPC `-32000` 同文案（信封恒 200，错误看信封，见《外部Agent编辑画布.md》）、画布路径自动重读重试一次，后写叠加应用）；「每空间恰一行」由生成列 `draft_key` 的唯一索引兜底，不靠进程内纪律。重启不复位、跨实例一致。
-- **其余 6 张元数据表**（conn_source、adj_decision、adj_overlap、ont_question、log_query、log_action）全部带 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。发号没有计数器表（`meta_seq` 已随雪花发号删除）。
+- **其余 7 张元数据表**（conn_source、adj_decision、adj_overlap、adj_candidates、ont_question、log_query、log_action）全部带 `workspace_id`，唯一约束与索引以 `(workspace_id, …)` 为首列。隔离从「物理分开」变为「列上纪律」：每条查询必须带 `WHERE workspace_id = ?`，这层纪律收在 MetaStore 一处，不漏给调用方。发号没有计数器表（`meta_seq` 已随雪花发号删除）。
 - **元库可换、实例可平铺**：共享元库是一个接口（`MetaDatasource`）。离线开发默认单文件 SQLite（即开即用，不改隔离语义——隔离在列上，不在文件上）；设 `ONTOS_META_DSN=mysql://…` 即换 MySQL（DDL 见 `src/server/meta/ddl/mysql.sql`），`postgres://…` / `postgresql://…` 即换 PostgreSQL（DDL 见 `src/server/meta/ddl/pg.sql`）。开发期不做老库迁移：表结构变了删库重建，启动只跑 CREATE TABLE IF NOT EXISTS。服务本身无状态（无进程内写队列与内存快照缓存），同一份元库下任意多实例行为一致；多实例部署 = MySQL 或 PG 元库 + 每实例分配 `ONTOS_SNOWFLAKE_INSTANCE_ID`（雪花号实例位，不分配则随机派生）。
 - **配置模板仍是文件**：`src/server/config/ontology.yaml` 是演示模板，只播种给 `test` 的 `onto_version` v1 行，此后不再被读；`default` 与新建空间一样空白起步（v1 是空本体），演示 fixture 连接也只注入 `test`——切换空间要看得出是另一套。
 
@@ -466,7 +466,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 **循环分三种，只禁一种。** 禁止的是模型自转的 ReAct 循环：建模没有即时反馈信号，数据库不会告诉模型建错了，模型自己判自己对错只会漂移；每次循环走的路径不同，标注库回归就没法跑；循环的中间产物没人读，裁决权也就丢了。要保留的是人驱动的再生成，以及确定性流水线里嵌多个模型槽位：表多了逐批产类，由代码做确定性合并，再产关系建议与动作草稿——下一步走什么由代码决定，停不停由人决定，模型只在槽位里填空。槽位再多也落在「写出配置」这一个用途里；模型的另一个用途是把自然语言编成查询请求（验收问题集跑批；没有自然语言 → 动作的槽），两个用途之外没有模型。真想要 agent 式探索，循环放在 Ontos 之外，由外部 Agent 驱动，Ontos 内部永远保持确定性。
 
-**入口两个，内核同一套**：画布点「生成对象」与 MCP 同一套名字——`propose_objects` 只建议，再 `edit_draft` `{ op: import_objects }` 落地。Claude Code 等外部 Agent 经 MCP 调九个工具（`query` / `run_action` / `propose_objects` / `propose_action` / `list_classes` / `read_class` / `search` / `list_tables` / `edit_draft`）。发布、裁决、连接、回滚仍是人的关卡，不做成 MCP 写工具。
+**入口两个，内核同一套**：画布点「生成对象」与 MCP 同一套名字——`propose_objects` 只建议，再 `edit_draft` `{ op: import_objects }` 落地。Claude Code 等外部 Agent 经 MCP 调十个工具（`query` / `run_action` / `propose_objects` / `propose_action` / `list_classes` / `read_class` / `search` / `list_candidates` / `list_tables` / `edit_draft`）。发布、裁决、连接、回滚仍是人的关卡，不做成 MCP 写工具。
 
 **持久化与即用即弃**：本体、映射、动作定义、`log_query`、`log_action` 持久化；每次执行编出的 SQL 即用即弃；业务行留在原库。
 
@@ -501,7 +501,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 
 | 本文章节 | 细节在哪 |
 |---|---|
-| §2 五种结论与三层证据链 | 文章 §3.2：五种结论的处理、三步判定、候选对、交集率 |
+| §2 五种结论与三层证据链 | 文章 §3.2：五种结论的处理、三问判定、候选对、交集率 |
 | §4 元模型骨架 | 文章附录 B：全部键、保留字、键的命名空间；附录 C：完整可发布配置 |
 | §5 查询 | 文章 §5：请求写法、过滤语法、派生属性求值、多源对齐 |
 | §5 写入 | 文章 §6：前置、效应、写回规则、转化关系判定、告知 |
