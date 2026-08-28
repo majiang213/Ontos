@@ -8,7 +8,7 @@ import { cleanupRuntime, draftEngine, setupRuntime, unwrap, expectRejected } fro
 import { pickRule, normalizeWith, RULES } from "../server/features/integrate/normalize";
 import { overlapRate } from "../server/features/integrate/overlap";
 import { applyVerdict } from "../server/features/integrate/applyVerdict";
-import { Verdict } from "../server/schema/verdict";
+import { Verdict, type PairAdvice } from "../server/schema/verdict";
 import { listCandidates } from "../server/features/integrate/candidates";
 import { proposePair } from "../server/features/integrate/advise";
 import { computeOverlap } from "../server/features/integrate/overlap";
@@ -198,6 +198,22 @@ describe("裁决写草稿", () => {
     assertPublishable(d);
   });
 
+  it("部分重叠：没有同名公共字段仍立公共对象，只带唯一键", () => {
+    const d = twoClasses();
+    d.object_types.po_b.identity = "serial_no";
+    d.object_types.po_b.properties = { serial_no: { type: "string" }, extra_b: { type: "string" } };
+    d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", extra_b: "name" };
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
+    const parent = d.object_types.shared_po_a_po_b;
+    expect(parent).toBeDefined();
+    expect(parent.properties.name).toBeUndefined(); // 没有同名公共字段，不上移
+    expect(parent.properties.sn).toBeDefined(); // 唯一键复制上去
+    expect(parent.properties.serial_no).toBeDefined();
+    expect(d.object_types.po_a.properties.extra_a).toBeDefined();
+    expect(d.object_types.po_b.properties.extra_b).toBeDefined();
+    assertPublishable(d);
+  });
+
   it("仅名称相似：配置不动", () => {
     const d = twoClasses();
     const before = JSON.stringify(d);
@@ -360,7 +376,7 @@ describe("裁决流水线", () => {
     expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(false);
   });
 
-  it("proposePair：看过交集率后改口；空表不因 0% 改口；无源/同源拒绝", async () => {
+  it("proposePair：看过交集率后改口；空表不因 0% 改口；无源拒绝；同一库两张表可以建议", async () => {
     const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
@@ -370,7 +386,7 @@ describe("裁决流水线", () => {
       },
     });
     const miss = unwrap(await proposePair(s.env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 80, count_hit: 0 }));
-    expect(miss.tendency).toBe(Verdict.NameSimilar);
+    expect(miss.tendency).toBe(Verdict.Same); // 不是同一批，但不能据此否定同一
     const empty = unwrap(await proposePair(s.env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
     expect(empty.tendency).toBe(Verdict.Same);
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
@@ -378,16 +394,187 @@ describe("裁决流水线", () => {
     await s.editDraft({
       op: "import_objects",
       objects: {
-        po_c: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sc: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } } },
+        asg: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sc: { connection: "device_sys", table: "assignment", pk: "id", fields: { sn: "sn" } } } },
       },
     });
-    expect((await proposePair(s.env, "default", "po_a", "po_c", { rate: 0.5, count_a: 2, count_b: 2, count_hit: 1 })).code).toBe(422);
+    expect((await proposePair(s.env, "default", "po_b", "asg", { rate: 0.5, count_a: 2, count_b: 2, count_hit: 1 })).code).toBe(200); // 同一库两张表也可以建议
   });
 
-  it("computeOverlap：无源类、同源对拒绝", async () => {
+  it("proposePair：清单快照里的第一版建议作为锚传给槽位", async () => {
     const s = await draftEngine();
-    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
-    expect((await computeOverlap(s.env, "default", "equipment", "vendor")).code).toBe(422);
-    expect((await computeOverlap(s.env, "default", "repair", "assignment")).code).toBe(422);
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+    });
+    const one: { class_a: string; class_b: string; tendency: Verdict.Overlap; reason: string } = {
+      class_a: "po_a",
+      class_b: "po_b",
+      tendency: Verdict.Overlap,
+      reason: "字段部分重合",
+    };
+    let seenBase: unknown;
+    const env = {
+      ...s.env,
+      llm: {
+        name: "anchor",
+        nlToQuery: async () => ({ object: "po_a" }),
+        proposeObjects: async () => ({}),
+        proposePairs: async () => [one], // 第一版建议（进快照）
+        proposePair: async (input: { base?: { tendency: Verdict; reason: string } }) => {
+          seenBase = input.base;
+          return { class_a: "po_a", class_b: "po_b", tendency: Verdict.Overlap as const, reason: "维持" };
+        },
+      },
+    };
+    unwrap(await proposePair(env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
+    expect(seenBase).toEqual({ tendency: Verdict.Overlap, reason: "字段部分重合" }); // 第二版的锚 = 快照里的第一版
+  });
+
+  it("computeOverlap：无源类拒绝；同一库两张表可以算", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, "test");
+    expect((await computeOverlap(s.env, "test", "repair", "vendor")).code).toBe(422);
+    expect((await computeOverlap(s.env, "test", "repair", "assignment")).code).toBe(200);
+  });
+
+  it("同一库两张表：listCandidates 收进；「同一」合并后两个源条目都留下", async () => {
+    const s = await draftEngine();
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        dev: {
+          kind: "thing",
+          identity: "sn",
+          properties: { sn: { type: "string" }, name: { type: "string" } },
+          sources: { device_sys: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } },
+        },
+        asg: {
+          kind: "thing",
+          identity: "sn",
+          properties: { sn: { type: "string" }, name: { type: "string" } },
+          sources: { device_sys: { connection: "device_sys", table: "assignment", pk: "id", fields: { sn: "sn", name: "asgn_no" } } },
+        },
+      },
+    });
+    const isPair = (p: { class_a: string; class_b: string }) =>
+      (p.class_a === "dev" && p.class_b === "asg") || (p.class_a === "asg" && p.class_b === "dev");
+    expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(true);
+    unwrap(await decide(s.env, { class_a: "dev", class_b: "asg", verdict: Verdict.Same }));
+    const d = (await s.getDraft()).draft;
+    expect(d.object_types.asg).toBeUndefined();
+    expect(d.object_types.dev.sources!.device_sys.table).toBe("device");
+    expect(d.object_types.dev.sources!.device_sys_asg.table).toBe("assignment");
+    assertPublishable(d);
+  });
+
+  const pairOf = (x: string, y: string) => (p: { class_a: string; class_b: string }) =>
+    (p.class_a === x && p.class_b === y) || (p.class_a === y && p.class_b === x);
+
+  const stubLlm = (proposePairs: () => PairAdvice[]) => ({
+    name: "chain",
+    nlToQuery: async () => ({ object: "a" }),
+    proposeObjects: async () => ({}),
+    proposePairs: async () => proposePairs(),
+    proposePair: async () => proposePairs()[0] ?? { class_a: "a", class_b: "b", tendency: Verdict.Same as const, reason: "" },
+  });
+
+  const threeSourced = {
+    a: { kind: "thing" as const, identity: "sn", properties: { sn: { type: "string" as const }, name: { type: "string" as const } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+    b: { kind: "thing" as const, identity: "sn", properties: { sn: { type: "string" as const }, name: { type: "string" as const } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+    c: { kind: "thing" as const, identity: "sn", properties: { sn: { type: "string" as const }, name: { type: "string" as const } }, sources: { sc: { connection: "asset_sys", table: "asset", pk: "asset_id", fields: { sn: "sn", name: "asset_name" } } } },
+    d: { kind: "thing" as const, identity: "sn", properties: { sn: { type: "string" as const }, name: { type: "string" as const } }, sources: { sd: { connection: "hr_sys", table: "person", pk: "person_no", fields: { sn: "person_no", name: "name" } } } },
+  };
+
+  it("疑似重复串：「同一」之后 B–C 改问 A–C；串外的 D 不进来；不再问模型", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "import_objects", objects: threeSourced });
+    let calls = 0;
+    const env = {
+      ...s.env,
+      llm: stubLlm(() => {
+        calls++;
+        return [
+          { class_a: "a", class_b: "b", tendency: Verdict.Same, reason: "1" },
+          { class_a: "b", class_b: "c", tendency: Verdict.Overlap, reason: "2" },
+        ];
+      }),
+    };
+    expect(unwrap(await listCandidates(env)).map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "b-c"]);
+    expect(calls).toBe(1);
+    unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Same }));
+    const left = unwrap(await listCandidates(env));
+    expect(left.some(pairOf("a", "c"))).toBe(true);
+    expect(left.some(pairOf("a", "b"))).toBe(false);
+    expect(left.some(pairOf("b", "c"))).toBe(false);
+    expect(left.some(pairOf("a", "d"))).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it("疑似重复串：「部分重叠」之后 B–C 还在；公共对象不跟串里每个类成对；不再问模型", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "import_objects", objects: { a: threeSourced.a, b: threeSourced.b, c: threeSourced.c } });
+    let calls = 0;
+    const env = {
+      ...s.env,
+      llm: stubLlm(() => {
+        calls++;
+        return [
+          { class_a: "a", class_b: "b", tendency: Verdict.Overlap, reason: "1" },
+          { class_a: "b", class_b: "c", tendency: Verdict.Same, reason: "2" },
+        ];
+      }),
+    };
+    unwrap(await listCandidates(env));
+    expect(calls).toBe(1);
+    unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Overlap }));
+    const left = unwrap(await listCandidates(env));
+    expect(left.some(pairOf("a", "b"))).toBe(false);
+    expect(left.some(pairOf("b", "c"))).toBe(true);
+    expect(left.some((p) => p.class_a.startsWith("shared_") || p.class_b.startsWith("shared_"))).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it("疑似重复串：A–C 已跳过，「同一」把 B 并进 A 后不重开 A–C", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "import_objects", objects: { a: threeSourced.a, b: threeSourced.b, c: threeSourced.c } });
+    const env = {
+      ...s.env,
+      llm: stubLlm(() => [
+        { class_a: "a", class_b: "b", tendency: Verdict.Same, reason: "1" },
+        { class_a: "b", class_b: "c", tendency: Verdict.Same, reason: "2" },
+        { class_a: "a", class_b: "c", tendency: Verdict.NameSimilar, reason: "3" },
+      ]),
+    };
+    unwrap(await listCandidates(env));
+    unwrap(await decide(env, { class_a: "a", class_b: "c", verdict: Verdict.Skip }));
+    unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Same }));
+    const left = unwrap(await listCandidates(env));
+    expect(left.some(pairOf("a", "c"))).toBe(false);
+    expect(left.some(pairOf("a", "b"))).toBe(false);
+  });
+
+  it("疑似重复串：先跳过 B–C，再把 B 并进 A，不把已拿掉的牵线改写成 A–C", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "import_objects", objects: { a: threeSourced.a, b: threeSourced.b, c: threeSourced.c } });
+    let calls = 0;
+    const env = {
+      ...s.env,
+      llm: stubLlm(() => {
+        calls++;
+        return [
+          { class_a: "a", class_b: "b", tendency: Verdict.Same, reason: "1" },
+          { class_a: "b", class_b: "c", tendency: Verdict.Same, reason: "2" },
+        ];
+      }),
+    };
+    unwrap(await listCandidates(env));
+    unwrap(await decide(env, { class_a: "b", class_b: "c", verdict: Verdict.Skip }));
+    unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Same }));
+    const left = unwrap(await listCandidates(env));
+    expect(left.some(pairOf("a", "c"))).toBe(false);
+    expect(calls).toBe(1);
   });
 });

@@ -4,7 +4,8 @@
 import type { EngineEnv } from "../env";
 import { getDraft } from "../ontology/current";
 import { adjudicate, type Verdict } from "./applyVerdict";
-import { hasSources, isCrossSource, SAME_SOURCE_OK_VERDICTS, sharedSourcesMsg } from "./eligibility";
+import { syncCandidatesAfterVerdict } from "./candidates";
+import { hasSources } from "./eligibility";
 import { VERDICT_LABELS } from "../../schema/verdict";
 import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
@@ -35,13 +36,11 @@ export async function decide(env: EngineEnv, input: DecideInput, workspace: stri
     if (!hasSources(clsA) || !hasSources(clsB)) {
       throw new EngineReject(MSG.decideNoSources);
     }
-    if (!isCrossSource(clsA, clsB) && !SAME_SOURCE_OK_VERDICTS.has(input.verdict)) {
-      throw new EngineReject(sharedSourcesMsg(clsA, clsB));
-    }
     const sourceOf = (name: string) => Object.keys(d.object_types[name]?.sources ?? {})[0] ?? "";
     const source_a = sourceOf(input.class_a);
     const source_b = sourceOf(input.class_b);
     await adjudicate(env, { class_a: input.class_a, class_b: input.class_b }, input.verdict, input.stage_names, workspace);
+    await syncCandidatesAfterVerdict(env, workspace, input.class_a, input.class_b, input.verdict);
     let recorded = true;
     try {
       await env.meta.recordDecision(workspace, {
