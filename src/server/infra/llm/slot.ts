@@ -1,5 +1,5 @@
 // LLM 槽位 —— 「模型在哪几个槽位出现、没 key 怎么办」（《ontos-article.md》§4、§5.3）。
-// 整合槽位两次出场：proposePairs 只看名字和字段；proposePair 看过交集率再给倾向。
+// 整合槽位两次出场：proposePairs 看名字、连接集合和字段名；proposePair 看过交集率再给倾向。
 // 接口 + 组合原语；槽位选择（有 OPENAI_API_KEY 走真模型，否则罐头离线回退）收在组合根 runtime.ts，
 // 边界经 EngineEnv.llm 下传——本文件不摸进程级单例。
 // 实现在同目录：罐头 canned.ts（离线确定性 + 演示剧本），真模型 aiSdk.ts（提示词工程）。

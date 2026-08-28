@@ -143,22 +143,30 @@ function reviseWithOverlap(
   const counts = `${overlap.count_hit} 条对得上号（${overlap.count_a} / ${overlap.count_b}）`;
   const empty = overlap.count_a === 0 || overlap.count_b === 0;
   if (overlap.count_hit === 0) {
-    const tendency = base.tendency === Verdict.Overlap ? Verdict.Same : base.tendency;
+    // 空表＝第二问沉默：证据不足以改口，沿用第一版。非空命中为零：现在不是同一批——
+    // 部分重叠要有交集、阶段要同一个体两头都在，都立不住，改口同一（命中为零不能否定同一）。
+    const demote = base.tendency === Verdict.Overlap || (!empty && base.tendency === Verdict.Stage);
+    const tendency = demote ? Verdict.Same : base.tendency;
     return {
       class_a: a.name,
       class_b: b.name,
       tendency,
       reason: empty
         ? `有一侧还没有行（${overlap.count_a} / ${overlap.count_b}），交集率说明不了是不是同一批，也不能据此否定同一。${base.reason}`
-        : `交集率 ${pct(overlap.rate)}（${counts}），现在不是同一批个体；命中为零，数据不支持部分重叠，也不能据此否定同一。${base.reason}`,
+        : `交集率 ${pct(overlap.rate)}（${counts}），现在不是同一批个体；命中为零，数据不支持${base.tendency === Verdict.Stage ? "阶段（阶段要求同一个体两头都在）" : "部分重叠"}，也不能据此否定同一。${base.reason}`,
     };
   }
+  // 接近全交：命中大于零才谈得上（这一支已保证）。有状态字段且第一版倾向阶段 → 维持阶段（第三问答案为「是」）；
+  // 否则全交、只看这一批 → 同一。比率不再单独压过第三问——与 §3.2 合成表、ADR 0004 一致。
   if (overlap.rate >= 0.8) {
+    const stage = hasStageField(a, b) && base.tendency === Verdict.Stage;
     return {
       class_a: a.name,
       class_b: b.name,
-      tendency: Verdict.Same,
-      reason: `交集率 ${pct(overlap.rate)}（${counts}），现在多半是同一批个体，倾向同一。`,
+      tendency: stage ? Verdict.Stage : Verdict.Same,
+      reason: stage
+        ? `交集率 ${pct(overlap.rate)}（${counts}），接近全交、有状态字段、第一版已倾向阶段，维持阶段——同一批个体的不同时期。`
+        : `交集率 ${pct(overlap.rate)}（${counts}），现在多半是同一批个体，倾向同一。`,
     };
   }
   const tendency = hasStageField(a, b) ? Verdict.Stage : Verdict.Overlap;

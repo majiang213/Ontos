@@ -283,4 +283,26 @@ describe("LLM 槽位离线回退", () => {
     expect(advice.tendency).toBe(Verdict.Same);
     expect(advice.reason).toContain("还没有行");
   });
+
+  it("看过交集率再建议：接近全交不压过第三问——有状态字段且第一版是阶段则维持阶段", async () => {
+    const a = { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] };
+    const b = { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] };
+    const full = { rate: 0.92, count_a: 100, count_b: 100, count_hit: 92 };
+    const stage = await slot.proposePair({ class_a: a, class_b: b, overlap: full, base: { tendency: Verdict.Stage, reason: "字段像阶段" } });
+    expect(stage.tendency).toBe(Verdict.Stage); // 合成表「是 | 命中大于零 | 是 → 阶段」，比率不单独压过第三问
+    expect(stage.reason).toContain("维持阶段");
+    const same = await slot.proposePair({ class_a: a, class_b: b, overlap: full, base: { tendency: Verdict.Same, reason: "字段几乎全同" } });
+    expect(same.tendency).toBe(Verdict.Same); // 第三问不是「是」——全交只答同一批，维持同一
+  });
+
+  it("看过交集率再建议：两边都有行、命中为零，阶段立不住——改口同一（空表才沉默）", async () => {
+    const advice = await slot.proposePair({
+      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] },
+      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] },
+      overlap: { rate: 0, count_a: 100, count_b: 80, count_hit: 0 },
+      base: { tendency: Verdict.Stage, reason: "字段像阶段" },
+    });
+    expect(advice.tendency).toBe(Verdict.Same); // 阶段要求同一个体两头都在；命中为零不支持阶段
+    expect(advice.reason).toContain("不是同一批");
+  });
 });
