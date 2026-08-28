@@ -11,6 +11,7 @@ import { Verdict, type PairAdvice } from "../../schema/verdict";
 import type { ObjectType, OntologyConfig } from "../../schema/config";
 import { MSG, toResult, type Result } from "../../errors";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
+import { isSharedObjectName } from "../ontology/sharedName";
 
 /** 建议规则版本：判定口径或可执行前提变了就 +1——混进哈希，旧规则写的快照自然失效重算。
  *  3：入围改为有源∧未定案（同一库两张表可成对）；三问改口规则。 */
@@ -60,7 +61,7 @@ function nameChangeIsVerdict(prev: string[] | undefined, now: string[]): boolean
   const gained = now.filter((n) => !old.has(n));
   const lost = prev.filter((n) => !next.has(n));
   if (lost.length === 0 && gained.length === 0) return false;
-  return gained.every((n) => n.startsWith("shared_"));
+  return gained.every(isSharedObjectName);
 }
 
 /** 已上画布、有来源的候选对（同一库两张表也算）：快照命中直接用；失配时若只是并类/立公共对象，沿用还活着的对；

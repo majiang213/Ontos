@@ -1,4 +1,4 @@
-// 本体画布 —— 节点是对象类型，边是关系。
+// 本体画布 —— 节点是对象类型；边是配置里的关系，加上公共对象的由来（只活在画布）。
 // 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
 
@@ -27,7 +27,7 @@ import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
-import { ORIGIN_COLOR, isOriginEdge, originLinksOf, originTriples } from "./sharedOrigin";
+import { SHARED_COLOR, isSharedLink, originLinksOf, originTriples } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import { beginSession, currentSession, dropSession, endSession, fireSession, trackSession, xyDragArgs } from "./connectSession";
@@ -128,16 +128,16 @@ export default function OntologyCanvas(props: CanvasProps) {
   );
 }
 
-/** 边色一处判：点中 > 由来 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn 同值——SVG marker 不吃 CSS var，故常量单源）。
+/** 边色一处判：点中 > 由来 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn/--shared 同值——SVG marker 不吃 CSS var，故常量单源）。
  *  默认边也必须显式给 marker 颜色：color 缺省时不渲染箭头（marker 不继承边的描边色）。 */
 const EDGE_ACCENT = "#3b36b0"; // = var(--accent)
 const EDGE_WARN = "#8a5f0b"; // = var(--warn)
 const EDGE_DEFAULT = "#b1b1b7"; // = xyflow 默认边色（.react-flow__edge-path 的默认 stroke）
 function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["style"]; markerEnd: Edge["markerEnd"] } {
-  if (l.kind === "origin") {
+  if (isSharedLink(l)) {
     return {
-      style: { stroke: ORIGIN_COLOR, strokeDasharray: "3 5" },
-      markerEnd: { type: MarkerType.ArrowClosed, color: ORIGIN_COLOR, width: 14, height: 14 },
+      style: { stroke: SHARED_COLOR, strokeDasharray: "3 5" },
+      markerEnd: { type: MarkerType.ArrowClosed, color: SHARED_COLOR, width: 14, height: 14 },
     };
   }
   const selected = l.name === selectedLink;
@@ -151,7 +151,7 @@ function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["s
 function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange }: CanvasProps) {
   // 由来边只活在画布：进分层把三元组拉到一起，不进配置。
   const viewLinks = useMemo(
-    () => [...links, ...originLinksOf(originTriples(objects.map((o) => o.name)))],
+    () => [...links, ...originLinksOf(originTriples(objects))],
     [objects, links]
   );
 
@@ -237,16 +237,16 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
   const edges: Edge[] = useMemo(
     () =>
       viewLinks.map((l) => {
-        const origin = l.kind === "origin";
+        const shared = isSharedLink(l);
         return {
           id: l.name,
           type: "floating" as const,
-          className: origin ? "is-origin" : undefined,
+          className: shared ? "is-shared" : undefined,
           source: l.from,
           target: l.to,
           // 由来边只标「公共部分」；配置关系两行：主行描述，副行「源对象 → 目标对象」
-          label: origin ? (
-            <span className="edge-label-origin">{l.description}</span>
+          label: shared ? (
+            <span className="edge-label-shared">{l.description}</span>
           ) : (
             <>
               <span>{l.description ?? (l.inverse ? `${l.name} / ${l.inverse}` : l.name)}</span>
@@ -256,10 +256,10 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
             </>
           ),
           ...edgeTone(l, selectedLink), // 边色与箭头一处判定
-          interactionWidth: origin ? 0 : 20, // 由来边不可点；配置关系热区放宽
-          selectable: !origin,
-          data: origin
-            ? { obstacles }
+          interactionWidth: shared ? 0 : 20, // 由来边不可点；配置关系热区放宽
+          selectable: !shared,
+          data: shared
+            ? { obstacles, shared: true }
             : {
                 bend: edgeBends?.[l.name],
                 pins: edgePins?.[l.name],
@@ -306,11 +306,11 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
       onNodesChange={onNodesChange}
       onNodeClick={(_, node) => onSelect(node.id)}
       onEdgeClick={(_, edge) => {
-        if (isOriginEdge(edge.id)) return; // 由来边不打开关系详情（它不活在配置里）
+        if ((edge.data as { shared?: boolean } | undefined)?.shared) return; // 由来边不打开关系详情
         onSelectLink?.(edge.id);
       }}
       onEdgeMouseEnter={(_, edge) => {
-        if (isOriginEdge(edge.id)) return;
+        if ((edge.data as { shared?: boolean } | undefined)?.shared) return;
         setHoveredEdge(edge.id);
       }}
       onEdgeMouseLeave={() => setHoveredEdge(null)}

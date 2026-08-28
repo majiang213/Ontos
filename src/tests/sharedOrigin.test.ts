@@ -21,6 +21,35 @@ describe("originTriples（shared_A_B 认出两个原类）", () => {
     expect(originTriples(["asset", "shared_asset_device"])).toEqual([]);
   });
 
+  it("原类已经是公共对象时，再立的 shared_shared_x_y_z 仍认出两端", () => {
+    expect(originTriples(["x", "y", "z", "shared_x_y", "shared_shared_x_y_z"])).toEqual([
+      { shared: "shared_shared_x_y_z", a: "shared_x_y", b: "z" },
+      { shared: "shared_x_y", a: "x", b: "y" },
+    ]);
+  });
+
+  it("两端都能拆时，公共对象的来源对得上哪一对就认哪一对", () => {
+    const src = (label: string) => [{ key: label, label }];
+    expect(
+      originTriples([
+        { name: "po", sources: src("hr.po") },
+        { name: "po_a", sources: src("a.t") },
+        { name: "po_b", sources: src("b.t") },
+        { name: "a_po_b", sources: src("x.y") },
+        { name: "shared_po_a_po_b", sources: [...src("a.t"), ...src("b.t")] },
+      ])
+    ).toEqual([{ shared: "shared_po_a_po_b", a: "po_a", b: "po_b" }]);
+    expect(
+      originTriples([
+        { name: "po", sources: src("hr.po") },
+        { name: "po_a", sources: src("a.t") },
+        { name: "po_b", sources: src("b.t") },
+        { name: "a_po_b", sources: src("x.y") },
+        { name: "shared_po_a_po_b", sources: [...src("hr.po"), ...src("x.y")] },
+      ])
+    ).toEqual([{ shared: "shared_po_a_po_b", a: "po", b: "a_po_b" }]);
+  });
+
   it("两个公共对象可以共享一个原类，按公共对象名排序", () => {
     expect(
       originTriples([
@@ -43,18 +72,18 @@ describe("originLinksOf（原类 → 公共对象的由来边）", () => {
       originLinksOf([{ shared: "shared_asset_device", a: "asset", b: "device" }])
     ).toEqual([
       {
-        name: "origin:shared_asset_device:asset",
+        name: "shared:shared_asset_device:asset",
         from: "asset",
         to: "shared_asset_device",
         description: "公共部分",
-        kind: "origin",
+        kind: "shared",
       },
       {
-        name: "origin:shared_asset_device:device",
+        name: "shared:shared_asset_device:device",
         from: "device",
         to: "shared_asset_device",
         description: "公共部分",
-        kind: "origin",
+        kind: "shared",
       },
     ]);
   });

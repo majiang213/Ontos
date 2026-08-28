@@ -13,6 +13,7 @@
   --ink-2: #5d574c;
   --ink-3: #a09a8c;
   --accent: #3b36b0;        /* 产品靛蓝（深化） */
+  --shared: #9a94b8;        /* 公共对象由来边（SVG marker 用同值 SHARED_COLOR） */
   --accent-ink: #2c29a0;
   --accent-soft: rgba(59, 54, 176, 0.09);
   --ok: #0b7a55;
@@ -460,14 +461,13 @@ input { font-family: inherit; outline: none; }
   font-size: 10px;
   color: var(--ink-3);
 }
-/* 由来边主标注：与 ORIGIN_COLOR 同系，略深一点方便读 */
-.edge-label-origin {
-  color: #6b67a3;
+.edge-label-shared {
+  color: var(--shared);
 }
 .react-flow__edge-text { font-size: 11px; fill: var(--ink-2); }
 .react-flow__edge-textbg { fill: var(--bg); }
 .react-flow__edge-path { stroke: var(--ink-3); stroke-width: 1.2; }
-.react-flow__edge:hover:not(.is-origin) .react-flow__edge-path { stroke: var(--accent); }
+.react-flow__edge:hover:not(.is-shared) .react-flow__edge-path { stroke: var(--accent); }
 .react-flow__controls { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow-soft); }
 .react-flow__controls button { background: var(--panel); border-bottom: 1px solid var(--hairline); color: var(--ink-2); }
 .react-flow__controls button:hover { background: var(--panel-2); }

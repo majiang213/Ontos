@@ -9,6 +9,7 @@ import { walkEffectItems } from "../../schema/spec/actionSpec";
 import { dropClass } from "../ontology/ops/editObject";
 import { mutateDraft } from "../ontology/editDraft";
 import { conversionAction, conversionActionName, removeFieldsUpdateKeys } from "../ontology/skeletons";
+import { sharedObjectName } from "../ontology/sharedName";
 import type { EngineEnv } from "../env";
 import { commonProperties } from "./eligibility";
 import { Verdict } from "../../schema/verdict";
@@ -176,9 +177,9 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       if (!A || !B) throw new Error(MSG.classPairNotFound(a, b));
       const idProps = new Set([A.identity, B.identity].filter(Boolean) as string[]);
       const common = commonProperties(A, B); // 同名才上移；没有同名不挡——公共对象只带唯一键
-      const parent = `shared_${a}_${b}`;
+      const shared = sharedObjectName(a, b);
       // 上位对象的源：公共列 + 识别列（识别列是读公共属性的对齐齐）
-      const parentSources: NonNullable<OntologyConfig["object_types"][string]["sources"]> = {};
+      const sharedSources: NonNullable<OntologyConfig["object_types"][string]["sources"]> = {};
       for (const [side, cls] of [["a", A], ["b", B]] as const) {
         for (const [srcName, entry] of Object.entries(cls.sources ?? {})) {
           const keep = [...common, ...idProps].filter((p) => entry.fields[p]);
@@ -186,12 +187,12 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
           const fields = Object.fromEntries(keep.map((p) => [p, entry.fields[p]]));
           // 该侧源条目映射到的识别属性显式写进 key——上位对象的 identity 只取其一，另一侧靠 key 认行
           const sideId = [...idProps].find((p) => fields[p]);
-          parentSources[parentSources[srcName] ? `${srcName}_${side}` : srcName] = { ...entry, fields, key: sideId };
+          sharedSources[sharedSources[srcName] ? `${srcName}_${side}` : srcName] = { ...entry, fields, key: sideId };
         }
       }
-      const parentProps: OntologyConfig["object_types"][string]["properties"] = {};
+      const sharedProps: OntologyConfig["object_types"][string]["properties"] = {};
       for (const p of common) {
-        parentProps[p] = A.properties[p];
+        sharedProps[p] = A.properties[p];
         delete A.properties[p];
         delete B.properties[p];
         for (const entry of Object.values(A.sources ?? {})) delete entry.fields[p];
@@ -202,14 +203,14 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       // 识别属性复制给上位对象（不移动）
       for (const p of idProps) {
         const def = A.properties[p] ?? B.properties[p];
-        if (def) parentProps[p] = def;
+        if (def) sharedProps[p] = def;
       }
-      d.object_types[parent] = {
+      d.object_types[shared] = {
         kind: "thing",
         description: `${a} 与 ${b} 的公共部分`,
         identity: [...idProps][0],
-        properties: parentProps,
-        sources: parentSources,
+        properties: sharedProps,
+        sources: sharedSources,
       };
       break;
     }
