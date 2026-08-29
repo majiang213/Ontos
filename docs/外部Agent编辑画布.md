@@ -2,7 +2,7 @@
 
 > **历史评审记录**：本文档是早期迭代的评审结论，代码路径与 API 形态随重构变化。
 > 现行结构见 `README.md`「代码结构」与 `AGENTS.md`。历史名对照：`configStore.ts` → `features/ontology/`（editDraft / commit / ops 的旧称）、
-> `llmSlot.ts` → `infra/llm/slot.ts`、`views.ts` → `features/ontology/views.ts`、`load.ts` → `infra/connections.ts`、
+> `llmSlot.ts` → `infra/llm/llm.ts`、`views.ts` → `features/ontology/views.ts`、`load.ts` → `infra/connections.ts`、
 > `apply_draft` 路由 → `edit_draft`；工作空间从 `?ws=` / `x-ontos-ws` 改为路径段 `/api/<空间名>/…`（`workspaceOf`）。
 
 
@@ -22,7 +22,7 @@
 
 今天外部 Agent 能问数、能跑已发布动作，也能让 `propose_objects` / `propose_action` 给出建议，但建议**不进工作副本**。画布上的改动只走 UI → `POST /api/apply_draft` → `applyDraft`。人在画布上看着、Agent 在 MCP 里写着——这两条路还没接上。`list_classes` / `read_class` / `search` 读的是已发布快照，Agent 若按这份配置改画布，会盖掉人尚未发布的编辑。
 
-本设计补上这一条路：给 MCP 增加与 `draftOpSchema` **同一套**编辑语言的写入工具 `apply_draft`（与画布共用 `applyDraft` 同一判别联合），并让发现类工具能显式读工作副本。动作定义也走同一套 op：人在对象卡上新建/改/删，Agent 经 `set_action` / `remove_action` 写入，两端都进草稿。对象卡列出动作摘要（含「删除某某」），发布条点名动作变化。画布继续当**监视器**：轮询工作副本的 `rev`，有外部改动就刷新并 toast。发布、放弃、裁决、回滚、连接数据源、画布上的「生成对象」仍是人的关卡，不做成 MCP 写工具。循环、推理、多步拼装全部在 Ontos 之外；Ontos 内部保持一次调用、一次确定性结果（既有 LLM 槽位仍是一次 `generateObject`）。
+本设计补上这一条路：给 MCP 增加与 `draftOpSchema` **同一套**编辑语言的写入工具 `apply_draft`（与画布共用 `applyDraft` 同一判别联合），并让发现类工具能显式读工作副本。动作定义也走同一套 op：人在对象卡上新建/改/删，Agent 经 `set_action` / `remove_action` 写入，两端都进草稿。对象卡列出动作摘要（含「删除某某」），发布条点名动作变化。画布继续当**监视器**：轮询工作副本的 `rev`，有外部改动就刷新并 toast。发布、放弃、裁决、回滚、连接数据源、画布上的「生成对象」仍是人的关卡，不做成 MCP 写工具。循环、推理、多步拼装全部在 Ontos 之外；Ontos 内部保持一次调用、一次确定性结果（既有 LLM 出口仍是一次 `generateObject`）。
 
 ---
 
@@ -37,7 +37,7 @@
 | 画布 UI | `GET /api/ontology` → `getDraft` | `POST /api/apply_draft` → `applyDraft`；`POST /api/propose_objects` 再 `apply_draft` `{ op: import_objects }` | 是 |
 | MCP | `getPublished`（`list_classes` / `read_class` / `search` / `query` / `run_action` / `propose_action`） | 只有 `run_action`（改源库个体，不改本体） | `propose_*` 明确不落地 |
 
-`src/app/api/mcp/route.ts` 在 `tools/call` 入口无条件 `getPublished`。`propose_objects` 用 `resolveTableInfos` + `getSlot().proposeObjects` 产对象，返回 `{ object_types }` 即停——与 `src/app/api/propose_objects/route.ts` 同名同义。落地走 `apply_draft` `{ op: import_objects }`。
+`src/app/api/mcp/route.ts` 在 `tools/call` 入口无条件 `getPublished`。`propose_objects` 用 `resolveTableInfos` + `getLlm("test").proposeObjects` 产对象，返回 `{ object_types }` 即停——与 `src/app/api/propose_objects/route.ts` 同名同义。落地走 `apply_draft` `{ op: import_objects }`。
 
 `src/server/schema/ops.ts` 的 `draftOpSchema` 已是画布编辑语言：`create_object` / `delete_object` / `update_object` / `add_property` / `remove_property` / `set_identity` / `create_link` / `delete_link` / `import_objects` / `save_layout`。MCP 一条都没暴露。
 
@@ -51,7 +51,7 @@
 ### 不可协商（产品已定）
 
 - 画布仍是唯一工作台，页上无对话抄本。
-- ReAct 留在 MCP 调用方。不引入 Mastra，不在后端做 tool-calling LLM，不第四个 NL 改稿槽位。
+- ReAct 留在 MCP 调用方。不引入 Mastra，不在后端做 tool-calling LLM，不第四个 NL 改稿出口。
 - 人的关卡（引擎真的不做这些写工具）：连接的保存/删除、裁决、发布/放弃/回滚、摆位（`save_layout`）、以及画布上「勾表并点生成对象」的一次性按钮。产品事实：外部 Agent 经 `list_tables` → `propose_objects` → `import_objects` 也能把表建成对象，不经过画布勾选——这是 §9 第二条入口的完整形态，选表关卡只约束画布那条入口。
 - 不新增本体 YAML 键，不改附录 B 保留字。编辑走 `draftOpSchema`（本设计只**谨慎扩三个**判别值 `replace_object` / `set_action` / `remove_action`，理由见下）。
 - 用户看得见的字（工具说明、skill、toast）走 `AGENTS.md` 大白话。代码标识符可继续用 `draft` / `identity` / 工具名。
@@ -72,9 +72,9 @@
 ### Non-Goals
 
 - 页内聊天列、Copilot 侧栏、「再说一句」/ `reviseObject` 浮卡。
-- 把 `generate`（内省 + 槽位 + `import_objects` 一次完成）暴露为 MCP 工具。
+- 把 `generate`（内省 + 出口 + `import_objects` 一次完成）暴露为 MCP 工具。
 - 在画布上做动作的 YAML / JSON 编辑器。对象卡白话表单只覆盖简单动作（见 Goal 1）；表单填不全的动作只展示摘要、只许删除，避免点「编辑」再保存把结构弄丢。告知（`inform`）本期表单不做。演示五条完整规矩是否加进表单，看过简单表单效果再定，不挡本期。
-- 第四个 LLM 槽位（NL → 动作）。生成动作的是外部 Agent 自己；`propose_action` 仍给确定性模板，不开新的 `generateObject` 槽。
+- 第四个 LLM 出口（NL → 动作）。生成动作的是外部 Agent 自己；`propose_action` 仍给确定性模板，不开新的 `generateObject` 出口。
 - 按 skill 裁剪 MCP 工具列表。`tools/list` 全量暴露十个工具，分工由 skill 文档承担（§13）——skill 是提示不是沙箱：红线靠模型守；引擎真没有的是发布/裁决等关卡工具。
 - Agent 写摆位（`save_layout`）。
 - 新元数据表 `log_draft`、SSE/WebSocket、跨进程共享工作副本。
@@ -99,7 +99,7 @@ flowchart LR
     Pub["已发布 getPublished"]
     Canvas["画布 CanvasPage"]
     Engine["query / run_action"]
-    Slot["llmSlot 三槽 · generateObject 一次"]
+    Slot["llmSlot 三个出口 · generateObject 一次"]
   end
   Person -->|"对话"| Agent
   Person -->|"看、连源、勾表、裁决、发布"| Canvas
@@ -297,7 +297,7 @@ DraftReject("equipment 不能整对象替换：已经发布过；含派生字段
 
 **未锁定** = 草稿里有这个类、已发布快照里没有、至多一个来源、没有派生字段/动作/公理，并且：有来源时每个非派生字段都能在 `fields` 里对上列。Agent 可以对它再跑一次 `propose_objects` 并整份换掉。
 
-**没挂来源的类故意不走「未对照字段」锁。** `CannedSlot.proposeObjects` 猜不到识别字段时产出 `{ kind: "thing", properties }`、不写 `sources`（有源无 identity 过不了发布闸）。这正是「按表再建议一次并覆盖」要救的残缺生成态，必须 `replaceable: true`。人「新建对象」后的空类（`properties: {}`）同样可换。人在无源类上 `add_property` 过的，整份替换是后写赢——skill 写明：没挂来源的类一换会盖掉人加的字段；人已经在画布上改过就改用逐步操作。有来源的类上人加的字段仍靠上一表最后一行锁住。
+**没挂来源的类故意不走「未对照字段」锁。** `DemoLlm.proposeObjects` 猜不到识别字段时产出 `{ kind: "thing", properties }`、不写 `sources`（有源无 identity 过不了发布闸）。这正是「按表再建议一次并覆盖」要救的残缺生成态，必须 `replaceable: true`。人「新建对象」后的空类（`properties: {}`）同样可换。人在无源类上 `add_property` 过的，整份替换是后写赢——skill 写明：没挂来源的类一换会盖掉人加的字段；人已经在画布上改过就改用逐步操作。有来源的类上人加的字段仍靠上一表最后一行锁住。
 
 识别字段和描述在未锁定类上是**后写赢**：`replace_object` 用建议稿里的 `identity` / `description` 盖掉当前值，不把「描述不同」当成锁。
 
@@ -405,7 +405,7 @@ draft 视图**带 sources**（连接名、表名、`fields`，可带 `pk`），�
 
 #### `propose_action` 与 `space`
 
-今天 `propose_action` 在**已发布**配置上找类。草稿里新建、尚未发布的类会得到「配置中没有类」。允许 `space: "draft"`，缺省仍 `"published"`。只改变查找哪份配置，仍然一次出模板、不落地、不新增槽位。转化模板继续走 `conversionAction`（`adjudicate.ts` 唯一构造点）。
+今天 `propose_action` 在**已发布**配置上找类。草稿里新建、尚未发布的类会得到「配置中没有类」。允许 `space: "draft"`，缺省仍 `"published"`。只改变查找哪份配置，仍然一次出模板、不落地、不新增出口。转化模板继续走 `conversionAction`（`adjudicate.ts` 唯一构造点）。
 
 `propose_objects` 不读本体配置，只读表结构，不需要 `space`。
 
@@ -645,7 +645,7 @@ action_changes: {
 - 点另一个对象 / 关卡 / 对象被删：有未保存改动则 `confirm`。
 - 保存仍不带 `base_rev`；若 `getRev()` 已不是打开表单时的值，先 `confirm`「外面已经改过这份草稿，还要按表单覆盖吗？」
 
-不在画布上调 `propose_action`（那是 MCP 槽位/模板）。转化动作的默认骨架仍只由裁决生成；人可以在表单里加一条「转化」效应，规则 3① 会拦指向不存在的转化关系。
+不在画布上调 `propose_action`（那是 MCP 出口/模板）。转化动作的默认骨架仍只由裁决生成；人可以在表单里加一条「转化」效应，规则 3① 会拦指向不存在的转化关系。
 
 不加常驻「直播中」指示灯。关卡区已有「发布 vN+1 / 放弃」随 `dirty` 出现，足够表示草稿未发布。
 
@@ -716,11 +716,11 @@ Agent 不写 `save_layout`。MCP 的 `mcpDraftOpSchema` 不含该判别值；万
 
 ---
 
-### 9. 槽位：仍是三个，没有 NL→ops
+### 9. 出口：仍是三个，没有 NL→ops
 
-`src/server/infra/llm/slot.ts` 三个槽位不变：`nlToQuery`、`proposeObjects`、`proposePairs`。每个仍是一次 `generateObject` + Zod。
+`src/server/infra/llm/llm.ts` 三个出口不变：`nlToQuery`、`proposeObjects`、`proposePairs`。每个仍是一次 `generateObject` + Zod。
 
-Agent 自己把自然语言编成 `draftOpSchema`。Ontos 不提供「改 equipment 的说明」这种第四槽。`propose_objects` 继续当表→对象建议的一次性槽位，由 Agent 决定是否落地。`propose_action` 不是槽位，是确定性模板（`conversionAction` 或 `set_fields` 骨架，两个构造点），返回形状即 `set_action.def`；生成动作的是外部 Agent 自己，Ontos 不开 NL→动作的第四槽。
+Agent 自己把自然语言编成 `draftOpSchema`。Ontos 不提供「改 equipment 的说明」这种第四个出口。`propose_objects` 继续当表→对象建议的一次性出口，由 Agent 决定是否落地。`propose_action` 不是出口，是确定性模板（`conversionAction` 或 `set_fields` 骨架，两个构造点），返回形状即 `set_action.def`；生成动作的是外部 Agent 自己，Ontos 不开 NL→动作的第四个出口。
 
 画布「生成对象」继续：选表 → `POST /api/propose_objects` → `apply_draft` `{ op: import_objects }`。人点按钮，不是 Agent 点。两步与 MCP 同名。
 
@@ -1049,7 +1049,7 @@ if ("link" in item) {
 4. **发现工具加 `space`，缺省 `published`，非法值 `-32602`。** 改画布必须写 `space: "draft"`。`query` / `run_action` / `propose_objects` / `apply_draft` / `list_tables` 带 `space` → `-32602`。draft 的 `read_class` 才带 `sources` 与（PR 2）`replaceable`。
 5. **人的关卡不做写工具：** 发布、放弃、裁决、回滚、连接的保存/删除、画布「生成对象」、`save_layout`。`list_tables` 只读且无采样，不是选表关卡。
 6. **画布监视器用 `Store.rev`（只加不回零，加在第一个 await 前）+ 2s 轮询 + ETag/304 + `Cache-Control: no-store`。** 不用 SSE。`save_layout` 不递增 `rev`。仅空画布第一次出现节点时 `fitView`。`withLocalWrite` 覆盖裁决 `onDone`，`finally` 里放下 `localBusy`（失败也放）。
-7. **无第四个 LLM 槽位。** Agent 在外编排 op；`proposeObjects` 仍只给 `propose_objects` 与画布 generate。
+7. **无第四个 LLM 出口。** Agent 在外编排 op；`proposeObjects` 仍只给 `propose_objects` 与画布 generate。
 8. **`apply_draft` 走 `requireWriteAuth`；发现工具保持放开。** 工具入参不带 `ws`。
 9. **不建 `log_draft`。** 未发布编辑以画布状态与外部对话抄本为准；发布后以 `onto_version` 为准。
 10. **并发：每空间一层 `enqueue`（失败也续链）。`base_rev` 在 `applyDraft` task 开头比较，MCP 不再比、不再套队列。** MCP 信封必填；REST 画布不传，队列里后到的写入赢。不在对象卡上做 OT。
@@ -1073,7 +1073,7 @@ MCP 客户端有时对「多名工具 + 窄 schema」更熟，模型少把判别
 
 少一步，看起来更像画布 generate。
 
-代价：第二条落地入口，与 `import_objects` 分叉；撞名策略（拒 / 替换 / 合并）会藏进这个工具，而不是显式 op。人在外循环里「先看建议再决定落不落」的能力被收回 Ontos。**不采用。** 保持槽位只建议，与 §9「模型当顾问」一致。
+代价：第二条落地入口，与 `import_objects` 分叉；撞名策略（拒 / 替换 / 合并）会藏进这个工具，而不是显式 op。人在外循环里「先看建议再决定落不落」的能力被收回 Ontos。**不采用。** 保持出口只建议，与 §9「模型当顾问」一致。
 
 ### C. 发现工具默认改读草稿；或另做 `read_draft_*` 三件套
 
@@ -1101,7 +1101,7 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 
 少一步，Agent 不用拼 `set_action`。
 
-代价：第二条落地入口，与 `apply_draft` 分叉；同名策略（覆盖 / 拒绝）会藏进 `propose_action`，而不是显式 op；Agent「先看建议再决定改不改」的能力被收回 Ontos。**不采用。** 与 B（`apply_proposal`）同一理由：槽位只建议，落地是显式 op。
+代价：第二条落地入口，与 `apply_draft` 分叉；同名策略（覆盖 / 拒绝）会藏进 `propose_action`，而不是显式 op；Agent「先看建议再决定改不改」的能力被收回 Ontos。**不采用。** 与 B（`apply_proposal`）同一理由：出口只建议，落地是显式 op。
 
 ### H. 一份 SKILL.md 两条用法（原方案）
 
@@ -1126,7 +1126,7 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 5. **把问数视图换成草稿，使 Agent 按未发布配置去 `run_action`。** `query` / `run_action` 继续 `getPublished`。未发布的动作名在已发布配置里不存在，引擎拒绝。
 6. **连接机密。** `list_tables` 无密码、无 `options`、无采样行。不提供 `POST /api/connections`。
 7. **业务行。** `list_tables` 不采样。`query` 仍只读、仍走 `log_query`。草稿编辑不碰源库。
-8. **提示注入（人把不可信文本贴进外部 Agent）。** Agent 可能被唆使 `delete_object`。缓解：人闸（发布/放弃）、skill 红线、画布可见 `deleted` 与 toast。不在 Ontos 内做二次 LLM 审查（那会变成第四槽 + 内循环）。
+8. **提示注入（人把不可信文本贴进外部 Agent）。** Agent 可能被唆使 `delete_object`。缓解：人闸（发布/放弃）、skill 红线、画布可见 `deleted` 与 toast。不在 Ontos 内做二次 LLM 审查（那会变成第四个出口 + 内循环）。
 9. **`replace_object` 抹掉派生/动作/已挂来源类上人加的未对照字段。** 锁定规则（计数 + 有来源时才锁未对照字段）禁止这类覆盖。没挂来源的残缺生成可以整份换。
 10. **ETag/`rev` 泄露。** 只说明「这份草稿改过几次」，无个体数据。`GET /api/ontology` 本就是画布只读面。
 11. **经 MCP 写入恶意动作定义。** `set_action` 与画布编辑同一道 `requireWriteAuth` 闸；`def` 必须过 `actionSchema`（机器可读），效应/前置经 `validateSemantics` 校验（含效应 `link`、转化成对、取值来源形状三项），自由 SQL 进不来（取值全部参数化，`EXPR_LIKE` 串在 `expr.ts` 被拒）；发布仍是人闸，且对象卡效应摘要必须印出「撤走」那一行——多挂 `delete` 不是只能看见动作名。`run_action` 只执行已发布快照上的动作，草稿里的动作谁也执行不了。同一属性换取值来源或字面量，摘要看不见，见 Risks。
@@ -1155,11 +1155,11 @@ SSE 端到端延迟更短，但要新增路由、处理代理缓冲、重连，�
 - `src/server/schema/ops.ts` — `draftOpSchema`
 - `src/server/engine/configStore.ts` — `applyDraft` / `import_objects` 拒已存在名 / `dropClass` / dirty / 每步 `validateSemantics`
 - `src/app/api/apply_draft/route.ts` — REST 薄适配
-- `src/app/api/propose_objects/route.ts` — 槽位产建议，不落地
+- `src/app/api/propose_objects/route.ts` — 出口产建议，不落地
 - `src/app/api/ontology/route.ts` — 画布读草稿、`states` / `deleted`
 - `src/components/CanvasPage.tsx` — `refresh` 仅在本页写路径之后
 - `src/server/features/ontology/views.ts` — 问数三视图
-- `src/server/infra/llm/slot.ts` — 三槽
+- `src/server/infra/llm/llm.ts` — 三个出口
 - `src/server/features/ontology/refs.ts` — 删除前引用扫描
 - `src/app/api/_shared.ts` — `requireWriteAuth`、`workspaceOf`（路径段校验）
 - `src/server/runtime.ts` — 单进程内存态

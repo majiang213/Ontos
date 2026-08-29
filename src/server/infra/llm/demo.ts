@@ -1,5 +1,6 @@
-// 罐头槽位 —— 没有模型 key 时的离线确定性回退：问数只覆盖 test 演示空间的剧本（demoQueries，本文件末尾），
-// 逆向建模与候选对建议是通用启发式（按列名猜类型、按字段重合度给倾向），各空间都能用。
+// 演示实现（DemoLlm）—— test 空间的离线确定性实现：问数走剧本（demoQueries，本文件末尾），
+// 逆向建模与候选对建议是通用启发式（按列名猜类型、按字段重合度给倾向）。有 Key 时三个出口都走真模型，
+// 本类只在 test 空间、没配 Key 时被组合根选中——演示行为按工作空间绑定，不按 Key。
 // 产出一律过 Zod 校验，与真模型同闸。本文件是演示逻辑的唯一住所——引擎其余源码不出现领域词。
 
 import type { QueryRequest } from "../../schema/request";
@@ -10,7 +11,7 @@ import type { TableInfo } from "../../infra/driver";
 import { TEST_WORKSPACE } from "../../infra/workspace";
 import { VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { EngineReject, MSG } from "../../errors";
-import { prefixedTableName, type ClassShot, type LlmSlot } from "./slot";
+import { prefixedTableName, type ClassShot, type Llm } from "./llm";
 /** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
  *  allowDate=false 给破格进属性的主键用（主键当识别字段时只分 number/string）。 */
 function columnPropType(rawType: string, allowDate: boolean): "string" | "number" | "date" {
@@ -20,14 +21,14 @@ function columnPropType(rawType: string, allowDate: boolean): "string" | "number
   return "string";
 }
 
-export class CannedSlot implements LlmSlot {
-  readonly name = "canned-离线回退";
+export class DemoLlm implements Llm {
+  readonly name = "demo-演示实现";
   async nlToQuery(question: string, config: OntologyConfig, workspace: string): Promise<QueryRequest> {
     // 空间守门（真实约束，写进签名的原因）：剧本是 test 空间的演示数据，别的空间问数必须配模型 Key——
     // 不能靠「config 里有没有同名类」巧合放行，否则别的空间任何问法都会被静默编成演示查询（错答案比报错糟）
-    if (workspace !== TEST_WORKSPACE) throw new EngineReject(MSG.cannedWsOnly);
+    if (workspace !== TEST_WORKSPACE) throw new EngineReject(MSG.demoScriptTestOnly);
     // 剧本在本文件 demoQueries（test 空间的演示数据）：正则顺序即优先级，末条兜底。
-    // 形状与真模型槽位出槽 JSON 一致（generateText 出文本抠 JSON，不下发 response_format），过同一道 Zod。
+    // 形状与真模型出口出槽 JSON 一致（generateText 出文本抠 JSON，不下发 response_format），过同一道 Zod。
     // 无模型时问数没有通用编译法，剧本只对上了类才编；对不上说明不是演示问题，得配模型 Key
     const hit = demoQueries.find((q) => q.pattern.test(question))!;
     if (!config.object_types[hit.query.object]) {
@@ -48,7 +49,7 @@ export class CannedSlot implements LlmSlot {
         properties[col.name] = { type: columnPropType(col.type, true), ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
         fields[col.name] = col.name;
       }
-      // 罐头没有语义可读，不按列名形状猜识别字段（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
+      // 演示实现没有语义可读，不按列名形状猜识别字段（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
       // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）才当识别字段，破格进属性；
       // 整数自增主键是表内行号，跨源对不上号，宁缺勿错——identity 留空，人到待确认面板①定。
       let identity: string | undefined;
@@ -122,7 +123,7 @@ function pickKeep(a: ClassShot, b: ClassShot): string {
   return a.fields.length < b.fields.length ? b.name : a.name;
 }
 
-/** 人只点关系类型；留下谁由建议给出。时期名、谁早谁晚罐头不产（没有语义可读，也不看值域证据）——
+/** 人只点关系类型；留下谁由建议给出。时期名、谁早谁晚演示实现不产（没有语义可读，也不看值域证据）——
  *  省略 stage，由 executionPlan 的中性占位词兜底，画布上看得见，人事后可改标识。 */
 function withKeep(p: PairAdvice, a: ClassShot, b: ClassShot): PairAdvice {
   return { ...p, keep: pickKeep(a, b) };
@@ -199,7 +200,7 @@ function reviseWithOverlap(
   }, a, b);
 }
 
-/* ---------- 演示问数剧本（test 空间离线回退的编译脚本） ----------
+/* ---------- 演示问数剧本（test 空间演示实现的编译脚本） ----------
    正则 → 查询，顺序即优先级，最后一条兜底。这是演示数据，不是引擎逻辑。 */
 
 export const demoQueries: { pattern: RegExp; query: QueryRequest }[] = [

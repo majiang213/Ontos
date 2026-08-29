@@ -11,7 +11,7 @@ import { query } from "@/server/features/query/query";
 import { runAction } from "@/server/features/action/action";
 import { DraftReject, EngineReject } from "@/server/errors";
 import { actionSkeletonFor } from "@/server/features/ontology/skeletons";
-import { proposeObjectsFor } from "@/server/infra/llm/slot";
+import { proposeObjectsFor } from "@/server/infra/llm/llm";
 import { listCandidates } from "@/server/features/integrate/candidates";
 import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/features/ontology/views";
 import { listTables } from "@/server/infra/tables";
@@ -24,7 +24,7 @@ import { withActionLog, withQueryLog } from "@/server/infra/trail";
 /** 处理器上下文：空间、驱动、引擎依赖、space 选择与取配置的入口。工具层的依赖面就是这张表——handler 不绕过它直取 draft 包。 */
 export interface ToolContext {
   workspace: string;
-  /** 引擎依赖（组合根组装，路由/本层只下传）：handler 需要 meta / 槽位 / 时钟时从这里拿。 */
+  /** 引擎依赖（组合根组装，路由/本层只下传）：handler 需要 meta / LLM 实现 / 时钟时从这里拿。 */
   env: EngineEnv;
   driver: DriverRegistry;
   space: "published" | "draft";
@@ -101,8 +101,8 @@ export const TOOLS: ToolDef[] = [
     inputSchema: json(z.object({ tables: z.array(z.object({ connection: z.string(), table: z.string() })).nonempty() })),
     handler: async (ctx, args) => {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
-      // 按连接分组内省 + 逐表定位 + 槽位产草稿：组合原语（llm/slot.proposeObjectsFor，REST 同款）
-      const r = await proposeObjectsFor(ctx.env.llm, ctx.driver, tables, (m) => new EngineReject(m));
+      // 按连接分组内省 + 逐表定位 + 实现产草稿：组合原语（llm/llm.proposeObjectsFor，REST 同款）
+      const r = await proposeObjectsFor(ctx.env.llm(ctx.workspace), ctx.driver, tables, (m) => new EngineReject(m));
       if (r.code !== 200) throw new EngineReject(r.message); // 域拒绝经 Result 返回，按 MCP 约定转 -32000（route 的 catch 接）
       return { payload: { object_types: r.value } };
     },

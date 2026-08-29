@@ -1,4 +1,4 @@
-// 验收问题集跑批 —— 逐条经 LLM 槽位编译后交引擎执行，失败分阶段记：
+// 验收问题集跑批 —— 逐条经 LLM 接口编译后交引擎执行，失败分阶段记：
 //   编译失败（模型没产出结构化查询）/ 执行出错（本体或映射有误）/ 答案不符（查出来了但对不上期望）。
 // 答错即本体或映射有误，回画布改对象或来源映射再跑；失败原因落 detail，界面点开能看。
 // target=draft 时对当前草稿试跑：用工作副本的配置，结果不落验收记录（草稿没有版本可锚）。
@@ -7,7 +7,7 @@
 import { query } from "../query/query";
 import { metricColumn } from "../query/assemble";
 import type { QueryRequest } from "../../schema/request";
-import type { LlmSlot } from "../../infra/llm/slot";
+import type { Llm } from "../../infra/llm/llm";
 import type { EngineEnv } from "../env";
 import { getDraft, getPublished } from "../ontology/current";
 import { MSG, toResult, type Result } from "../../errors";
@@ -63,12 +63,12 @@ export interface QuestionRunResult {
 }
 
 /** 跑批：全量；onlyId 给了就只跑那一条。target=draft 对当前草稿试跑，状态不落库、版本返回 null。
- *  slot 可注入假实现（测试用），缺省用 env 的槽位（无 key 走离线回退）。 */
-export async function runQuestions(env: EngineEnv, workspace: string, opts: { onlyId?: number; slot?: LlmSlot; target?: "published" | "draft" } = {}): Promise<Result<{ results: QuestionRunResult[]; version: number | null }>> {
+ *  llm 可注入假实现（测试用），缺省用 env 的实现（无 Key 时 test 走演示实现，其他空间报错）。 */
+export async function runQuestions(env: EngineEnv, workspace: string, opts: { onlyId?: number; llm?: Llm; target?: "published" | "draft" } = {}): Promise<Result<{ results: QuestionRunResult[]; version: number | null }>> {
   return toResult(async () => {
     const draft = opts.target === "draft";
     const { config, version } = draft ? { config: (await getDraft(env, workspace)).draft, version: null } : await getPublished(env, workspace);
-    const slot = opts.slot ?? env.llm;
+    const llm = opts.llm ?? env.llm(workspace);
     const registry = await env.getRegistry(workspace);
     const all = await env.meta.listQuestions(workspace);
     const targets = opts.onlyId === undefined ? all : all.filter((q) => q.id === opts.onlyId);
@@ -77,7 +77,7 @@ export async function runQuestions(env: EngineEnv, workspace: string, opts: { on
       let status: QuestionStatus = Q_STATUS.pass;
       let detail = "";
       try {
-        const parsed = await slot.nlToQuery(q.question, config, workspace);
+        const parsed = await llm.nlToQuery(q.question, config, workspace);
         const r = await query(env, config, registry, parsed);
         if (r.code !== 200) {
           status = Q_STATUS.error;

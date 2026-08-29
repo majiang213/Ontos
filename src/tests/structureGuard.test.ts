@@ -1,7 +1,7 @@
 // 结构守门 —— 评审六轴里能机器化的两条，写成测试永不过期：
 // ① 用户可见错误文案唯一出处是 MSG（src/server/errors.ts），throw / reject 阶段消息 / error / note / warning /
 //    zod message 出现内联中文即红——不许拿魔法字串绕过单源。
-//    （reason 通道不机守：裁决建议的 reason 是展示文案不是报错（infra/llm/canned 的 PairAdvice），机守会误伤；
+//    （reason 通道不机守：裁决建议的 reason 是展示文案不是报错（infra/llm/demo 的 PairAdvice），机守会误伤；
 //    报错向的 reason 已有实例收在 MSG.noWritableProps。）
 // ② 调用方向：schema 最底、meta 不碰 engine、infra 不上指 engine 其它包、draft 读路径纯函数层不 import 写路径、
 //    errors.ts 保持纯叶子（前端经 purityBoundary 引它）。值侧 import 才查；type-only 编译期擦除，放行。
@@ -74,7 +74,7 @@ const DIRECTION_RULES: { area: RegExp; forbidden: string[]; exempt?: string[]; w
   {
     area: /^server\/features\//,
     forbidden: ["server/runtime", "server/meta/"],
-    why: "领域不摸进程级单例（runtime / metaStore / getSlot）：依赖由边界组装成 features/env 下传",
+    why: "领域不摸进程级单例（runtime / metaStore / getLlm）：依赖由边界组装成 features/env 下传",
   },
   /* 域间依赖白名单：域 = 一条业务链的完整问题；域间依赖是业务真实耦合，方向必须成 DAG——
      ontology、query 是底座（不依赖任何域）；action 只许 query；integrate 只许 ontology+query；
@@ -190,7 +190,7 @@ describe("结构守门", () => {
   it("④ 共享能力不在领域包内：features 下无 llm/trail；schema/verdict 与 infra/llm 存在", () => {
     const offenders = files.filter((f) => /^server\/features\/(llm\/|trail\.ts)/.test(relative(SRC, f)));
     expect(offenders, "llm / trail 是跨域共享能力，住 infra 不住领域包").toEqual([]);
-    expect(existsSync(join(SRC, "server", "infra", "llm", "slot.ts")), "共享词汇与槽位接口应在 schema/verdict 与 infra/llm").toBe(true);
+    expect(existsSync(join(SRC, "server", "infra", "llm", "llm.ts")), "共享词汇与 LLM 接口应在 schema/verdict 与 infra/llm").toBe(true);
     expect(existsSync(join(SRC, "server", "schema", "verdict.ts"))).toBe(true);
   });
 

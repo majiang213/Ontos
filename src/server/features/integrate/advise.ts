@@ -1,5 +1,5 @@
-// 看过交集率之后的倾向 —— 硬证据进整合槽位，再给一句建议。
-// 模型当顾问不当计算器：比率由 overlap 算好传入；本文件只做资格闸 + 把两个类的字段交给槽位。
+// 看过交集率之后的倾向 —— 硬证据进整合出口，再给一句建议。
+// 模型当顾问不当计算器：比率由 overlap 算好传入；本文件只做资格闸 + 把两个类的字段交给实现。
 
 import type { EngineEnv } from "../env";
 import { getDraft } from "../ontology/current";
@@ -46,7 +46,7 @@ export async function proposePair(
       if (!s) throw new EngineReject(MSG.pairNoSources); // 两次读取之间类失源（并发编辑）：按业务拒绝收，不炸类型错误
       return s;
     };
-    const advice = await env.llm.proposePair({
+    const advice = await env.llm(workspace).proposePair({
       class_a: shotOf(a.name),
       class_b: shotOf(b.name),
       overlap,

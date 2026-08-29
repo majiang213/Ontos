@@ -9,7 +9,7 @@ import { connectionsOf, hasSources, pairEligible, pairKey } from "./eligibility"
 import { rewriteAfterVerdict } from "./chain";
 import { cleanAdvice, Verdict, type PairAdvice } from "../../schema/verdict";
 import { enumValueKey, type ObjectType, type OntologyConfig } from "../../schema/config";
-import type { ClassShot } from "../../infra/llm/slot";
+import type { ClassShot } from "../../infra/llm/llm";
 import { MSG, toResult, type Result } from "../../errors";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 import { isSharedObjectName } from "../ontology/sharedName";
@@ -17,7 +17,7 @@ import { isSharedObjectName } from "../ontology/sharedName";
 /** 建议规则版本：判定口径或可执行前提变了就 +1——混进哈希，旧规则写的快照自然失效重算。
  *  3：入围改为有源∧未定案（同一库两张表可成对）；三问改口规则。
  *  4：建议带可执行方案（keep / stage），人只点关系类型。
- *  5：建议输入带枚举值域 enums——时期名判据（原样取现成取值，不新造词）；离线回退不再带时期名与先后。 */
+ *  5：建议输入带枚举值域 enums——时期名判据（原样取现成取值，不新造词）；演示实现不再带时期名与先后。 */
 const ADVICE_RULES_VERSION = 5;
 
 /** 投喂形状的哈希：类名 + 连接集 + 字段名 + 枚举值域（各自排序后序列化），前缀建议规则版本。快照的失效键——
@@ -72,7 +72,7 @@ function nameChangeIsVerdict(prev: string[] | undefined, now: string[]): boolean
 }
 
 /** 已上画布、有来源的候选对（同一库两张表也算）：快照命中直接用；失配时若只是并类/立公共对象，沿用还活着的对；
- *  否则问槽位并重写快照。定案过滤在读时套——已放弃的裁决（version=-1）不算定案。 */
+ *  否则问实现并重写快照。定案过滤在读时套——已放弃的裁决（version=-1）不算定案。 */
 export async function listCandidates(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<Result<PairAdvice[]>> {
   return toResult(async () => {
     const d = (await getDraft(env, workspace)).draft;
@@ -96,7 +96,7 @@ export async function listCandidates(env: EngineEnv, workspace: string = DEFAULT
         // 钉失败不拦答案：本次用还活着的对；下次若仍失配且不是并类，才会再猜
       }
     } else {
-      proposals = keepPairs((await env.llm.proposePairs(classes)).map(cleanAdvice), byName, none); // 出槽清一遍：stage 空壳不留快照
+      proposals = keepPairs((await env.llm(workspace).proposePairs(classes)).map(cleanAdvice), byName, none); // 出槽清一遍：stage 空壳不留快照
       try {
         await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
       } catch {

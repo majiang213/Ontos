@@ -1,9 +1,9 @@
-// 真模型槽位 —— Vercel AI SDK + xAI chat completions：三个槽位同构 generateText({ model, prompt }) → 文本抠 JSON。
+// 真模型实现 —— Vercel AI SDK + xAI chat completions：三个出口同构 generateText({ model, prompt }) → 文本抠 JSON。
 // 形状只走提示词（z.toJSONSchema），完全不下发 response_format：兼容网关普遍只实现 chat completions
 //（Responses API 直接 404），带投机解码的模型连 json_object 都当语法约束拒绝（400）。
 // 提示词工程住这里（唯一住所）；模型当顾问不当计算器：出槽前再过一道 Zod（模型乱说话 = 拒绝，不进引擎）。
 // 失败落盘：generateText 抛错或出槽 parse 失败时，原始产出写 os.tmpdir()/ontos-llm-fail/（key 字面值打码），
-// 进程 console.error 一行路径——不绑任何测试门闩（走查就是生产路径）；罐头槽位不写。
+// 进程 console.error 一行路径——不绑任何测试门闩（走查就是生产路径）；演示实现不写。
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +17,7 @@ import { enumValueKey, objectTypeSchema, type ObjectType, type OntologyConfig } 
 import type { TableInfo } from "../../infra/driver";
 import { TENDENCIES, VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { IDENTITY_COL_RULE } from "./identityHint";
-import type { ClassShot, LlmSlot } from "./slot";
+import type { ClassShot, Llm } from "./llm";
 
 type Gen = typeof generateText;
 
@@ -60,7 +60,7 @@ function extractJson(text: string): unknown {
   }
 }
 
-/** 失败落盘：槽位名 / 实现名 / 输入摘要 / 原始产出或异常，写临时目录 JSON；OPENAI_API_KEY 字面值打码。
+/** 失败落盘：出口名 / 实现名 / 输入摘要 / 原始产出或异常，写临时目录 JSON；OPENAI_API_KEY 字面值打码。
  *  落盘失败不挡原错误抛出（调试设施不能变成新故障源）。 */
 function dumpFailure(slot: string, impl: string, input: unknown, output: unknown, err: unknown): void {
   try {
@@ -75,13 +75,13 @@ function dumpFailure(slot: string, impl: string, input: unknown, output: unknown
     if (key) text = text.split(key).join("***"); // 密钥不进落盘文件
     const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${slot}.json`);
     writeFileSync(file, text);
-    console.error(`[ontos] 模型槽位 ${slot} 失败，原始产出已写入 ${file}`);
+    console.error(`[ontos] 模型出口 ${slot} 失败，原始产出已写入 ${file}`);
   } catch {
     // 落盘失败吞掉：原错误照样抛
   }
 }
 
-export class AiSdkSlot implements LlmSlot {
+export class AiSdkLlm implements Llm {
   readonly name: string;
   constructor(
     private model: LanguageModel,
@@ -90,7 +90,7 @@ export class AiSdkSlot implements LlmSlot {
     this.name = `ai-sdk:${typeof model === "string" ? model : model.modelId}`;
   }
 
-  /** 三槽位同一条失败闸：跑 run → 文本抠 JSON → parse；抛错或出槽校验失败都把原始文本落盘再原样抛出。 */
+  /** 三个出口同一条失败闸：跑 run → 文本抠 JSON → parse；抛错或出槽校验失败都把原始文本落盘再原样抛出。 */
   private async runWithFailureDump<T>(slot: string, input: unknown, run: () => Promise<{ text: string }>, parse: (output: unknown) => T): Promise<T> {
     let raw: unknown;
     try {
@@ -104,7 +104,7 @@ export class AiSdkSlot implements LlmSlot {
   }
 
   async nlToQuery(question: string, config: OntologyConfig, _ws: string): Promise<QueryRequest> {
-    // 真模型各空间通用：workspace 论元只在罐头实现里当守门用（见 LlmSlot 接口注释）
+    // 真模型各空间通用：workspace 论元只在演示实现里当守门用（见 Llm 接口注释）
     const classes = Object.entries(config.object_types).map(([name, t]) => ({
       name,
       description: t.description,

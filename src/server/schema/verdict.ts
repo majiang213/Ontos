@@ -1,5 +1,5 @@
 // 对齐判定的共享词汇 —— 机器键 + 展示文案 + 建议形状（《AGENTS.md》术语表「对齐判定」）。
-// 住 schema 不住任何领域包：配置键、decisions API、adj_decision 留痕、AI 槽位建议、前端按钮全用它，
+// 住 schema 不住任何领域包：配置键、decisions API、adj_decision 留痕、AI 接口建议、前端按钮全用它，
 // 是跨域共享内核（纯叶子，前端可安全引用）。枚举成员是稳定键：汉字只做展示文案（VERDICT_LABELS）。
 
 export enum Verdict {
@@ -32,7 +32,7 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
 };
 
 /** 候选对建议：疑似同义的两个类 + 机器倾向 + 理由。可以是不同库，也可以是同一库的两张表。
- *  人只点关系类型；留下谁、谁早谁晚、时期名由建议给出（LLM 槽位产出，/api/list_candidates 的响应形状，画布裁决面板消费）。 */
+ *  人只点关系类型；留下谁、谁早谁晚、时期名由建议给出（LLM 接口产出，/api/list_candidates 的响应形状，画布裁决面板消费）。 */
 export interface PairAdvice {
   class_a: string;
   class_b: string;

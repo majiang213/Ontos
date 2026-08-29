@@ -1,11 +1,11 @@
 // 运行态 —— 平台进程级状态的唯一构造点。
-// 无状态化之后，这里只剩两类进程本地物：元库/驱动注册表/LLM 槽位句柄（可重建的实例本地缓存）与
+// 无状态化之后，这里只剩两类进程本地物：元库/驱动注册表/LLM 实现句柄（可重建的实例本地缓存）与
 // clock / uuid / 雪花号等注入源。globalThis 只挂这一个键：Next dev 下各路由包各有模块实例，挂全局才共享同一份；
 // 测试 installRuntime(makeRuntime({ cwd: tmp })) 整套换掉——不再 chdir，也不再逐个 reset。
 // 多实例语义：已发布快照与工作副本全部读库（onto_version），写走 rev CAS——同一份元库下任意多个实例行为一致；
 // 多实例部署要求 ONTOS_META_DSN=mysql:// 或 postgres://（SQLite 单文件保留本地开发/单实例/全部测试）。
 // engineEnv() 是引擎依赖的组装点（边界经它显式下传）：clock / uuid / snowflake 默认真实实现、
-// 测试经 makeRuntime 覆盖注入（含固定 instanceId 钉死雪花）；LLM 槽位选择（离线回退 / 真模型）也收在这里。
+// 测试经 makeRuntime 覆盖注入（含固定 instanceId 钉死雪花）；LLM 实现选择（真模型 / 演示实现，按 Key 与空间）也收在这里。
 
 import { createXai } from "@ai-sdk/xai";
 import type { MetaStore } from "./meta/store";
@@ -13,18 +13,20 @@ import { metaStore } from "./meta/store";
 import type { DriverRegistry } from "./infra/registry";
 import { getDriverRegistry } from "./infra/connections";
 import { makeSnowflake } from "./infra/snowflake";
-import { CannedSlot } from "./infra/llm/canned";
-import { AiSdkSlot } from "./infra/llm/aiSdk";
-import type { LlmSlot } from "./infra/llm/slot";
+import { DemoLlm } from "./infra/llm/demo";
+import { AiSdkLlm } from "./infra/llm/aiSdk";
+import type { Llm } from "./infra/llm/llm";
+import { TEST_WORKSPACE } from "./infra/workspace";
 import type { EngineEnv } from "./features/env";
-import { MSG } from "./errors";
+import { EngineReject, MSG } from "./errors";
 
 export interface OntosRuntime {
   cwd: string;
   metaDsn?: string;
   meta?: MetaStore;
   registries?: Map<string, DriverRegistry>;
-  llmSlot?: LlmSlot;
+  llmAiSdk?: Llm;
+  llmDemo?: Llm;
   /** 测试注入假时钟（UTC Unix 秒）；缺省真实系统时间（引擎读不到系统时间，只有这一处实现）。 */
   clock?: () => number;
   /** 测试注入假 uuid 源；缺省真实 v7（引擎不碰 crypto，只有这一处实现）。 */
@@ -63,22 +65,27 @@ function instanceIdOf(rt: OntosRuntime): number {
   return Math.floor(Math.random() * 1024);
 }
 
-/** 槽位选择：有 OPENAI_API_KEY 走真模型（OpenAI 兼容协议，通用键同 Claude Code / Codex），实例缓存在运行态上；
- *  否则离线回退（CannedSlot：问数只覆盖演示剧本，逆向建模与候选对建议是通用启发式，各空间都能用）。
+/** LLM 实现选择：有 OPENAI_API_KEY 走真模型 AiSdkLlm（OpenAI 兼容协议，通用键同 Claude Code / Codex），所有空间一致；
+ *  没 Key 时 test 空间走演示实现 DemoLlm（问数剧本 + 逆向建模/倾向的确定性规则），其他空间直接报错——
+ *  演示行为按工作空间绑定，不按 Key；演示剧本只属于 test。实例缓存在运行态上。
  *  模型必须显式指定 OPENAI_MODEL，不设默认；接入点用 OPENAI_BASE_URL（填基址，SDK 自己拼 /chat/completions），
  *  不设走 SDK 默认端点。走 chat completions 而非 Responses API：OpenAI 兼容网关普遍只实现前者（后者会 404）。 */
-export function getSlot(): LlmSlot {
+export function getLlm(workspace: string): Llm {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) return new CannedSlot();
   const rt = runtime();
-  if (rt.llmSlot && typeof rt.llmSlot.proposePair !== "function") rt.llmSlot = undefined; // 热更留下的旧实例没有新方法，丢掉重做
-  if (!rt.llmSlot) {
+  if (!key) {
+    if (workspace !== TEST_WORKSPACE) throw new EngineReject(MSG.llmKeyRequired(workspace));
+    rt.llmDemo ??= new DemoLlm();
+    return rt.llmDemo;
+  }
+  if (rt.llmAiSdk && typeof rt.llmAiSdk.proposePair !== "function") rt.llmAiSdk = undefined; // 热更留下的旧实例没有新方法，丢掉重做
+  if (!rt.llmAiSdk) {
     const model = process.env.OPENAI_MODEL;
     if (!model) throw new Error(MSG.openaiModelMissing);
     const xai = createXai({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL ?? undefined });
-    rt.llmSlot = new AiSdkSlot(xai.chat(model));
+    rt.llmAiSdk = new AiSdkLlm(xai.chat(model));
   }
-  return rt.llmSlot;
+  return rt.llmAiSdk;
 }
 
 /** 缺省取进程cwd与 ONTOS_META_DSN；测试传 { cwd: 临时目录 }（另可注入 clock / uuid / instanceId / snowflake 钉死时间、随机与发号）。 */
@@ -99,7 +106,7 @@ export function engineEnv(): EngineEnv {
   return {
     meta: metaStore(),
     getRegistry: (workspace) => getDriverRegistry(workspace),
-    llm: getSlot(),
+    llm: (workspace) => getLlm(workspace),
     clock,
     uuid: rt.uuid ?? realUuidV7,
     snowflake: rt.snowflake ?? (rt.snowflakeFn ??= makeSnowflake(clock, instanceIdOf(rt))),

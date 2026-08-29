@@ -85,17 +85,17 @@ describe("组件 → server 导入方向（只许纯叶子）", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("守门自检：元库与驱动实现被判不纯（meta/store、infra/sqlDriver、llm/slot）", () => {
+  it("守门自检：元库与驱动实现被判不纯（meta/store、infra/sqlDriver、llm/llm）", () => {
     // 守门规则本身有效的活证：这几个已知不纯的模块必须被判出来，否则上面的全绿是假绿
     for (const [file, expectPure] of [
       ["meta/store.ts", false],
       ["infra/sqlDriver.ts", false],
-      ["runtime.ts", false], // 组合根：槽位选择（@ai-sdk/xai）与驱动注册都在这里组装，值侧闭包必不纯
+      ["runtime.ts", false], // 组合根：LLM 实现选择（@ai-sdk/xai）与驱动注册都在这里组装，值侧闭包必不纯
       ["etag.ts", true],
       ["schema/verdict.ts", true],
       ["schema/spec/actionSpec.ts", true],
       ["features/ontology/lineage.ts", true],
-      ["infra/llm/slot.ts", true], // 槽位接口与组合原语：不摸单例后已是纯叶子
+      ["infra/llm/llm.ts", true], // LLM 接口与组合原语：不摸单例后已是纯叶子
     ] as const) {
       expect(isPure(join(SERVER, file)), file).toBe(expectPure);
     }

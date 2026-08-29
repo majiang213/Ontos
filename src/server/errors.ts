@@ -239,7 +239,7 @@ export const MSG = {
   aggregateUnknown: (op: string) => `未知聚合：${op}`,
   filterConflictsPair: (link: string, k: string) => `目标侧过滤 ${k} 与关系 ${link} 的配对字段冲突`,
 
-  // 基础设施 infra（连接生命周期、驱动注册表、工作空间、LLM 槽位）
+  // 基础设施 infra（连接生命周期、驱动注册表、工作空间、LLM 实现）
   sqliteNeedsPath: "sqlite 连接必须给文件路径（db_name）",
   sqliteFileMissing: (p: string) => `sqlite 文件不存在：${p}`,
   sidecarCommentsUnreadable: (p: string) => `注释文件读不出：${p}.comments.json——修好或删掉这个文件再保存`,
@@ -254,8 +254,9 @@ export const MSG = {
   sampleUnsupported: (connection: string) => `连接 ${connection} 不支持采样`,
   workspaceNameBad: (name: string) => `空间名必须是小写字母/数字/中划线/下划线，字母开头：${name}`,
   workspaceExists: (name: string) => `空间已存在：${name}`,
-  cannedWsOnly: "离线回退只覆盖 test 演示空间的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
-  cannedScriptOnly: "离线回退只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
+  demoScriptTestOnly: "演示剧本只属于 test 演示空间：其他空间的问数需要配置模型 Key（OPENAI_API_KEY）",
+  llmKeyRequired: (ws: string) => `空间 ${ws} 需要模型 Key（OPENAI_API_KEY）：演示剧本只属于 test 空间`,
+  cannedScriptOnly: "演示实现只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   openaiModelMissing: "OPENAI_MODEL 未设置：接真模型必须显式指定模型名",
   noJsonInModelOutput: "模型产出里没有 JSON 对象",
   noSuchConnection: "没有这个连接",

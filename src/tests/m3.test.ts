@@ -298,7 +298,7 @@ describe("裁决流水线", () => {
     expect((await s.getDraft()).draft.object_types.po_b).toBeDefined();
   });
 
-  it("listCandidates：槽位把同一对写两遍或对调两端，只出一条", async () => {
+  it("listCandidates：实现把同一对写两遍或对调两端，只出一条", async () => {
     const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
@@ -316,13 +316,13 @@ describe("裁决流水线", () => {
     const list = unwrap(
       await listCandidates({
         ...s.env,
-        llm: {
+        llm: () => ({
           name: "dup",
           nlToQuery: async () => ({ object: "po_a" }),
           proposeObjects: async () => ({}),
           proposePairs: async () => [one, one, { ...one, class_a: "po_b", class_b: "po_a" }],
           proposePair: async () => one,
-        },
+        }),
       })
     );
     const isPair = (p: { class_a: string; class_b: string }) =>
@@ -348,7 +348,7 @@ describe("裁决流水线", () => {
     };
     const env = {
       ...s.env,
-      llm: {
+      llm: () => ({
         name: "count",
         nlToQuery: async () => ({ object: "po_a" }),
         proposeObjects: async () => ({}),
@@ -357,7 +357,7 @@ describe("裁决流水线", () => {
           return [one];
         },
         proposePair: async () => one,
-      },
+      }),
     };
     const isPair = (p: { class_a: string; class_b: string }) =>
       (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a");
@@ -392,7 +392,9 @@ describe("裁决流水线", () => {
     });
     const isPair = (p: { class_a: string; class_b: string }) =>
       (p.class_a === "po_a" && p.class_b === "po_b") || (p.class_a === "po_b" && p.class_b === "po_a");
-    expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(true);
+    // 注入「已配 Key 的模型」替身：新矩阵下其他空间没 Key 直接拒绝，有 Key 即真模型替身
+    const env = { ...s.env, llm: stubLlm(() => [{ class_a: "po_a", class_b: "po_b", tendency: Verdict.Same, reason: "字段重合" }]) };
+    expect(unwrap(await listCandidates(env)).some(isPair)).toBe(true);
     const before = JSON.stringify((await s.getDraft()).draft);
     const r = unwrap(await decide(s.env, { class_a: "po_a", class_b: "po_b", verdict: Verdict.Skip }));
     expect(r.recorded).toBe(true);
@@ -409,22 +411,24 @@ describe("裁决流水线", () => {
         po_b: { kind: "thing", identity: "sn", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
       },
     });
-    const miss = unwrap(await proposePair(s.env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 80, count_hit: 0 }));
+    // 注入「已配 Key 的模型」替身：改口逻辑在实现里，替身恒答同一（锚定行为由 advise 保证）
+    const env = { ...s.env, llm: stubLlm(() => [{ class_a: "po_a", class_b: "po_b", tendency: Verdict.Same, reason: "锚" }]) };
+    const miss = unwrap(await proposePair(env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 80, count_hit: 0 }));
     expect(miss.tendency).toBe(Verdict.Same); // 不是同一批，但不能据此否定同一
-    const empty = unwrap(await proposePair(s.env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
+    const empty = unwrap(await proposePair(env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
     expect(empty.tendency).toBe(Verdict.Same);
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
-    expect((await proposePair(s.env, "default", "po_a", "vendor", { rate: 0, count_a: 1, count_b: 1, count_hit: 0 })).code).toBe(422);
+    expect((await proposePair(env, "default", "po_a", "vendor", { rate: 0, count_a: 1, count_b: 1, count_hit: 0 })).code).toBe(422);
     await s.editDraft({
       op: "import_objects",
       objects: {
         asg: { kind: "thing", identity: "sn", properties: { sn: { type: "string" } }, sources: { sc: { connection: "device_sys", table: "assignment", pk: "id", fields: { sn: "sn" } } } },
       },
     });
-    expect((await proposePair(s.env, "default", "po_b", "asg", { rate: 0.5, count_a: 2, count_b: 2, count_hit: 1 })).code).toBe(200); // 同一库两张表也可以建议
+    expect((await proposePair(env, "default", "po_b", "asg", { rate: 0.5, count_a: 2, count_b: 2, count_hit: 1 })).code).toBe(200); // 同一库两张表也可以建议
   });
 
-  it("proposePair：清单快照里的第一版建议作为锚传给槽位", async () => {
+  it("proposePair：清单快照里的第一版建议作为锚传给实现", async () => {
     const s = await draftEngine();
     await s.editDraft({
       op: "import_objects",
@@ -442,7 +446,7 @@ describe("裁决流水线", () => {
     let seenBase: unknown;
     const env = {
       ...s.env,
-      llm: {
+      llm: () => ({
         name: "anchor",
         nlToQuery: async () => ({ object: "po_a" }),
         proposeObjects: async () => ({}),
@@ -451,7 +455,7 @@ describe("裁决流水线", () => {
           seenBase = input.base;
           return { class_a: "po_a", class_b: "po_b", tendency: Verdict.Overlap as const, reason: "维持" };
         },
-      },
+      }),
     };
     unwrap(await proposePair(env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
     expect(seenBase).toEqual({ tendency: Verdict.Overlap, reason: "字段部分重合" }); // 第二版的锚 = 快照里的第一版
@@ -485,7 +489,8 @@ describe("裁决流水线", () => {
     });
     const isPair = (p: { class_a: string; class_b: string }) =>
       (p.class_a === "dev" && p.class_b === "asg") || (p.class_a === "asg" && p.class_b === "dev");
-    expect(unwrap(await listCandidates(s.env)).some(isPair)).toBe(true);
+    const env = { ...s.env, llm: stubLlm(() => [{ class_a: "dev", class_b: "asg", tendency: Verdict.Same, reason: "同库两张表" }]) };
+    expect(unwrap(await listCandidates(env)).some(isPair)).toBe(true);
     unwrap(await decide(s.env, { class_a: "dev", class_b: "asg", verdict: Verdict.Same }));
     const d = (await s.getDraft()).draft;
     expect(d.object_types.asg).toBeUndefined();
@@ -497,7 +502,7 @@ describe("裁决流水线", () => {
   const pairOf = (x: string, y: string) => (p: { class_a: string; class_b: string }) =>
     (p.class_a === x && p.class_b === y) || (p.class_a === y && p.class_b === x);
 
-  const stubLlm = (proposePairs: () => PairAdvice[]) => ({
+  const stubLlm = (proposePairs: () => PairAdvice[]) => (workspace: string) => ({
     name: "chain",
     nlToQuery: async () => ({ object: "a" }),
     proposeObjects: async () => ({}),

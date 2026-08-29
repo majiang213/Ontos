@@ -1,7 +1,7 @@
 // SQLite 驱动 —— 每个连接一个 node:sqlite 库（内存或文件），用真实 SQL 执行下推与写回。
 // 真驱动聚一处（pool 家族在 sqlDriver.ts）：本类管驱动 + 列注释（SQLite 本身没有列注释，
 // 文件连接经 ${db}.comments.json sidecar 载入；种子注释由 fixture.ts 经 setComments 手写）。
-// 用户接入的 sqlite 文件库走本类（connections.ts registerSaved）；演示种子数据在 fixture.ts（继承本类），问数剧本在 llm/canned.ts。
+// 用户接入的 sqlite 文件库走本类（connections.ts registerSaved）；演示种子数据在 fixture.ts（继承本类），问数剧本在 llm/demo.ts。
 
 import { DatabaseSync } from "node:sqlite";
 import { buildAggregate, buildInsert, buildSelect, buildStatement, maskValue, type AggMetric, type Condition, type SourceDriver, type TableInfo } from "./driver";

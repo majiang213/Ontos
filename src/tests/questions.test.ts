@@ -1,11 +1,11 @@
-// 验收问题集引擎层测试：期望写法解析/比对（纯函数）+ 失败分阶段（假槽位注入，真跑 runQuestions）。
+// 验收问题集引擎层测试：期望写法解析/比对（纯函数）+ 失败分阶段（假实现注入，真跑 runQuestions）。
 // 三波对错板（questionPacks）的数字口径也钉在这里。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkExpected, parseExpected, runQuestions, EXPECTED_HINT } from "../server/features/acceptance/questions";
 import { QUESTION_PACKS } from "../server/features/acceptance/questionPacks";
 import type { QueryRequest } from "../server/schema/request";
-import type { LlmSlot } from "../server/infra/llm/slot";
+import type { Llm } from "../server/infra/llm/llm";
 import { Verdict } from "../server/schema/verdict";
 import { cleanupRuntime, draftEngine, setupRuntime, testEnv, unwrap } from "./helpers";
 
@@ -66,7 +66,7 @@ describe("三波对错板（questionPacks 唯一出处）", () => {
   });
 });
 
-describe("跑批失败分阶段（假槽位）", () => {
+describe("跑批失败分阶段（假实现）", () => {
   let tmp: string;
   beforeEach(async () => {
     tmp = await setupRuntime("ontos-qeng-");
@@ -75,7 +75,7 @@ describe("跑批失败分阶段（假槽位）", () => {
     await cleanupRuntime(tmp);
   });
 
-  const fakeSlot = (nlToQuery: LlmSlot["nlToQuery"]): LlmSlot => ({
+  const fakeSlot = (nlToQuery: Llm["nlToQuery"]): Llm => ({
     name: "fake-测试",
     nlToQuery,
     proposeObjects: async () => ({}),
@@ -89,13 +89,13 @@ describe("跑批失败分阶段（假槽位）", () => {
     await meta.addQuestion("test", "查了不存在的类");
     const [q1, q2] = await meta.listQuestions("test");
 
-    // 编译失败：槽位直接抛错
-    const r1 = unwrap(await runQuestions(testEnv(), "test", { onlyId: q1.id, slot: fakeSlot(async () => { throw new Error("模型没输出合法 JSON"); }) }));
+    // 编译失败：实现直接抛错
+    const r1 = unwrap(await runQuestions(testEnv(), "test", { onlyId: q1.id, llm: fakeSlot(async () => { throw new Error("模型没输出合法 JSON"); }) }));
     expect(r1.results[0].status).toBe("编译失败");
     expect(r1.results[0].detail).toContain("模型没输出合法 JSON");
 
     // 执行出错：编译产物合法，但查的类不存在（本体/映射的锅）
-    const r2 = unwrap(await runQuestions(testEnv(), "test", { onlyId: q2.id, slot: fakeSlot(async () => ({ object: "ghost" }) as never) }));
+    const r2 = unwrap(await runQuestions(testEnv(), "test", { onlyId: q2.id, llm: fakeSlot(async () => ({ object: "ghost" }) as never) }));
     expect(r2.results[0].status).toBe("执行出错");
     expect(r2.results[0].detail).toBeTruthy();
 
@@ -107,7 +107,7 @@ describe("跑批失败分阶段（假槽位）", () => {
   });
 });
 
-describe("跑批比对口径（假槽位，真引擎）", () => {
+describe("跑批比对口径（假实现，真引擎）", () => {
   let tmp: string;
   beforeEach(async () => {
     tmp = await setupRuntime("ontos-qagg-");
@@ -116,7 +116,7 @@ describe("跑批比对口径（假槽位，真引擎）", () => {
     await cleanupRuntime(tmp);
   });
 
-  const slotReturning = (queryReq: QueryRequest): LlmSlot => ({
+  const slotReturning = (queryReq: QueryRequest): Llm => ({
     name: "fake-测试",
     nlToQuery: async () => queryReq,
     proposeObjects: async () => ({}),
@@ -129,7 +129,7 @@ describe("跑批比对口径（假槽位，真引擎）", () => {
     await meta.addQuestion("test", "在役设备按部门合计", "97"); // 种子恰有 97 台在役
     await meta.addQuestion("test", "在役设备按部门合计（故意错）", "96");
     const agg: QueryRequest = { object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } };
-    const r = unwrap(await runQuestions(testEnv(), "test", { slot: slotReturning(agg) }));
+    const r = unwrap(await runQuestions(testEnv(), "test", { llm: slotReturning(agg) }));
     expect(r.results[0].status).toBe("通过"); // 分组 8 行，count 列合计 97
     expect(r.results[1].status).toBe("答案不符");
     expect(r.results[1].detail).toBe("期望合计 96，实得 97");
@@ -138,7 +138,7 @@ describe("跑批比对口径（假槽位，真引擎）", () => {
   it("列表题带了比期望小的显式 limit：记答案不符，不当通过", async () => {
     const meta = (await import("../server/meta/store")).metaStore();
     await meta.addQuestion("test", "还有多少在途设备", "81");
-    const r = unwrap(await runQuestions(testEnv(), "test", { slot: slotReturning({ object: "equipment", filter: { status: "in_transit" }, properties: ["name"], limit: 5 }) }));
+    const r = unwrap(await runQuestions(testEnv(), "test", { llm: slotReturning({ object: "equipment", filter: { status: "in_transit" }, properties: ["name"], limit: 5 }) }));
     expect(r.results[0].status).toBe("答案不符");
     expect(r.results[0].detail).toContain("截断 limit=5");
   });

@@ -1,8 +1,8 @@
-// LLM 槽位 —— 「模型在哪几个槽位出现、没 key 怎么办」（《ontos-article.md》§4、§5.3）。
-// 整合槽位两次出场：proposePairs 看名字、连接集合和字段名；proposePair 看过交集率再给倾向。
-// 接口 + 组合原语；槽位选择（有 OPENAI_API_KEY 走真模型，否则罐头离线回退）收在组合根 runtime.ts，
-// 边界经 EngineEnv.llm 下传——本文件不摸进程级单例。
-// 实现在同目录：罐头 canned.ts（离线确定性 + 演示剧本），真模型 aiSdk.ts（提示词工程）。
+// LLM 接口 —— 「模型在哪几个出口出现、没 Key 怎么办」（《ontos-article.md》§4、§5.3）。
+// 整合出口两次出场：proposePairs 看名字、连接集合和字段名；proposePair 看过交集率再给倾向。
+// 接口 + 组合原语；实现选择（有 OPENAI_API_KEY 走真模型 AiSdkLlm；没 Key 时 test 空间走演示实现
+// DemoLlm，其他空间直接报错——演示剧本只属于 test）收在组合根 runtime.ts，边界经 EngineEnv.llm(workspace) 下传。
+// 实现在同目录：演示实现 demo.ts（离线确定性 + 演示剧本），真模型 aiSdk.ts（提示词工程）。
 
 import type { QueryRequest } from "../../schema/request";
 import type { Literal, ObjectType, OntologyConfig } from "../../schema/config";
@@ -20,10 +20,10 @@ export interface ClassShot {
   enums: { name: string; values: Literal[] }[];
 }
 
-export interface LlmSlot {
-  /** 实现名，留痕用（离线回退 / 真模型名） */
+export interface Llm {
+  /** 实现名，留痕用（演示实现 / 真模型名） */
   readonly name: string;
-  /** NL → 查询 JSON（问数调用口）。workspace 说出「哪个空间在问」：离线回退的剧本只服务 test 空间（演示数据），
+  /** NL → 查询 JSON（问数调用口）。workspace 说出「哪个空间在问」：演示剧本只服务 test 空间（演示数据），
    *  没有这条论元守卫只能借 config 拐弯——任何空间恰好有同名类就会被静默编成演示查询。 */
   nlToQuery(question: string, config: OntologyConfig, workspace: string): Promise<QueryRequest>;
   /** 表结构 → 本体草稿（逆向建模调用口）。occupied = 草稿里已有的类名：撞名时实现按 {connection}_{table} 起名，不静默覆盖。 */
@@ -40,10 +40,10 @@ export interface LlmSlot {
   }): Promise<PairAdvice>;
 }
 
-/** 「表结构 → 对象建议」的组合原语：按连接内省定位 + 槽位产草稿。REST 与 MCP 的 propose_objects 共用；
+/** 「表结构 → 对象建议」的组合原语：按连接内省定位 + 实现产草稿。REST 与 MCP 的 propose_objects 共用；
  *  notFound 产出的错误类型由调用方定（REST 与 MCP 都传 EngineReject——路由按 422、MCP 按 -32000 映射）。 */
 export async function proposeObjectsFor(
-  slot: LlmSlot,
+  llm: Llm,
   registry: DriverRegistry,
   tables: { connection: string; table: string }[],
   notFound: (msg: string) => Error,
@@ -51,11 +51,11 @@ export async function proposeObjectsFor(
 ): Promise<Result<Record<string, ObjectType>>> {
   return toResult(async () => {
     const infos = await resolveTableInfos(registry, tables, notFound);
-    return slot.proposeObjects(infos, occupied);
+    return llm.proposeObjects(infos, occupied);
   }, (v) => MSG.resultProposed(Object.keys(v).length));
 }
 
-/** 撞名时的改名规则（唯一出处）：{connection}_{table}。罐头槽位（本次/草稿已占）与落地前硬闸同用这一条。 */
+/** 撞名时的改名规则（唯一出处）：{connection}_{table}。演示实现（本次/草稿已占）与落地前硬闸同用这一条。 */
 export function prefixedTableName(connection: string, table: string): string {
   return `${connection}_${table}`;
 }

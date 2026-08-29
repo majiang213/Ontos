@@ -3,7 +3,7 @@
 // 种子数据按演示剧本：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）。
 // 设备核心配方（CREATE/INSERT）与十二套文件库共用 demoSystems.ts 的同一份——内存四连的表清单在这里分叉：
 // 内存 device_sys 带 repair 2 行、hr_sys 是窄表 person 张三；文件库不带 repair、人事是宽表 50 行（见 demoSystems）。
-// 演示问数剧本不住这里：它是罐头槽位的编译脚本，在 llm/canned.ts（demoQueries）。
+// 演示问数剧本不住这里：它是演示实现的编译脚本，在 llm/demo.ts（demoQueries）。
 
 import type { SourceDriver } from "./driver";
 import { SqliteDriver } from "./sqliteDriver";

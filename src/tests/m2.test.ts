@@ -1,4 +1,4 @@
-// M2 测试：配置三视图、LLM 槽位离线回退、生成对象导入草稿。
+// M2 测试：配置三视图、LLM 演示实现、生成对象导入草稿。
 
 import { describe, expect, it } from "vitest";
 import { load } from "js-yaml";
@@ -9,7 +9,7 @@ import { enumValueKey, enumValueLabel } from "../server/schema/config";
 import { listClasses, readClass, search } from "../server/features/ontology/views";
 import { VERDICT_LABELS, Verdict } from "../server/schema/verdict";
 import { conclusionsAbout, liveConclusions } from "../server/features/ontology/classConclusions";
-import { CannedSlot } from "../server/infra/llm/canned";
+import { DemoLlm } from "../server/infra/llm/demo";
 import { classStages, explainWhen, moveStageItem } from "../server/features/ontology/stages";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -112,31 +112,33 @@ describe("配置三视图", () => {
   });
 });
 
-describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校验）", () => {
+describe("真模型实现 AiSdkLlm（注入假 generate，驱动真实出槽校验）", () => {
   const fakeModel = { modelId: "test-model" } as never;
 
   it("合法产出过闸；乱说话的产出被 Zod 拒绝（模型当顾问不当计算器）", async () => {
-    const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
     const good = { object: "equipment", filter: { status: "in_service" }, properties: ["name"] };
     // 围栏 + 闲话的文本也抠得出 JSON（真模型常这么回）
-    const slot = new AiSdkSlot(fakeModel, (async () => ({ text: `结果如下：\n\`\`\`json\n${JSON.stringify(good)}\n\`\`\`` })) as never);
+    const slot = new AiSdkLlm(fakeModel, (async () => ({ text: `结果如下：\n\`\`\`json\n${JSON.stringify(good)}\n\`\`\`` })) as never);
     expect((await slot.nlToQuery("在役设备", config, "test")).object).toBe("equipment");
-    const bad = new AiSdkSlot(fakeModel, (async () => ({ text: JSON.stringify({ object: 123 }) })) as never);
+    const bad = new AiSdkLlm(fakeModel, (async () => ({ text: JSON.stringify({ object: 123 }) })) as never);
     await expect(bad.nlToQuery("x", config, "test")).rejects.toThrow();
-    const prose = new AiSdkSlot(fakeModel, (async () => ({ text: "这个问题我答不了。" })) as never);
+    const prose = new AiSdkLlm(fakeModel, (async () => ({ text: "这个问题我答不了。" })) as never);
     await expect(prose.nlToQuery("x", config, "test")).rejects.toThrow(/JSON/);
   });
 
-  it("getSlot：没 OPENAI_API_KEY 回退罐头；有 key 没指定模型报错；有 key 有模型走真模型", async () => {
-    const { getSlot } = await import("../server/runtime"); // 槽位选择收在组合根，引擎不自查
+  it("getLlm：没 Key 时 test 走演示实现、其他空间报错；有 key 没指定模型报错；有 key 有模型走真模型", async () => {
+    const { getLlm } = await import("../server/runtime"); // 实现选择收在组合根，引擎不自查
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_MODEL;
     try {
-      expect(getSlot().name).toBe("canned-离线回退");
+      expect(getLlm("test").name).toBe("demo-演示实现"); // 演示行为按空间绑定：没 Key 的 test 走剧本
+      expect(() => getLlm("default")).toThrow(/需要模型 Key/); // 其他空间没 Key 直接报错，不静默顶替
       process.env.OPENAI_API_KEY = "test-key";
-      expect(() => getSlot()).toThrow(/OPENAI_MODEL/);
+      expect(() => getLlm("default")).toThrow(/OPENAI_MODEL/);
       process.env.OPENAI_MODEL = "test-model";
-      expect(getSlot().name).toContain("ai-sdk:");
+      expect(getLlm("default").name).toContain("ai-sdk:");
+      expect(getLlm("test").name).toContain("ai-sdk:"); // 有 Key 时 test 也走真模型
     } finally {
       // 自清假 key（setup.offline 的 afterEach 是兜底，不靠它）
       delete process.env.OPENAI_API_KEY;
@@ -144,24 +146,24 @@ describe("真模型槽位 AiSdkSlot（注入假 generate，驱动真实出槽校
     }
   });
 
-  it("罐头问数只服务 test 空间：别的空间即使有 equipment 类也拒（不静默编成演示查询）", async () => {
-    const { CannedSlot } = await import("../server/infra/llm/canned");
-    const slot = new CannedSlot();
+  it("演示剧本只服务 test 空间：别的空间即使有 equipment 类也拒（不静默编成演示查询）", async () => {
+    const { DemoLlm } = await import("../server/infra/llm/demo");
+    const slot = new DemoLlm();
     // 回归：守卫曾是类名巧合——config 里有 equipment 就放行，任何问法都被编成演示剧本（错答案）
-    await expect(slot.nlToQuery("随便问点什么", config, "default")).rejects.toThrow(/只覆盖 test 演示空间/);
-    await expect(slot.nlToQuery("随便问点什么", config, "sandbox")).rejects.toThrow(/只覆盖 test 演示空间/);
+    await expect(slot.nlToQuery("随便问点什么", config, "default")).rejects.toThrow(/只属于 test 演示空间/);
+    await expect(slot.nlToQuery("随便问点什么", config, "sandbox")).rejects.toThrow(/只属于 test 演示空间/);
   });
 
-  it("罐头问数只对上了类的剧本编得动：空配置下不编幽灵查询，明说该配模型 Key", async () => {
-    const { CannedSlot } = await import("../server/infra/llm/canned");
-    const slot = new CannedSlot();
-    await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never, "test")).rejects.toThrow(/离线回退只覆盖演示剧本/);
+  it("剧本只对上了类的演示问题编得动：空配置下不编幽灵查询，明说该配模型 Key", async () => {
+    const { DemoLlm } = await import("../server/infra/llm/demo");
+    const slot = new DemoLlm();
+    await expect(slot.nlToQuery("在途设备多少台", { object_types: {}, link_types: {} } as never, "test")).rejects.toThrow(/演示实现只覆盖演示剧本/);
   });
 });
 
 describe("撞名消解与 prompt 枚举（PR3）", () => {
   it("disambiguateClassNames：撞占用改 {connection}_{table}，仍撞补 _2，不占用不动；无源类退 _2", async () => {
-    const { disambiguateClassNames } = await import("../server/infra/llm/slot");
+    const { disambiguateClassNames } = await import("../server/infra/llm/llm");
     const obj = {
       kind: "thing",
       identity: "cust_no",
@@ -176,10 +178,10 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
   });
 
   it("nlToQuery 的 prompt 带属性类型与枚举 values（过滤值按 values 编，不写中文）", async () => {
-    const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
     const fakeModel = { modelId: "test-model" } as never;
     let seen = "";
-    const slot = new AiSdkSlot(fakeModel, (async (args: { prompt: string }) => {
+    const slot = new AiSdkLlm(fakeModel, (async (args: { prompt: string }) => {
       seen = args.prompt;
       return { text: JSON.stringify({ object: "equipment" }) };
     }) as never);
@@ -190,10 +192,10 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
   });
 
   it("proposePair 的 prompt 带交集率与判定顺序，零温度固定种子，空表不要只因 0% 判同形异义", async () => {
-    const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
     const fakeModel = { modelId: "test-model" } as never;
     let seen: { prompt?: string; temperature?: number; seed?: number } = {};
-    const slot = new AiSdkSlot(fakeModel, (async (args: { prompt: string; temperature?: number; seed?: number }) => {
+    const slot = new AiSdkLlm(fakeModel, (async (args: { prompt: string; temperature?: number; seed?: number }) => {
       seen = args;
       return { text: JSON.stringify({ class_a: "device", class_b: "asset", tendency: "same", reason: "空表不算不相干" }) };
     }) as never);
@@ -216,15 +218,15 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen.prompt).toContain("stage.earlier");
   });
 
-  it("AiSdkSlot 失败落盘：原始产出写临时目录，OPENAI_API_KEY 字面值打码", async () => {
-    const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
+  it("AiSdkLlm 失败落盘：原始产出写临时目录，OPENAI_API_KEY 字面值打码", async () => {
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
     const { readdirSync, readFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const fakeModel = { modelId: "test-model" } as never;
     process.env.OPENAI_API_KEY = "sk-testsecret";
     try {
-      const slot = new AiSdkSlot(fakeModel, (async () => {
+      const slot = new AiSdkLlm(fakeModel, (async () => {
         throw new Error("401 invalid key sk-testsecret"); // 上游报错把 key 带回来的情形
       }) as never);
       await expect(slot.nlToQuery("x", config, "test")).rejects.toThrow(/401/);
@@ -241,8 +243,8 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
   });
 });
 
-describe("LLM 槽位离线回退", () => {
-  const slot = new CannedSlot();
+describe("LLM 演示实现（离线）", () => {
+  const slot = new DemoLlm();
 
   it("演示四问编成正确查询（整体比对，不许片段正确）", async () => {
     expect(await slot.nlToQuery("在役设备及其所属部门", config, "test")).toEqual({
@@ -357,7 +359,7 @@ describe("LLM 槽位离线回退", () => {
     const same = pairs.find((p) => p.class_a === "shared_x" && p.class_b === "device");
     expect(same?.tendency).toBe(Verdict.Same);
     expect(same?.keep).toBe("device"); // 不留下 shared_
-    expect(same?.stage).toBeUndefined(); // 离线回退不产时期名：词与序交给引擎占位/人定
+    expect(same?.stage).toBeUndefined(); // 演示实现不产时期名：词与序交给引擎占位/人定
 
     const stage = pairs.find((p) => p.class_a === "po" && p.class_b === "dev");
     expect(stage?.tendency).toBe(Verdict.Stage); // 有状态类字段只是召回偏置
@@ -380,7 +382,7 @@ describe("LLM 槽位离线回退", () => {
       overlap: { rate: 0.33, count_a: 121, count_b: 100, count_hit: 40 },
     });
     expect(mid.tendency).toBe(Verdict.Stage);
-    expect(mid.stage).toBeUndefined(); // 离线回退仍不产时期名与先后（引擎占位）
+    expect(mid.stage).toBeUndefined(); // 演示实现仍不产时期名与先后（引擎占位）
     expect(empty.keep).toBe("device"); // 字段一样多，留下先写的
   });
 
