@@ -464,6 +464,8 @@ input { font-family: inherit; outline: none; }
 .edge-label-shared {
   color: var(--shared);
 }
+.tag.is-homonym { border: 1px dashed var(--shared); color: #5c5890; cursor: default; }
+.node-shell.is-homonym-hot { outline: 2px solid var(--shared); outline-offset: 3px; }
 .react-flow__edge-text { font-size: 11px; fill: var(--ink-2); }
 .react-flow__edge-textbg { fill: var(--bg); }
 .react-flow__edge-path { stroke: var(--ink-3); stroke-width: 1.2; }

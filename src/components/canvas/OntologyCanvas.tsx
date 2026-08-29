@@ -1,4 +1,4 @@
-// 本体画布 —— 节点是对象类型；边是配置里的关系，加上公共对象的由来（只活在画布）。
+// 本体画布 —— 节点是对象类型；边是配置里的关系，加上 class_conclusions 投影的由来边和同形异义芯片。
 // 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
 
@@ -27,14 +27,17 @@ import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
-import { SHARED_COLOR, isSharedLink, originLinksOf, originTriples } from "./sharedOrigin";
+import { SHARED_COLOR, homonymPeerMap, isSharedLink, overlapLinksOf } from "./sharedOrigin";
+import type { ClassConclusion } from "../../server/schema/config";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import { beginSession, currentSession, dropSession, endSession, fireSession, trackSession, xyDragArgs } from "./connectSession";
 
 function ObjectNode({ data }: { data: ObjNodeData }) {
   const store = useStoreApi();
-  const cls = data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell";
+  const cls =
+    (data.state === "new" ? "node-shell is-new" : data.state === "modified" ? "node-shell is-modified" : "node-shell") +
+    (data.homonymHot ? " is-homonym-hot" : "");
   /** 四边连接条：从任一边的任意点拖出即连线（与把手同走 XYHandle 一套拖拽机；透传参数在 connectSession.xyDragArgs 一处）。
       不 stopPropagation/preventDefault：吞掉 pointerdown 的默认行为会连带吞掉 click，边框一带的单击开不出编辑卡；
       节点拖动/画布平移由 nodrag/nopan 类拦（与把手同机制），单击则冒泡成节点点击 */
@@ -94,6 +97,17 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
           {data.actions.map((a) => (
             <span key={a} className="tag tag-ok">{a}</span>
           ))}
+          {(data.homonyms ?? []).map((peer) => (
+            <span
+              key={peer}
+              className="tag is-homonym"
+              title={`同形异义：不是同一种东西`}
+              onPointerEnter={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(peer)}
+              onPointerLeave={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(null)}
+            >
+              同形异义 · {peer}
+            </span>
+          ))}
         </div>
       </div>
     </div>
@@ -118,6 +132,7 @@ export interface CanvasProps {
   onReconnectLink?: (name: string, from: string, to: string, moved?: { end: "source" | "target"; pin?: BorderPin }) => void; // 拖着已有边的一头改接到别的对象
   onBendChange?: (name: string, bend: Bend | null) => void; // 拖线身捏点拉弯/拉直
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
+  classConclusions?: ClassConclusion[]; // 类与类结论（画布只投影，不猜）
 }
 
 export default function OntologyCanvas(props: CanvasProps) {
@@ -148,22 +163,29 @@ function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["s
   };
 }
 
-function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange }: CanvasProps) {
-  // 由来边只活在画布：进分层把三元组拉到一起，不进配置。
-  const viewLinks = useMemo(
-    () => [...links, ...originLinksOf(originTriples(objects))],
-    [objects, links]
-  );
+function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange, classConclusions = [] }: CanvasProps) {
+  const viewLinks = useMemo(() => [...links, ...overlapLinksOf(classConclusions)], [links, classConclusions]);
+  const homonymPeers = useMemo(() => homonymPeerMap(classConclusions), [classConclusions]);
+  const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = layoutObjects(objects, viewLinks);
-    return objects.map((o) => ({
-      id: o.name,
-      type: "obj",
-      position: layout?.[o.name] ?? pos.get(o.name) ?? { x: 0, y: 0 }, // 已存摆位优先
-      data: { ...o, label: o.name },
-    }));
-  }, [objects, viewLinks, layout]);
+    return objects.map((o) => {
+      const peers = homonymPeers.get(o.name) ?? [];
+      return {
+        id: o.name,
+        type: "obj",
+        position: layout?.[o.name] ?? pos.get(o.name) ?? { x: 0, y: 0 }, // 已存摆位优先
+        data: {
+          ...o,
+          label: o.name,
+          homonyms: peers,
+          homonymHot: homonymHot !== null && (o.name === homonymHot || peers.includes(homonymHot)),
+          onHomonymHot: setHomonymHot,
+        },
+      };
+    });
+  }, [objects, viewLinks, layout, homonymPeers, homonymHot]);
 
   // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
   const [nodes, setNodes] = useNodesState(initialNodes);

@@ -1,5 +1,5 @@
-// 疑似重复里的一对：先选结论；「同一」再问留下谁，「阶段」再问谁早谁晚。
-// 顺序进 POST 的 class_a/class_b：「同一」留下 a 并把 b 并进去；「阶段」a 早 b 晚。
+// 疑似重复里的一对：先选结论；类等价再问留下谁，生命周期再问谁早谁晚。
+// 顺序进 POST 的 class_a/class_b：类等价留下 a 并把 b 并进去；生命周期 a 早 b 晚。
 "use client";
 
 import { useEffect, useState } from "react";
@@ -29,7 +29,7 @@ const HINTS: Record<Verdict, string> = {
   [Verdict.Same]: "两个类描述同一种东西。写成一个对象，挂多个来源。点了之后还要选留下谁。",
   [Verdict.Overlap]: "同一种东西里，个体有交集又不是同一批。要对得上号。会立一个公共对象。",
   [Verdict.Stage]: "同一个体的不同时期（如在途设备到在役设备）。并成一个对象，自动加状态字段和「转为晚阶段」动作。点了之后还要选谁早、谁晚。",
-  [Verdict.NameSimilar]: "不是同一种东西。各自独立。对得上号的话，数据不支持这一条。",
+  [Verdict.NameSimilar]: "不是同一种东西。各自独立。会写进本体，画布上互相标出来。对得上号的话，数据不支持这一条。",
   [Verdict.Skip]: "这次不判，先放着。",
 };
 
@@ -79,7 +79,7 @@ export default function PairCard({ pair, onDone }: { pair: PairAdvice; onDone: (
       onDone(
         verdict === Verdict.Stage
           ? `已裁决 ${ord[0]} × ${ord[1]}：并成一个对象，加了状态字段和「转为${stageNames.to}」动作（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
-          : verdict === Verdict.Same || verdict === Verdict.Overlap
+          : verdict === Verdict.Same || verdict === Verdict.Overlap || verdict === Verdict.NameSimilar
             ? `已裁决 ${ord[0]} × ${ord[1]}：${VERDICT_LABELS[verdict]}（进草稿，发布后生效）${data.recorded === false ? "；注意：留痕没写进库" : ""}`
             : ""
       );

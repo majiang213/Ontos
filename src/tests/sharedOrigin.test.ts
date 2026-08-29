@@ -1,75 +1,12 @@
-// 公共对象的由来：部分重叠立出的 shared_A_B 在画布上认出两个原类。
-// 纯函数零夹具，interface 就是测试面（components/canvas/sharedOrigin.ts）。
+// 画布投影 class_conclusions：由来边和同形异义芯片。不猜 shared_A_B。
 
 import { describe, expect, it } from "vitest";
-import { originLinksOf, originTriples } from "../components/canvas/sharedOrigin";
+import { homonymPeerMap, overlapLinksOf } from "../components/canvas/sharedOrigin";
 
-describe("originTriples（shared_A_B 认出两个原类）", () => {
-  it("asset 与 device 都在时，shared_asset_device 是它们的公共部分", () => {
-    expect(originTriples(["asset", "device", "shared_asset_device"])).toEqual([
-      { shared: "shared_asset_device", a: "asset", b: "device" },
-    ]);
-  });
-
-  it("短前缀和长前缀都能拆时，留下更长的那组（对齐 shared_${a}_${b} 用完整类名）", () => {
+describe("overlapLinksOf", () => {
+  it("每个原类一条边，指向上位对象，标「公共部分」", () => {
     expect(
-      originTriples(["po", "po_a", "po_b", "a_po_b", "shared_po_a_po_b"])
-    ).toEqual([{ shared: "shared_po_a_po_b", a: "po_a", b: "po_b" }]);
-  });
-
-  it("缺一边原类就不认", () => {
-    expect(originTriples(["asset", "shared_asset_device"])).toEqual([]);
-  });
-
-  it("原类已经是公共对象时，再立的 shared_shared_x_y_z 仍认出两端", () => {
-    expect(originTriples(["x", "y", "z", "shared_x_y", "shared_shared_x_y_z"])).toEqual([
-      { shared: "shared_shared_x_y_z", a: "shared_x_y", b: "z" },
-      { shared: "shared_x_y", a: "x", b: "y" },
-    ]);
-  });
-
-  it("两端都能拆时，公共对象的来源对得上哪一对就认哪一对", () => {
-    const src = (label: string) => [{ key: label, label }];
-    expect(
-      originTriples([
-        { name: "po", sources: src("hr.po") },
-        { name: "po_a", sources: src("a.t") },
-        { name: "po_b", sources: src("b.t") },
-        { name: "a_po_b", sources: src("x.y") },
-        { name: "shared_po_a_po_b", sources: [...src("a.t"), ...src("b.t")] },
-      ])
-    ).toEqual([{ shared: "shared_po_a_po_b", a: "po_a", b: "po_b" }]);
-    expect(
-      originTriples([
-        { name: "po", sources: src("hr.po") },
-        { name: "po_a", sources: src("a.t") },
-        { name: "po_b", sources: src("b.t") },
-        { name: "a_po_b", sources: src("x.y") },
-        { name: "shared_po_a_po_b", sources: [...src("hr.po"), ...src("x.y")] },
-      ])
-    ).toEqual([{ shared: "shared_po_a_po_b", a: "po", b: "a_po_b" }]);
-  });
-
-  it("两个公共对象可以共享一个原类，按公共对象名排序", () => {
-    expect(
-      originTriples([
-        "instrument",
-        "shared_asset_instrument",
-        "device",
-        "shared_asset_device",
-        "asset",
-      ])
-    ).toEqual([
-      { shared: "shared_asset_device", a: "asset", b: "device" },
-      { shared: "shared_asset_instrument", a: "asset", b: "instrument" },
-    ]);
-  });
-});
-
-describe("originLinksOf（原类 → 公共对象的由来边）", () => {
-  it("每个原类一条边，指向公共对象，标「公共部分」，不进配置", () => {
-    expect(
-      originLinksOf([{ shared: "shared_asset_device", a: "asset", b: "device" }])
+      overlapLinksOf([{ kind: "overlap", classes: ["asset", "device"], shared: "shared_asset_device" }])
     ).toEqual([
       {
         name: "shared:shared_asset_device:asset",
@@ -86,5 +23,22 @@ describe("originLinksOf（原类 → 公共对象的由来边）", () => {
         kind: "shared",
       },
     ]);
+  });
+
+  it("同形异义和子类型不画由来边", () => {
+    expect(overlapLinksOf([{ kind: "homonym", classes: ["a", "b"] }])).toEqual([]);
+    expect(overlapLinksOf([{ kind: "subtype", classes: ["intern", "employee"] }])).toEqual([]);
+  });
+});
+
+describe("homonymPeerMap", () => {
+  it("一行一次裁决，不把多对收成一团", () => {
+    const m = homonymPeerMap([
+      { kind: "homonym", classes: ["fund_account", "login_account"] },
+      { kind: "homonym", classes: ["fund_account", "member_account"] },
+    ]);
+    expect(m.get("fund_account")).toEqual(["login_account", "member_account"]);
+    expect(m.get("login_account")).toEqual(["fund_account"]);
+    expect(m.get("member_account")).toEqual(["fund_account"]);
   });
 });

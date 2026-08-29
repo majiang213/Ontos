@@ -146,6 +146,12 @@ export const MSG = {
   cfgValueGenerated: (where: string, detail: string) => `配置不合法：${where} 的 from: generated 只许用在 create 效应且目标字段带 generate 列表：${detail}`,
   cfgValueUnknown: (where: string, detail: string) => `配置不合法：${where} 的取值来源不认识：${detail}`,
   cfgOperandArrayLiteral: (where: string) => `配置不合法：${where} 的数组元素只许是字面量`,
+  cfgConclusionDupClass: "配置不合法：类与类结论的 classes 里有重复的类名",
+  cfgConclusionOverlapNoShared: "配置不合法：部分重叠必须写 shared（上位对象）",
+  cfgConclusionSharedInClasses: "配置不合法：部分重叠的 shared 不能写进 classes",
+  cfgConclusionSharedOnlyOverlap: "配置不合法：只有部分重叠能写 shared",
+  cfgConclusionClassMissing: (kind: string, name: string) => `配置不合法：类与类结论 ${kind} 点到了不存在的类 ${name}`,
+  cfgConclusionSharedMissing: (name: string) => `配置不合法：部分重叠的上位对象 ${name} 不存在`,
 
   // 动作执行（features/action，运行期拒绝，被 runAction 收成 stage=effect/pre 的结果）
   linkOnlyTransition: (link: string) => `link 只用于转化关系：${link}`,

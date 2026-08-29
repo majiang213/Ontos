@@ -150,6 +150,30 @@ export const linkTypeSchema = z
   .refine((l) => (l.match ? 1 : 0) + (l.transition ? 1 : 0) === 1, { message: MSG.matchXorTransition });
 export type LinkType = z.infer<typeof linkTypeSchema>;
 
+/* ---------- 类与类结论（还活着的：部分重叠由来、同形异义；子类型预留） ----------
+   一行一次裁决。classes 至少两个类名。不是个体边（个体边在 link_types）。 */
+export const CLASS_CONCLUSION_KINDS = ["overlap", "homonym", "subtype"] as const;
+export type ClassConclusionKind = (typeof CLASS_CONCLUSION_KINDS)[number];
+
+export const classConclusionSchema = z
+  .object({
+    kind: z.enum(CLASS_CONCLUSION_KINDS),
+    classes: z.array(z.string()).min(2),
+    shared: z.string().optional(), // 仅 overlap：上位对象名
+  })
+  .superRefine((row, ctx) => {
+    if (new Set(row.classes).size !== row.classes.length) {
+      ctx.addIssue({ code: "custom", message: MSG.cfgConclusionDupClass });
+    }
+    if (row.kind === "overlap") {
+      if (!row.shared) ctx.addIssue({ code: "custom", message: MSG.cfgConclusionOverlapNoShared });
+      else if (row.classes.includes(row.shared)) ctx.addIssue({ code: "custom", message: MSG.cfgConclusionSharedInClasses });
+    } else if (row.shared !== undefined) {
+      ctx.addIssue({ code: "custom", message: MSG.cfgConclusionSharedOnlyOverlap });
+    }
+  });
+export type ClassConclusion = z.infer<typeof classConclusionSchema>;
+
 /* ---------- 根 ---------- */
 export const outletSchema = z.object({
   description: z.string().optional(),
@@ -158,6 +182,7 @@ export const outletSchema = z.object({
 export const configSchema = z.object({
   object_types: z.record(z.string(), objectTypeSchema),
   link_types: z.record(z.string(), linkTypeSchema).default({}),
+  class_conclusions: z.array(classConclusionSchema).optional(),
   outlets: z.record(z.string(), outletSchema).optional(),
 });
 export type OntologyConfig = z.infer<typeof configSchema>;

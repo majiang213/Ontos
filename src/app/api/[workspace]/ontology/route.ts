@@ -37,6 +37,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ workspac
         action_changes,
         object_types: state.draft.object_types, // actions 保持完整 ActionDef——对象卡从 def 在前端算摘要
         link_types: state.draft.link_types,
+        class_conclusions: state.draft.class_conclusions ?? [],
       },
       { headers }
     );

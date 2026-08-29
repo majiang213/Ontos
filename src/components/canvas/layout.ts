@@ -16,6 +16,7 @@ export interface CanvasObject {
   sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
   actions: string[];
   state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
+  homonyms?: string[]; // 同形异义的对方类名（配置投影，不是关系）
 }
 
 export interface CanvasLink {

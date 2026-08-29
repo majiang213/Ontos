@@ -347,6 +347,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         }}
         onBendChange={(name, bend) => void op({ op: "save_edge_bend", name, bend })} // 拉弯/拉直：静默存，与摆位同理
         onLayoutChange={saveLayout}
+        classConclusions={ont?.class_conclusions ?? []}
       />
 
       {/* 左上一条工具条：品牌和入口同一行。顺序是连接 → 待确认 → 发布。入口一律 btn，发布有改动时用 btn-cta。 */}

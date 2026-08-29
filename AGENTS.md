@@ -72,7 +72,7 @@ AI 读表结构产出本体对象，直接上画布；表只是原料。有抉�
 _UI 说法_：逆向建模（步骤名保留）；动作用「生成对象」。
 
 **多源整合** 🔴：
-对疑似同义对象做五关系类型裁决的步骤（不同库，或同一库的两张表）。
+对疑似同义对象做对齐裁决的步骤（不同库，或同一库的两张表）。
 _UI 说法_：步骤名保留；动作一律说「裁决」。
 
 **发布本体**：
@@ -111,9 +111,9 @@ _UI 说法_：派生字段（规则随字段展示）。
 
 ### 整合方法论（差异化核心）
 
-**五关系类型** 🔴：
-五种结论的定义与判定依据见 CONTEXT「类与类」；工程纪律：①②③⑤ 在 demo 里全部可落本体；跳过的对按"各自独立"处理；不同库和同一库的两张表都进裁决。
-_UI 说法_：裁决按钮用简写「同一 / 部分重叠 / 阶段 / 仅名称相似 / 跳过」（UI 文案经 `VERDICT_LABELS` 映射；decisions API 的 verdict 枚举与 adj_decision 留痕存英文键 `same / overlap / stage / name_similar / skip`，汉字只当描述不当 Key）。
+**对齐判定** 🔴：
+候选对上人对齐时的定案。定义见 CONTEXT「类与类」。不是类与类关系的穷尽（部分与整体、不相交本期不定案）。工程纪律：类等价、部分重叠、生命周期、同形异义在 demo 里可落本体；子类型 / 部分与整体 / 不相交本期不定案；跳过不是关系，配置不动；同形异义写入 `class_conclusions`；不同库和同一库的两张表都进裁决。
+_UI 说法_：裁决按钮「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」（`VERDICT_LABELS`；decisions API 与 adj_decision 留痕存英文键 `same / overlap / stage / name_similar / skip`，汉字只当描述不当 Key）。_Avoid_: 五种结论（当类与类关系的章节名或穷尽表）
 
 **裁决** 🔴：
 人对候选对选择关系类型的定案动作。LLM 只建议，裁决权永远在人；裁决+证据快照全部留痕、可回滚。
@@ -193,7 +193,7 @@ _UI 说法_：取数路径。
 | 疑似重复 | 「待确认」面板②区块（①唯一键确认后才解锁） | `/api/list_candidates` | `listCandidates`（建议原语 `proposePairs`） | `list_candidates`（只看、不定案） |
 | 交集率 | 「算一算交集率」 | `/api/compute_overlap` | `computeOverlap`（底层算率 `overlapRate`） | 无（关卡在人） |
 | 看过交集率再建议 | 算完交集率后自动再问（面板上「看过交集率」） | `/api/propose_pair` | `proposePair` | 无（关卡在人） |
-| 裁决 | 「同一/部分重叠/阶段…」 | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | 无（关卡在人） |
+| 裁决 | 「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」 | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | 无（关卡在人） |
 | 发布 / 放弃 | 「发布 vN+1」「放弃」 | `/api/publish` | `publish` / `discard` | 无（关卡在人） |
 | 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，16 个 op（14 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`，没有独立 op） | `edit_draft`（吃同一批内容 op，不含界面状态） |
 | 问数 | 问题集「全量跑一遍」/「对草稿跑一遍」 | `/api/questions`（`?run=1`，可选 `&target=draft`）、`/api/query` | `nlToQuery` + `query` | `query`（入参已是结构化查询，Ontos 不编） |
@@ -204,7 +204,7 @@ _UI 说法_：取数路径。
 - 通道与载荷分开：`edit_draft` 是通道（路由、引擎、MCP 同名），16 个 op 是载荷（MCP 抽掉 2 条界面状态，剩 14 条）——op 名在页面内部调用和 MCP 入参里是同一个词。
 - 页面暴露任务层（一个按钮一个动作），MCP 暴露 op 层——粒度不同是设计，不是遗漏。裁决、发布、交集率、看过交集率再建议没有 MCP 工具是刻意的：关卡留给人。疑似重复清单只读开放（`list_candidates`），定案仍在人。
 - 新加入口时词干从本表已有工程词里取，不另造。只建议不落地的工具一律 `propose_` 前缀（`propose_objects` / `propose_action` / `propose_pair`）。
-- 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀；schema 也是**共享内核**——跨域词汇（五关系类型的 `schema/verdict`：机器键、展示文案、建议形状）住这里，领域与前端都能安全引用。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
+- 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀；schema 也是**共享内核**——跨域词汇（对齐判定的 `schema/verdict`：机器键、展示文案、建议形状）住这里，领域与前端都能安全引用。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
 
 ## 代码结构纪律（评审六轴）
 
@@ -214,7 +214,7 @@ _UI 说法_：取数路径。
 2. **不变量落在哪**。一条不变量一个家，且家是文件不是注释：每步改动的「落定」在 `commit.ts`、引用扫描在 `refs.ts`、界面状态跟随在 `canvasState.ts`、op 分派在 `ops/index.ts`、厚不变量一文件一个（`editObject` / `editProperty` / `editLink` / `importObjects` / `replaceObject`）。文件头注释第一行写它回答的问题，不写谁调它。
 3. **打开文件能否读完一个问题**。切分轴是「编辑一份规定这条链上的问题」，不是按本体要素（类/关系/动作）分，也不是按 16 个 op 一人一个文件。浅 case（单点赋值级）留分派，厚不变量（跨键跟随级）独立成文件。一个概念要跨三个以上文件才能读完，就是切错了。
 4. **命名谓宾搭配**。主语要真：`configStore` 那种「声称存 config 实际不是」的假主语不许再出现。谓语和宾语要对得上：被 apply 的是 op 不是 draft，所以通道叫 `editDraft` 不叫 applyDraft。动词短语不当模块名（`editProperty` 这种「做什么编辑」的动名允许，因为它说的是住着的知识；`mustType` 这种纯调用句不行）。读路径和写路径共用规则时，规则放纯函数层，不许读 import 写。
-5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、聚合产出列名 `metricColumn`（features/query/assemble）、转化动作名 `conversionActionName`（features/ontology/skeletons）、公共对象名 `sharedObjectName`（features/ontology/sharedName）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、公共对象由来 `originTriples` / `originLinksOf`（components/canvas/sharedOrigin）、insert-ignore 与方言 upsert `insertIgnoreSql` / `upsertSql`（meta/stores/base）、元库 DSN 方言 `metaDialectOf`（meta/datasource）、边界入口 Result 收尾 `toResult`（server/errors，各入口不再自写 try/catch 阶梯）、业务拒绝落日志 `logReject`（server/errors，REST 与 MCP 的收尾共用一处）、元库 PG 占位符 `toPgPlaceholders`（meta/datasource；源驱动下推另有 `renderPlaceholders`，不互相 import）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**、十二套演示系统的清单/注释/文件播种与 sidecar 读写 `DEMO_SYSTEMS` / `DEMO_COMMENTS` / `writeDemoFiles` / `readSidecarComments`（infra/demoSystems，叶子模块：裸 node 可跑）、生成撞名改名规则 `prefixedTableName` 与落地前硬闸 `disambiguateClassNames`（infra/llm/slot）、三波对错板 `QUESTION_PACKS`（features/acceptance/questionPacks）。新单源先登记本表再落地。
+5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、聚合产出列名 `metricColumn`（features/query/assemble）、转化动作名 `conversionActionName`（features/ontology/skeletons）、公共对象名 `sharedObjectName`（features/ontology/sharedName）、类与类结论 `class_conclusions`（schema/config；画布投影 `overlapLinksOf` / `homonymPeerMap`）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、insert-ignore 与方言 upsert `insertIgnoreSql` / `upsertSql`（meta/stores/base）、元库 DSN 方言 `metaDialectOf`（meta/datasource）、边界入口 Result 收尾 `toResult`（server/errors，各入口不再自写 try/catch 阶梯）、业务拒绝落日志 `logReject`（server/errors，REST 与 MCP 的收尾共用一处）、元库 PG 占位符 `toPgPlaceholders`（meta/datasource；源驱动下推另有 `renderPlaceholders`，不互相 import）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**、十二套演示系统的清单/注释/文件播种与 sidecar 读写 `DEMO_SYSTEMS` / `DEMO_COMMENTS` / `writeDemoFiles` / `readSidecarComments`（infra/demoSystems，叶子模块：裸 node 可跑）、生成撞名改名规则 `prefixedTableName` 与落地前硬闸 `disambiguateClassNames`（infra/llm/slot）、三波对错板 `QUESTION_PACKS`（features/acceptance/questionPacks）。新单源先登记本表再落地。
 6. **代码坏味道**。报错文案不当机器判据（判定走结构参数，如 `exceptAction`）；吞错必须注释说清为什么安全；错误类型按域归一（EngineReject / DraftReject / ConnectionReject / WorkspaceReject），调用方不猜类型；内部形状（SQL / 主机 / 路径 / 堆栈）不进用户可见输出，生产只给「内部错误」（`_shared.internalErrorMessage` 单闸）；无调试残留（console.log / dbg）；无死导出。
 
 ## 本体论要素 × 落地（附录对照，写代码按此表）
@@ -223,13 +223,14 @@ _UI 说法_：取数路径。
 |---|---|
 | 类 / 属性 / 关系 | **已落地** |
 | 识别标准 `identity` | **已落地** |
-| ①类等价 ②上位 ③阶段 ⑤同名不同类 | **已落地** |
+| 类等价 / 部分重叠（上位对象） / 生命周期 / 同形异义 | **已落地**（类等价合并；生命周期转化；部分重叠与同形异义写入 `class_conclusions`） |
 | 派生属性（status） | **已落地** |
 | 个体 ABox | **不做**（数据留源库） |
-| ④子类型 / `parent` | **未做**（V2） |
+| 子类型 / `parent` | **未做**（V2） |
+| 部分与整体 | **未做**（V2） |
+| 不相交 | **未做**（V2） |
 | 事物 vs 事件 `kind` | **字段有**，未约束（引擎不按 thing/event 分支） |
-| 部分—整体 | **未做** |
-| 公理 / 谓词 / 动作 | 动作 **已落地**（`features/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词即布尔派生，**已落地**（不另设构造）。导入落草稿时每类自动补一条 `set_fields`（按 identity 认人、写字段，唯一键与派生属性不可写，无可写字段不生成；字段改名/删除、部分重叠上移时级联跟随）；转化动作由阶段裁决自动立（`convert_to_<晚阶段>`）；业务动作经 `set_action` 由人/Agent 写 |
+| 公理 / 谓词 / 动作 | 动作 **已落地**（`features/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词即布尔派生，**已落地**（不另设构造）。导入落草稿时每类自动补一条 `set_fields`（按 identity 认人、写字段，唯一键与派生属性不可写，无可写字段不生成；字段改名/删除、部分重叠上移时级联跟随）；转化动作由生命周期裁决自动立（`convert_to_<晚阶段>`）；业务动作经 `set_action` 由人/Agent 写 |
 | 变更事件与告知 | 拼装 **已落地**（`features/action/notify`，随 `run_action` 结果返回，`delivered: false`）；外发 **未做** |
 | 推理机 / OWL | **未做** |
 
@@ -250,7 +251,7 @@ _UI 说法_：取数路径。
 - **单一画布页**：「本体构建」是唯一页面；问数与动作不外置 UI——外部 Agent 经 MCP（`/api/<空间名>/mcp`，配套 skill 在 `skills/` 下四个目录：ontos-query / ontos-action-run / ontos-canvas / ontos-action）驱动，Claude / Codex 是 MCP 调用方，循环不做进 Ontos。
 
 - **工作台 = 本体画布**：初始即空画布。画布内容永远是当前工作副本（已发布合并本体上的未发布改动；空空间是空画布），随时可拖、可点节点编辑。
-- **画布只放本体对象，schema 永不当节点**：源表是只读原料，躺在「表结构」抽屉里（每列标出映射去向）；画布节点 = 本体对象。对象 ↔ 源列是**多对多**：一列可喂多个对象，一个对象可挂多张表（编辑卡可从任意已连接源拉列进对象）。部分重叠立出的公共对象，从两个原类各画一条虚线指向它，线上标「公共部分」——这条边只活在画布，不进配置。
+- **画布只放本体对象，schema 永不当节点**：源表是只读原料，躺在「表结构」抽屉里（每列标出映射去向）；画布节点 = 本体对象。对象 ↔ 源列是**多对多**：一列可喂多个对象，一个对象可挂多张表（编辑卡可从任意已连接源拉列进对象）。部分重叠立出的公共对象，从两个原类各画一条虚线指向它，线上标「公共部分」：由来边是配置 `class_conclusions`（`kind: overlap`，`shared`）的投影，不进 `link_types`。同形异义不连线，节点上互标芯片「同形异义 · 对方类名」，悬停高亮；一行一次裁决，不合成一团。
 - **多选 → 生成对象 → 直接上画布 → 至多一张抉择卡**：表结构抽屉勾选表后点「生成对象」——对象立刻上画布并收起抽屉。**没有预览卡、没有确认草稿卡**。表永远是原料不上画布（节点只可能是本体对象）。有抉择进「待确认」面板（工具条入口，生成后不自动弹出；关掉可再进）：先定唯一键，确认后疑似重复才展开——交集率、阶段配对都建在唯一键上，键没定就裁会出「合法但错误」的关系。同一时间底中只浮一张卡。点节点可随时改字段。
 - **发布后修改走发布流程**：画布是**工作副本**——发布后的编辑（改字段/拉列/连线/删节点/加表）只标「待发布」，点工具条「发布 vN+1」才升版本入历史；问数与动作始终读**已发布**的快照。
 - **手动建模与导入并列**：画布不依赖数据源——空画布和工具条都有「新建对象」，无源对象不挂 `sources`，与导入的对象同等进工作副本；要让问数看见，再点发布。

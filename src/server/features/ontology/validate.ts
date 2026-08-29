@@ -114,6 +114,14 @@ export function validateSemantics(config: OntologyConfig): void {
       }
     }
   }
+  for (const row of config.class_conclusions ?? []) {
+    for (const name of row.classes) {
+      if (!config.object_types[name]) throw new Error(MSG.cfgConclusionClassMissing(row.kind, name));
+    }
+    if (row.kind === "overlap") {
+      if (!row.shared || !config.object_types[row.shared]) throw new Error(MSG.cfgConclusionSharedMissing(row.shared ?? ""));
+    }
+  }
   for (const [clsName, cls] of Object.entries(config.object_types)) {
     for (const [actName, act] of Object.entries(cls.actions ?? {})) {
       // 效应指向的类必须存在；update/create 写的属性必须是该类的源列属性；$request 认人的类必须存在

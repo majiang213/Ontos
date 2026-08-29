@@ -173,7 +173,7 @@ export function createAssetTables(db: DatabaseSync): void {
 
 /* ---------- 文件专属配方（只进 writeDemoFiles，不进内存 seedDemo） ---------- */
 
-/** 采购库第二张表：办公采购订单（没有序列号），约 25 行——给第三波「采购 order × 销售 order 仅名称相似」埋伏。 */
+/** 采购库第二张表：办公采购订单（没有序列号），约 25 行——给第三波「采购 order × 销售 order 同形异义」埋伏。 */
 function createPurchaseOrder(db: DatabaseSync): void {
   db.exec(`CREATE TABLE "order" (order_id INTEGER PRIMARY KEY AUTOINCREMENT, order_no TEXT UNIQUE, supplier_name TEXT, amount REAL)`);
   const ins = db.prepare(`INSERT INTO "order" (order_no, supplier_name, amount) VALUES (?, ?, ?)`);
@@ -282,7 +282,7 @@ function seedCrmFile(db: DatabaseSync): void {
 }
 
 /** 销售库两张表：客户 40 行（前 30 个与档案同号同名，10 个销售独有）；订单 60 行（用 25 种 sku，其中 20 种仓库有）。
- *  表名 order 与采购 order 撞名——第三波「仅名称相似」的那一对。 */
+ *  表名 order 与采购 order 撞名——第三波「同形异义」的那一对。 */
 function seedSalesFile(db: DatabaseSync): void {
   db.exec(`CREATE TABLE customer (cust_no TEXT PRIMARY KEY, name TEXT, payment_term TEXT)`);
   db.exec(`CREATE TABLE "order" (order_id INTEGER PRIMARY KEY AUTOINCREMENT, order_no TEXT UNIQUE, cust_no TEXT, sku TEXT, amount REAL)`);
@@ -306,7 +306,7 @@ function seedWmsFile(db: DatabaseSync): void {
   }
 }
 
-/** 应收发票 40 张：order_no 对得上部分销售单，但它不是销售订单那一类（跳过 / 仅名称相似）。 */
+/** 应收发票 40 张：order_no 对得上部分销售单，但它不是销售订单那一类（跳过 / 同形异义）。 */
 function seedArFile(db: DatabaseSync, now: number): void {
   db.exec(`CREATE TABLE invoice (invoice_no TEXT PRIMARY KEY, customer_no TEXT, order_no TEXT, amount REAL, due_date INTEGER)`);
   const ins = db.prepare(`INSERT INTO invoice (invoice_no, customer_no, order_no, amount, due_date) VALUES (?, ?, ?, ?, ?)`);

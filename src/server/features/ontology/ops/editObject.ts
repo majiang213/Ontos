@@ -1,13 +1,16 @@
-// 撤类 —— 「撤一个类，连同挂着它的关系」：delete_object 与裁决的 mergeInto 共用这一个函数。
+// 撤类 —— 「撤一个类，连同挂着它的关系和类与类结论」：delete_object 与裁决的 mergeInto 共用这一个函数。
 
 import type { OntologyConfig } from "../../../schema/config";
 import { DraftReject, MSG } from "../../../errors";
 
-/** 撤一个类，连同挂着它的关系（delete_object 与裁决的 mergeInto 共用）。 */
+/** 撤一个类，连同挂着它的关系和类与类结论（delete_object 与裁决的 mergeInto 共用）。 */
 export function dropClass(d: OntologyConfig, name: string): void {
   delete d.object_types[name];
   for (const [linkName, link] of Object.entries(d.link_types)) {
     if (link.from === name || link.to === name) delete d.link_types[linkName];
+  }
+  if (d.class_conclusions?.length) {
+    d.class_conclusions = d.class_conclusions.filter((row) => row.shared !== name && !row.classes.includes(name));
   }
 }
 

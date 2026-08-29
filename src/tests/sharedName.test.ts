@@ -1,7 +1,7 @@
 // 公共对象名：shared_${a}_${b} 起名。纯函数零夹具（features/ontology/sharedName.ts）。
 
 import { describe, expect, it } from "vitest";
-import { isSharedObjectName, sharedEnds, sharedObjectName } from "../server/features/ontology/sharedName";
+import { isSharedObjectName, sharedObjectName } from "../server/features/ontology/sharedName";
 
 describe("isSharedObjectName", () => {
   it("只认 shared_ 前缀的类名", () => {
@@ -19,11 +19,3 @@ describe("sharedObjectName", () => {
   });
 });
 
-describe("sharedEnds", () => {
-  it("两端都在才拆得出", () => {
-    expect(sharedEnds("shared_asset_device", new Set(["asset", "device", "shared_asset_device"]))).toEqual([
-      { a: "asset", b: "device" },
-    ]);
-    expect(sharedEnds("shared_asset_device", new Set(["asset", "shared_asset_device"]))).toEqual([]);
-  });
-});

@@ -2,9 +2,10 @@
 // 列出类 / 读取一个类 / 检索。description 供阅读；填进 JSON 的是 name。
 // 已发布视图不返回 sources/pk（问数 Agent 不绑表）；草稿视图（space=draft）带状态与来源对照，供改画布。
 
-import type { ActionDef, OntologyConfig } from "../../schema/config";
+import type { ActionDef, ClassConclusion, OntologyConfig } from "../../schema/config";
 import { replaceBlockers } from "./ops/replaceObject";
 import { sameConfig } from "./sameConfig";
+import { conclusionsAbout } from "./classConclusions";
 import { EngineReject, MSG } from "../../errors";
 
 /** 类相对已发布快照的状态（与 GET /api/ontology 的 states 同一算法）。 */
@@ -67,6 +68,7 @@ export interface ClassView {
   }[];
   relations: { name: string; description?: string; to: string; kind: "match" | "transition" }[]; // 从该类出发的（含反向名）；kind 区分普通配对与转化
   actions: { name: string; description?: string; pre?: unknown }[];
+  class_conclusions: ClassConclusion[]; // 该类参与的类与类结论（部分重叠由来、同形异义）；不是个体边
   // 不返回：sources、pk、axioms
 }
 
@@ -94,6 +96,7 @@ export function readClass(config: OntologyConfig, name: string): ClassView {
     })),
     relations,
     actions: Object.entries(t.actions ?? {}).map(([a, d]) => ({ name: a, description: d.description, pre: d.pre })),
+    class_conclusions: conclusionsAbout(config, name),
   };
 }
 

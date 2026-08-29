@@ -1,6 +1,6 @@
 // 疑似重复的候选 —— 「哪些对等着人裁」：候选集按草稿内容快照（adj_candidates），同一内容只问一次模型。
 // 定案后钉快照（pinCandidateSnapshot）：并类/立公共对象只改写串里的对，不把串外拉进来。
-// 资格谓词在 eligibility.ts。定案过滤在读时套——定案不动草稿（跳过/仅名称相似）也即时生效。
+// 资格谓词在 eligibility.ts。定案过滤在读时套——跳过不改草稿、同形异义只写 class_conclusions，清单仍即时消失。
 
 import { createHash } from "node:crypto";
 import type { EngineEnv } from "../env";
@@ -101,7 +101,7 @@ export async function listCandidates(env: EngineEnv, workspace: string = DEFAULT
 }
 
 /** 定案之后钉住快照：按串改写还该问的对，并把哈希对齐到现在的类集合。
- *  没有快照则不动（下次列表按入围再猜）。跳过/仅名称相似不写——读时过滤，放弃未发布裁决后还能回来。 */
+ *  没有快照则不动（下次列表按入围再猜）。跳过/同形异义不改清单——读时过滤，放弃未发布裁决后还能回来。 */
 export async function pinCandidateSnapshot(
   env: EngineEnv,
   workspace: string,

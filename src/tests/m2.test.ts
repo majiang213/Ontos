@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
 import { listClasses, readClass, search } from "../server/features/ontology/views";
-import { Verdict } from "../server/schema/verdict";
+import { VERDICT_LABELS, Verdict } from "../server/schema/verdict";
+import { conclusionsAbout, liveConclusions } from "../server/features/ontology/classConclusions";
 import { CannedSlot } from "../server/infra/llm/canned";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -29,10 +30,24 @@ describe("配置三视图", () => {
     expect(v.relations.map((r) => r.name)).toContain("belongs_to");
     expect(v.relations.map((r) => r.name)).toContain("covered_by"); // 反向名也在
     expect(v.actions.map((a) => a.name)).toContain("convert");
+    expect(v.class_conclusions).toEqual([]);
     expect(v).not.toHaveProperty("sources");
     const text = JSON.stringify(v);
     expect(text).not.toContain("po_item"); // 源表名不出视图
     expect(text).not.toContain("status_one"); // 公理不出视图
+  });
+
+  it("读取一个类：带上它参与的类与类结论；死类的行滤掉", () => {
+    const cfg = structuredClone(config);
+    cfg.class_conclusions = [
+      { kind: "homonym", classes: ["equipment", "person"] },
+      { kind: "homonym", classes: ["ghost", "person"] },
+      { kind: "overlap", classes: ["equipment", "person"], shared: "missing_shared" },
+    ];
+    expect(liveConclusions(cfg)).toEqual([{ kind: "homonym", classes: ["equipment", "person"] }]);
+    expect(conclusionsAbout(cfg, "equipment")).toEqual([{ kind: "homonym", classes: ["equipment", "person"] }]);
+    expect(readClass(cfg, "equipment").class_conclusions).toEqual([{ kind: "homonym", classes: ["equipment", "person"] }]);
+    expect(readClass(cfg, "department").class_conclusions).toEqual([]);
   });
 
   it("检索按名字与说明命中", () => {
@@ -119,7 +134,7 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen).toContain("in_service"); // equipment.status 的枚举值进了 prompt
   });
 
-  it("proposePair 的 prompt 带交集率与判定顺序，零温度固定种子，空表不要只因 0% 判仅名称相似", async () => {
+  it("proposePair 的 prompt 带交集率与判定顺序，零温度固定种子，空表不要只因 0% 判同形异义", async () => {
     const { AiSdkSlot } = await import("../server/infra/llm/aiSdk");
     const fakeModel = { modelId: "test-model" } as never;
     let seen: { prompt?: string; temperature?: number; seed?: number } = {};
@@ -140,7 +155,7 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen.prompt).toContain("有一侧取不出取值");
     expect(seen.prompt).toContain("判定顺序");
     expect(seen.prompt).toContain("第一版建议");
-    expect(seen.prompt).toContain("命中大于零不许给仅名称相似");
+    expect(seen.prompt).toContain(`命中大于零不许给${VERDICT_LABELS[Verdict.NameSimilar]}`);
     expect(seen.prompt).toContain("命中为零不许给部分重叠");
   });
 
@@ -256,7 +271,7 @@ describe("LLM 槽位离线回退", () => {
     expect(pairs.find((p) => p.class_a === "a" && p.class_b === "b")?.tendency).toBe(Verdict.Stage); // 含状态字段
   });
 
-  it("看过交集率再建议：命中为零不改口仅名称相似；空表不否定同一", async () => {
+  it("看过交集率再建议：命中为零不改口同形异义；空表不否定类等价", async () => {
     const a = { name: "device", sources: ["device_sys"], fields: ["sn", "name"] };
     const b = { name: "asset", sources: ["asset_sys"], fields: ["sn", "name"] };
     const empty = await slot.proposePair({ class_a: a, class_b: b, overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 } });
@@ -284,13 +299,13 @@ describe("LLM 槽位离线回退", () => {
     expect(advice.reason).toContain("还没有行");
   });
 
-  it("看过交集率再建议：接近全交不压过第三问——有状态字段且第一版是阶段则维持阶段", async () => {
+  it("看过交集率再建议：接近全交不压过第三问——有状态字段且第一版是生命周期则维持生命周期", async () => {
     const a = { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] };
     const b = { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] };
     const full = { rate: 0.92, count_a: 100, count_b: 100, count_hit: 92 };
     const stage = await slot.proposePair({ class_a: a, class_b: b, overlap: full, base: { tendency: Verdict.Stage, reason: "字段像阶段" } });
     expect(stage.tendency).toBe(Verdict.Stage); // 合成表「是 | 命中大于零 | 是 → 阶段」，比率不单独压过第三问
-    expect(stage.reason).toContain("维持阶段");
+    expect(stage.reason).toContain(`维持${VERDICT_LABELS[Verdict.Stage]}`);
     const same = await slot.proposePair({ class_a: a, class_b: b, overlap: full, base: { tendency: Verdict.Same, reason: "字段几乎全同" } });
     expect(same.tendency).toBe(Verdict.Same); // 第三问不是「是」——全交只答同一批，维持同一
   });

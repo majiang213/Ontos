@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 import DecisionPanel, { identityRows, mergeSelections } from "../components/cards/DecisionPanel";
+import PairCard from "../components/cards/PairCard";
+import { VERDICT_LABELS, Verdict } from "../server/schema/verdict";
 
 const t = (identity: string | undefined, props: Record<string, { derived?: boolean; description?: string }>) => ({
   identity,
@@ -83,6 +85,21 @@ describe("DecisionPanel 渲染冒烟（react-dom/server，无 DOM 环境）", ()
     expect(html).toContain("先确认①唯一键，这里才展开"); // 未确认前不渲染 PairCard 列表
     expect(html).not.toContain("认人字段");
     expect(html).not.toMatch(/disabled[^>]*>确认唯一键/); // 已有建议值，确认可点
+  });
+
+  it("裁决按钮用类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过", () => {
+    const html = strip(
+      renderToString(
+        <PairCard pair={{ class_a: "fund_account", class_b: "login_account", tendency: Verdict.NameSimilar, reason: "不是同一种东西" }} onDone={() => {}} />
+      )
+    );
+    expect(html).toContain(VERDICT_LABELS[Verdict.Same]);
+    expect(html).toContain(VERDICT_LABELS[Verdict.Overlap]);
+    expect(html).toContain(VERDICT_LABELS[Verdict.Stage]);
+    expect(html).toContain(VERDICT_LABELS[Verdict.NameSimilar]);
+    expect(html).toContain(VERDICT_LABELS[Verdict.Skip]);
+    expect(html).not.toContain("仅名称相似");
+    expect(html).not.toMatch(/>同一</);
   });
 
   it("唯一键未设置时确认按钮不可点", () => {

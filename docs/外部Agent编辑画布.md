@@ -75,7 +75,7 @@
 - 把 `generate`（内省 + 槽位 + `import_objects` 一次完成）暴露为 MCP 工具。
 - 在画布上做动作的 YAML / JSON 编辑器。对象卡白话表单只覆盖简单动作（见 Goal 1）；表单填不全的动作只展示摘要、只许删除，避免点「编辑」再保存把结构弄丢。告知（`inform`）本期表单不做。演示五条完整规矩是否加进表单，看过简单表单效果再定，不挡本期。
 - 第四个 LLM 槽位（NL → 动作）。生成动作的是外部 Agent 自己；`propose_action` 仍给确定性模板，不开新的 `generateObject` 槽。
-- 按 skill 裁剪 MCP 工具列表。`tools/list` 全量暴露九个工具（PR 2 起），分工由 skill 文档承担（§13）——skill 是提示不是沙箱：红线靠模型守；引擎真没有的是发布/裁决等关卡工具。
+- 按 skill 裁剪 MCP 工具列表。`tools/list` 全量暴露十个工具，分工由 skill 文档承担（§13）——skill 是提示不是沙箱：红线靠模型守；引擎真没有的是发布/裁决等关卡工具。
 - Agent 写摆位（`save_layout`）。
 - 新元数据表 `log_draft`、SSE/WebSocket、跨进程共享工作副本。
 - 改附录 B、给动作加 `write` 名单、引入 `$root`。
@@ -333,15 +333,15 @@ z.object({
 1. **`def` 来自三处：`propose_action` 的返回、`read_class space=draft` 返回的完整动作定义（读回-改-写回，见 §3）、或按动作骨架拼的等价形状。** `propose_action` 返回的 `{ name, action }` 里 `action` 就是 `actionSchema` 的一份实例（`adjudicate.ts` 的 `conversionAction` 与 `skeletons.ts` 的 `set_fields` 骨架同构造点出品），建议与落地之间没有第二套形状。draft 视图的 `read_class` 必须返回完整 `ActionDef`（`effect` / `inform` 原样），否则 Agent 改现有动作只能盲覆盖——published 视图维持今天的 `name/description/pre`（问数 Agent 不碰写侧）。类上已有转化关系时 `propose_action` 只给转化模板（`conversionAction`），否则给 `set_fields` 骨架（属性已从类定义接好）；带前置的业务动作（调拨、报废）要在此基础上补前置、调效应——业务动作骨架内嵌在 `ontos-action`（§13）。
 2. **`set_action` 是单条 upsert：同名覆盖、不同名新增。** 不做类级 merge、不整份替换 `actions` map。写错的动作用 `remove_action` 删掉重来，不靠 `delete_object` 再 `import_objects`（那条路拆关系，且 `replace_object` 对含动作的类锁定）。
 3. **校验是「Zod + 语义校验」两道闸，语义校验本期补三处缺口（PR 3 随 `set_action` 与对象卡动作区一起合入 `validate.ts`）。** `actionSchema` 校验的是**定义**（`pre` / `effect` / `inform`），不是写入请求。写入请求仍是 `{ action, object, identity, request? }`。附录 B：禁止 `$root`，动作上不写 `write` 名单，插入生编号走 `generate` 列表，认人必须写明。`actionSchema` 就是这份规则。`validateSemantics` 保证引用合法（前置与效应过滤的键必须是类属性、`$link` 可解析，效应指向的类必须存在，效应写的属性必须存在且非派生，`$request` 与 `inform` 指向的类/出站必须存在）。四处今天漏掉的形状由**独立函数 `validateActionShapes`**（仍在 `validate.ts`）补上，`applyDraft` / `mutateDraft` / `publish` 在 `validateSemantics` 之后调用它——`getPublished` / `rollbackTo` **不调**，历史已发布的坏配置加载放行（运行期 `action.ts` 兜底，见 §14 与 Risks）：①**效应 `link` 项**必须指向 `link_types` 里已存在的 `transition` 关系，且 `from` / `to` 都在动作宿主类上（与 `action.ts:211-216` 运行期口径一致——今天只有运行期拦，草稿期不拦）；②**转化成对**：每条 `transition` 关系必须被至少一条动作的效应 `link` 引用（防孤儿转化关系，见规则 4）；③**取值来源形状**：效应与 `inform` 的 `properties` 取值、`update.identity` / `delete.identity`、效应 `filter` 的取值一律过形状校验——`from` 只许 `identity` / `action` / `object` / `current` / `request` / `generated`；`{ property, from? }` 组合里 from 缺省即 `current`（与 `expr.ts` 的求值分支一致），给了 from 则只许 `current` / `request`；`generated` 只许出现在 `create` 效应且目标属性带 `generate` 列表；`current` 只许出现在 `update` 效应的 `properties` 与 `update` / `delete` 效应的 `filter` 取值（逐个体求值有 current 上下文），`identity` 字段与 `create` / `inform` 不可用（create 投影没有 current 上下文，运行期必炸）——与 `expr.ts` 的 `resolveValue` 分支一致，今天非法形状要运行期才炸。④**认人必须写明**（附录 B）：每条 `update` / `delete` 必须有 `identity` 或 `filter`（二选一，不许都缺）。表单路径保存时自动写 `identity: { from: identity }`；Agent 缺了 → `DraftReject`，不要等发布后执行才拒。前置（`pre`）的取值本期**不在** ③ 范围——前置求值失败只是业务失败（`stage: "pre"`），不写库。任一失败整步回退（`configStore.ts` 每步操作后都跑）。Zod 失败 → `-32602`（REST 422）；类不存在 → `DraftReject` → `-32000`。注意：这两道闸保证的是**能跑**（形状与指称合法），不管**该不该跑**——业务毒性（前置被掏空、效应多挂 `delete`）能过形状闸。人自己在对象卡上写的，人看着摘要决定发不发；Agent 写来的，同样靠对象卡摘要 + 发布条点名（§6）。
-4. **转化关系由裁决独占；转化动作的名字与内容不独占。** `create_link` 仍只收 `match`——Agent 无法用草稿 op 造出转化关系、冒充「阶段」定案；`stage` 裁决的 `mutateDraft` 生成的 `convert_to_*` 是转化动作的默认构造点，但动作本身可被同名覆盖/替代（与画布编辑同权，见规则 5；画布审查面让人看得见内容变化）。`set_action` 写出的动作若在效应里 `link` 一条关系，该关系必须已在 `link_types` 里（草稿期就拦，见规则 3①）。反过来（规则 3②）：`remove_action` 删掉一条转化关系的唯一引用动作会整步回退——孤儿转化关系（有关系、没有动作推进它）发布不出去。**逃生路径**：先 `set_action` 一条同样 `link` 该转化关系的替代动作，再 `remove_action` 删旧的——转化关系本身被 `linkRefs` 当引用保护（`refs.ts`），`delete_link` 删不掉。
+4. **转化关系由裁决独占；转化动作的名字与内容不独占。** `create_link` 仍只收 `match`——Agent 无法用草稿 op 造出转化关系、冒充「生命周期」定案；`stage` 裁决的 `mutateDraft` 生成的 `convert_to_*` 是转化动作的默认构造点，但动作本身可被同名覆盖/替代（与画布编辑同权，见规则 5；画布审查面让人看得见内容变化）。`set_action` 写出的动作若在效应里 `link` 一条关系，该关系必须已在 `link_types` 里（草稿期就拦，见规则 3①）。反过来（规则 3②）：`remove_action` 删掉一条转化关系的唯一引用动作会整步回退——孤儿转化关系（有关系、没有动作推进它）发布不出去。**逃生路径**：先 `set_action` 一条同样 `link` 该转化关系的替代动作，再 `remove_action` 删旧的——转化关系本身被 `linkRefs` 当引用保护（`refs.ts`），`delete_link` 删不掉。
 5. **覆盖既有动作与画布编辑同权。** 覆盖种子配置的动作（demo 里的 `convert` 验收入库）或裁决生成的转化动作都允许：草稿可放弃；人点发布才进已发布，`run_action` 只执行已发布快照上的动作。
 6. **`inform` 的出站必须已声明，而 `outlets` 没有写入 op。** 空白空间（`default` 与新建空间）的种子配置没有出站（`workspace.ts`；演示模板里的出站只在 `test` 空间），Agent 在那种空间写不出带 `inform` 的合法动作——去掉 `inform`，或由人在种子配置里声明出站。发现路径：`list_classes space=draft` 返回 `outlets` 名列表（§3）。
 
 `replace_object` 的锁定规则不变：含动作的类不能整份替换，动作的修正走 `set_action` / `remove_action`。
 
-`create_link` 仍然只收 `match`，不能写 `transition`。转化关系只由裁决的 `mutateDraft` 产生（`adjudicate.ts`）。Agent 无法用草稿 op 冒充「阶段」定案。
+`create_link` 仍然只收 `match`，不能写 `transition`。转化关系只由裁决的 `mutateDraft` 产生（`adjudicate.ts`）。Agent 无法用草稿 op 冒充「生命周期」定案。
 
-`add_property` 仍然没有 `derived` 字段。派生进工作副本的途径：`import_objects` / `replace_object` 的类体（剥掉 `actions` / `axioms`，`derived` 保留），或人在画布上裁决「阶段」。不为此再开 op。
+`add_property` 仍然没有 `derived` 字段。派生进工作副本的途径：`import_objects` / `replace_object` 的类体（剥掉 `actions` / `axioms`，`derived` 保留），或人在画布上裁决「生命周期」。不为此再开 op。
 
 ---
 
@@ -527,7 +527,7 @@ PR 1 的 `configStore` 测试钉：放弃后 `getRev()` 变了且**不等于 0**
 `CanvasPage.tsx`：
 
 1. `lastRev` ref，**每次** `setOnt` 成功都写成这次 JSON 的 `rev`（本页写入的 `refresh` 与轮询共用这一句）。
-2. `localBusy` ref。下列本页写路径都必须包进同一个助手 `withLocalWrite`：`op()`、generate、publish、discard、rollback、**裁决 `PairCard onDone`**（今天是 `loadPairs().then(() => refresh())`，不经 `op()`，漏了就会把人刚裁的「同一」toast 成外部改动）。
+2. `localBusy` ref。下列本页写路径都必须包进同一个助手 `withLocalWrite`：`op()`、generate、publish、discard、rollback、**裁决 `PairCard onDone`**（今天是 `loadPairs().then(() => refresh())`，不经 `op()`，漏了就会把人刚裁的那对 toast 成外部改动）。
 
 ```ts
 async function withLocalWrite(fn: () => Promise<void>): Promise<boolean> {
@@ -773,7 +773,7 @@ Skill 写明：端点 `POST <host>/api/<空间名>/mcp`。画布 `workspaceClien
 
 ### 13. Skill：四个 skill，按「世界 × 读写」分工，发布权在人
 
-Skill 从一份 `skills/ontos/SKILL.md` 拆成四个目录，各自自包含（端点、信封、错误码、鉴权、语法、红线都写全），不建公共文件——Agent 往往只加载一个 skill，缺上下文就会瞎拼。四个 skill 的端点都写 `POST <host>/api/<空间名>/mcp`；演示场景一律用 `/api/test/…` 路径段（演示种子与 fixture 只在 `test`，default 空白起步，见 §10）。**`tools/list` 从 PR 2 起是全量九个工具**（PR 1 仍是七个），MCP 单一端点不按 skill 裁剪；分工与克制靠 skill 正文（Non-Goals）。
+Skill 从一份 `skills/ontos/SKILL.md` 拆成四个目录，各自自包含（端点、信封、错误码、鉴权、语法、红线都写全），不建公共文件——Agent 往往只加载一个 skill，缺上下文就会瞎拼。四个 skill 的端点都写 `POST <host>/api/<空间名>/mcp`；演示场景一律用 `/api/test/…` 路径段（演示种子与 fixture 只在 `test`，default 空白起步，见 §10）。**`tools/list` 是全量十个工具**，MCP 单一端点不按 skill 裁剪；分工与克制靠 skill 正文（Non-Goals）。
 
 | skill | 世界 | 方向 | 工具 | 方法论 | 关键红线 |
 |---|---|---|---|---|---|

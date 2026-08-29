@@ -1,4 +1,4 @@
-// M3 测试：归一化、交集率（真实读源计算）、裁决写草稿的四种结论。
+// M3 测试：归一化、交集率（真实读源计算）、裁决写草稿（类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过）。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
@@ -54,6 +54,12 @@ describe("语义校验（validateSemantics）", () => {
     expect(() => validateSemantics(bad3)).toThrow(/department 上不存在的字段 ghost/);
     // 合法形状放行：status 现状（含 $link 转化）+ in_warranty 布尔派生
     expect(() => validateSemantics(structuredClone(base))).not.toThrow();
+  });
+
+  it("class_conclusions 点到不存在的类则拒", () => {
+    const bad = seedConfig();
+    bad.class_conclusions = [{ kind: "homonym", classes: ["equipment", "ghost"] }];
+    expect(() => validateSemantics(bad)).toThrow(/不存在的类 ghost/);
   });
 });
 
@@ -128,7 +134,7 @@ describe("裁决写草稿", () => {
     return d;
   }
 
-  it("同一：B 的源并进 A，同名对上、特有列加成属性，B 撤掉", () => {
+  it("类等价：B 的源并进 A，同名对上、特有列加成属性，B 撤掉", () => {
     const d = twoClasses();
     applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Same);
     expect(d.object_types.po_b).toBeUndefined();
@@ -138,7 +144,7 @@ describe("裁决写草稿", () => {
     assertPublishable(d);
   });
 
-  it("同一：识别字段不同名时，B 源条目的 fields 键改写为 A 的识别属性", () => {
+  it("类等价：识别字段不同名时，B 源条目的 fields 键改写为 A 的识别属性", () => {
     const d = twoClasses();
     d.object_types.po_b.identity = "serial_no";
     d.object_types.po_b.properties = { serial_no: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } };
@@ -151,7 +157,7 @@ describe("裁决写草稿", () => {
     assertPublishable(d);
   });
 
-  it("阶段：收成一类 + 派生 status + transition 关系 + 转化动作", () => {
+  it("生命周期：收成一类 + 派生 status + transition 关系 + 转化动作", () => {
     const d = twoClasses();
     applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Stage, { from: "在途", to: "在役" });
     const A = d.object_types.po_a;
@@ -164,7 +170,7 @@ describe("裁决写草稿", () => {
     assertPublishable(d);
   });
 
-  it("阶段：B 有特有属性与映射列时也成立（属性并入、字段不悬空）", () => {
+  it("生命周期：B 有特有属性与映射列时也成立（属性并入、字段不悬空）", () => {
     const d = twoClasses();
     d.object_types.po_b.properties.extra_b2 = { type: "string" };
     d.object_types.po_b.sources!.sb.fields.extra_b2 = "name"; // B 特有列也映射着
@@ -183,6 +189,7 @@ describe("裁决写草稿", () => {
     expect(d.object_types.po_a.properties.name).toBeUndefined(); // 公共属性移上去
     expect(d.object_types.po_a.properties.extra_a).toBeDefined(); // 特有留下
     expect(parent.sources!.sa.fields).toEqual({ sn: "sn", name: "item_name" });
+    expect(d.class_conclusions).toEqual([{ kind: "overlap", classes: ["po_a", "po_b"], shared: "shared_po_a_po_b" }]);
     assertPublishable(d);
   });
 
@@ -214,11 +221,28 @@ describe("裁决写草稿", () => {
     assertPublishable(d);
   });
 
-  it("仅名称相似：配置不动", () => {
+  it("同形异义：两类留下，写入 class_conclusions；classes 按名字排序", () => {
+    const d = twoClasses();
+    applyVerdict(d, { class_a: "po_b", class_b: "po_a" }, Verdict.NameSimilar);
+    expect(d.object_types.po_a).toBeDefined();
+    expect(d.object_types.po_b).toBeDefined();
+    expect(d.class_conclusions).toEqual([{ kind: "homonym", classes: ["po_a", "po_b"] }]);
+    assertPublishable(d);
+  });
+
+  it("跳过：配置不动", () => {
     const d = twoClasses();
     const before = JSON.stringify(d);
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.NameSimilar);
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Skip);
     expect(JSON.stringify(d)).toBe(before);
+  });
+
+  it("并掉类时撤掉点到它的 class_conclusions", () => {
+    const d = twoClasses();
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.NameSimilar);
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Same);
+    expect(d.object_types.po_b).toBeUndefined();
+    expect(d.class_conclusions ?? []).toEqual([]);
   });
 });
 

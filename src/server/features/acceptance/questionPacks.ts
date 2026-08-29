@@ -38,9 +38,9 @@ export const QUESTION_PACKS: QuestionPack[] = [
   {
     key: "wave3",
     name: "第三波",
-    // 客货：客户档案 × 销售客户部分重叠、两张 order 仅名称相似之后
+    // 客货：客户档案 × 销售客户部分重叠、两张 order 同形异义之后
     questions: [
-      { question: "销售订单有多少条", expected: "60" }, // 来源标签认销售订单表；采购办公订单被裁成同一会变成 85
+      { question: "销售订单有多少条", expected: "60" }, // 来源标签认销售订单表；采购办公订单被裁成类等价会变成 85
       { question: "仓库里有多少种 sku", expected: "30" }, // 库存表，30 种
       { question: "应收发票有多少张", expected: "40" }, // 发票表，40 行
       { question: "销售系统客户表里的客户有多少", expected: "40" }, // 销售客户那一类，不是上位对象（并集 50）

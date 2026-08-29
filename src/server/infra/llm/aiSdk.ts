@@ -15,7 +15,7 @@ import type { QueryRequest } from "../../schema/request";
 import { queryRequestSchema } from "../../schema/request";
 import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../../schema/config";
 import type { TableInfo } from "../../infra/driver";
-import { TENDENCIES, VERDICT_LABELS, type PairAdvice, type Tendency } from "../../schema/verdict";
+import { TENDENCIES, VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { IDENTITY_COL_RULE } from "./identityHint";
 import type { LlmSlot } from "./slot";
 
@@ -163,7 +163,7 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           ...DECODING,
           prompt: `你是本体平台的整合顾问。下面是已上画布、有来源的对象（名字、来源连接集合、字段名）。${shapeOf(pairsSchema)}
-找出可能描述同一种或同一批现实事物的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。同一连接上的两张表也可以成对（候选人表和员工表）。这是召回，不是判定：表可以是多行对多列，字段可以完全对不上，仍可能是同一。
+找出可能描述同一种或同一批现实事物的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。同一连接上的两张表也可以成对（候选人表和员工表）。这是召回，不是判定：表可以是多行对多列，字段可以完全对不上，仍可能是${VERDICT_LABELS[Verdict.Same]}。
 对象：${JSON.stringify(classes)}`,
         }),
       (output) => pairsSchema.parse(output).pairs
@@ -190,12 +190,12 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
 倾向枚举：${labels}。class_a / class_b 必须用下面给的两个类名。
 ${base ? `第一版建议（只看字段和名字时给的）：「${VERDICT_LABELS[base.tendency]}」——${base.reason}
 现在的任务是看过硬证据后决定「维持」还是「改口」：以第一版为锚，不要从头重判，同一对、同一份计数，答案必须唯一。` : "这一对没有第一版建议（清单之外）。按下面的判定顺序给倾向与一句白话依据，不要自由发挥：同一对、同一份计数，答案必须唯一。"}
-按三问给倾向。第一问同一种事物：人定案；命中大于零是硬线索（对得上号的个体是同一个体），不许给仅名称相似。命中为零不能否定同一。第二问同一批个体：只看交集率。第三问不同时期：状态、日期只是线索。
-硬约束：命中大于零不许给仅名称相似；命中为零不许给部分重叠。表是多行还是多列、字段是否同名，不能当否决。
+按三问给倾向。第一问同一种事物：人定案；命中大于零是硬线索（对得上号的个体是同一个体），不许给${VERDICT_LABELS[Verdict.NameSimilar]}。命中为零不能否定${VERDICT_LABELS[Verdict.Same]}。第二问同一批个体：只看交集率。第三问不同时期：状态、日期只是线索。
+硬约束：命中大于零不许给${VERDICT_LABELS[Verdict.NameSimilar]}；命中为零不许给${VERDICT_LABELS[Verdict.Overlap]}。表是多行还是多列、字段是否同名，不能当否决。
 判定顺序：
-1. 有一侧取不出取值：第二问沉默，证据不足以改口${base ? "——第一版若是部分重叠则改口同一（没有交集）" : "——倾向同一，不能定仅名称相似"}。依据写清一侧还没行。
-2. 两边都有取值、命中为零：现在不是同一批；不能定部分重叠；不能据此否定同一。第一版是仅名称相似可维持，否则倾向同一。
-3. 命中大于零、接近全交：接近全交本身只答「现在是同一批」。有状态字段、且第一版倾向阶段 → 维持阶段（第三问为「是」）；否则 → 同一。介于中间、有状态或日期 → 阶段；介于中间否则 → 部分重叠。依据必须带比率与对得上号的条数。
+1. 有一侧取不出取值：第二问沉默，证据不足以改口${base ? `——第一版若是${VERDICT_LABELS[Verdict.Overlap]}则改口${VERDICT_LABELS[Verdict.Same]}（没有交集）` : `——倾向${VERDICT_LABELS[Verdict.Same]}，不能定${VERDICT_LABELS[Verdict.NameSimilar]}`}。依据写清一侧还没行。
+2. 两边都有取值、命中为零：现在不是同一批；不能定${VERDICT_LABELS[Verdict.Overlap]}；不能据此否定${VERDICT_LABELS[Verdict.Same]}。第一版是${VERDICT_LABELS[Verdict.NameSimilar]}可维持，否则倾向${VERDICT_LABELS[Verdict.Same]}。
+3. 命中大于零、接近全交：接近全交本身只答「现在是同一批」。有状态字段、且第一版倾向${VERDICT_LABELS[Verdict.Stage]} → 维持${VERDICT_LABELS[Verdict.Stage]}（第三问为「是」）；否则 → ${VERDICT_LABELS[Verdict.Same]}。介于中间、有状态或日期 → ${VERDICT_LABELS[Verdict.Stage]}；介于中间否则 → ${VERDICT_LABELS[Verdict.Overlap]}。依据必须带比率与对得上号的条数。
 4. 依据写一句人话，不要列编号。
 对象：${JSON.stringify({ class_a: input.class_a, class_b: input.class_b, overlap: input.overlap })}`,
         }),

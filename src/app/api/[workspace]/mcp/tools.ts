@@ -134,7 +134,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "read_class",
-    description: "读一个类的字段、关系、动作。缺省已发布（不含来源表）。改画布请传 space: \"draft\"，会带上来源对照、能不能整份替换（replaceable）和完整动作定义（可读回-改-写回）。入参：{ name, space? }。",
+    description: "读一个类的字段、关系、动作，以及该类参与的类与类结论（部分重叠由来、同形异义）。缺省已发布（不含来源表）。改画布请传 space: \"draft\"，会带上来源对照、能不能整份替换（replaceable）和完整动作定义（可读回-改-写回）。入参：{ name, space? }。",
     inputSchema: json(z.object({ name: z.string(), space: spaceField })),
     space: true,
     handler: async (ctx, args) => {

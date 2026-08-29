@@ -1,6 +1,7 @@
-// 定案应用 —— 把裁决结论变成配置变换（《ontos-article.md》§3.2 五种结论的处理）。
-// 同一：合并为一个对象、挂多源。阶段：收成一类 + 派生阶段 + 转化关系 + 转化动作。
-// 部分重叠：同名公共属性立公共对象（移上去，识别字段复制不移动）；没有同名则公共对象只带唯一键。仅名称相似/跳过：不动配置。
+// 定案应用 —— 把对齐裁决写成配置（《ontos-article.md》§3.2）。
+// 类等价：合并为一个对象、挂多源。生命周期：收成一类 + 派生阶段 + 转化关系 + 转化动作。
+// 部分重叠：同名公共属性立公共对象（移上去，识别字段复制不移动）；没有同名则公共对象只带唯一键；写入 class_conclusions。
+// 同形异义：两类都留下，写入 class_conclusions。跳过：不是类与类关系，配置不动。
 // 骨架（conversionAction / set_fields）的唯一构造点在 draft/skeletons.ts，这里只消费。
 
 import type { ActionDef, OntologyConfig, WhenRule } from "../../schema/config";
@@ -19,7 +20,7 @@ export type { Verdict } from "../../schema/verdict";
 
 /** B 的属性并入 A（同名跳过、特有带过来），B 的源映射照搬，B 挂着的关系撤掉。
  *  识别属性不同名时（A.sn × B.serial_no）：B 的识别属性不另立，B 源条目的 fields 键改写为 A 的识别属性——
- *  两识别字段同义正是「同一/阶段」的裁决前提，不改写则 fields 缺 A.identity 的映射，过不了发布校验。 */
+ *  两识别字段同义正是「类等价/生命周期」的裁决前提，不改写则 fields 缺 A.identity 的映射，过不了发布校验。 */
 function mergeInto(d: OntologyConfig, a: string, b: string): void {
   const A = d.object_types[a];
   const B = d.object_types[b];
@@ -131,15 +132,18 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
     case Verdict.Same:
       mergeInto(d, a, b);
       break;
-    case Verdict.NameSimilar:
     case Verdict.Skip:
-      break; // 各自独立，互不映射——配置不动
+      break; // 不是类与类关系，配置不动
+    case Verdict.NameSimilar:
+      // 两类都留下；结论写进 class_conclusions，问数/动作/画布才读得到
+      (d.class_conclusions ??= []).push({ kind: "homonym", classes: [a, b].sort() });
+      break;
     case Verdict.Stage: {
       const from = stageNames?.from ?? `${a}_前`;
       const to = stageNames?.to ?? `${b}_后`;
       const A = d.object_types[a];
       if (!A || !d.object_types[b]) throw new Error(MSG.classPairNotFound(a, b));
-      // 先并属性与源（与「同一」同款），再立阶段结构
+      // 先并属性与源（与类等价同款），再立生命周期结构
       const srcKeysBefore = new Set(Object.keys(A.sources ?? {}));
       mergeInto(d, a, b);
       const newKeys = Object.keys(A.sources ?? {}).filter((k) => !srcKeysBefore.has(k));
@@ -212,6 +216,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
         properties: sharedProps,
         sources: sharedSources,
       };
+      (d.class_conclusions ??= []).push({ kind: "overlap", classes: [a, b].sort(), shared });
       break;
     }
   }

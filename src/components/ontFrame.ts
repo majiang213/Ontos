@@ -2,6 +2,7 @@
 // revWatcher 管「什么时候有新帧」，这里管「帧来了视图模型怎么变」。第二个消费方（非画布页）出现时不再各写一份。
 
 import type { BorderPin } from "../server/schema/ops";
+import type { ClassConclusion } from "../server/schema/config";
 
 /** 本体视图响应：画布读工作副本（已发布 + 未发布改动）。rev 是 Store.rev，轮询监视器按它判变没变（ETag 同值）。 */
 export interface OntologyResp {
@@ -16,6 +17,7 @@ export interface OntologyResp {
   action_changes: { added: string[]; overwritten: string[]; removed: string[] }; // 类名.动作名
   object_types: Record<string, any>;
   link_types: Record<string, any>;
+  class_conclusions?: ClassConclusion[];
 }
 
 export interface MonitorFrame {
