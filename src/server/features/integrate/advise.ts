@@ -4,10 +4,10 @@
 import type { EngineEnv } from "../env";
 import { getDraft } from "../ontology/current";
 import { mustCls } from "../query/individual";
-import { connectionsOf, hasSources, pairKey } from "./eligibility";
-import { listCandidates } from "./candidates";
+import { hasSources, pairKey } from "./eligibility";
+import { classShots, listCandidates } from "./candidates";
 import { EngineReject, MSG, toResult, type Result } from "../../errors";
-import { VERDICT_LABELS, type PairAdvice } from "../../schema/verdict";
+import { cleanAdvice, VERDICT_LABELS, type PairAdvice } from "../../schema/verdict";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 
 export interface OverlapEvidence {
@@ -36,13 +36,19 @@ export async function proposePair(
       throw new EngineReject(MSG.pairNoIdentity);
     }
     // 第一版建议（清单快照里的同一裁判）取来当锚：第二版维持它或由证据改口，不另起炉灶。
-    // 清单拉不动不拦第二版——锚只是上下文，不是资格；清单外/已裁的对没有 base，槽位按无锚处理。
+    // 清单拉不动不拦第二版——锚只是上下文，不是资格；清单外/已裁的对没有 base，实现按无锚处理。
     const list = await listCandidates(env, workspace);
     const key = pairKey(class_a, class_b);
     const base = list.code === 200 ? list.value.find((p) => pairKey(p.class_a, p.class_b) === key) : undefined;
+    const shots = classShots(d); // 建议快照唯一构造处（与清单同源，含枚举值域）
+    const shotOf = (name: string) => {
+      const s = shots.find((x) => x.name === name);
+      if (!s) throw new EngineReject(MSG.pairNoSources); // 两次读取之间类失源（并发编辑）：按业务拒绝收，不炸类型错误
+      return s;
+    };
     const advice = await env.llm.proposePair({
-      class_a: { name: a.name, sources: [...connectionsOf(a.def)].sort(), fields: Object.keys(a.def.properties) },
-      class_b: { name: b.name, sources: [...connectionsOf(b.def)].sort(), fields: Object.keys(b.def.properties) },
+      class_a: shotOf(a.name),
+      class_b: shotOf(b.name),
       overlap,
       ...(base ? { base: { tendency: base.tendency, reason: base.reason } } : {}),
     });
@@ -50,8 +56,8 @@ export async function proposePair(
   }, (v) => MSG.resultPairAdvice(VERDICT_LABELS[v.tendency]));
 }
 
-/** 槽位可能对调两端或写错类名：倾向留下，名字掰回请求里的这一对。 */
+/** 调用口可能对调两端或写错类名、写 stage 空壳：倾向留下，名字掰回请求里的这一对，形状清一遍（cleanAdvice）。 */
 function alignAdvice(p: PairAdvice, a: string, b: string): PairAdvice {
-  if (p.class_a === a && p.class_b === b) return p;
-  return { ...p, class_a: a, class_b: b };
+  const aligned = p.class_a === a && p.class_b === b ? p : { ...p, class_a: a, class_b: b };
+  return cleanAdvice(aligned);
 }

@@ -55,6 +55,27 @@ export function walkFilter(config: OntologyConfig | null, clsName: string, filte
   }
 }
 
+/** 过滤树里的关系名改写（改类名/改标识时引用跟随，唯一出处）：$link 的条目键换名，子过滤递归。
+ *  只动 $link 的键，不碰属性键与 $request 内容。renameObject 与 editStages 共用这一条。 */
+export function renameFilterLinks(filter: Filter | undefined, map: Record<string, string>): void {
+  if (!filter) return;
+  for (const [k, v] of Object.entries(filter)) {
+    if (!v || typeof v !== "object") continue;
+    if (k === "$link") {
+      const bag = v as Record<string, unknown>;
+      for (const [lk, lv] of Object.entries(bag)) {
+        if (map[lk]) {
+          bag[map[lk]] = lv;
+          delete bag[lk];
+        }
+        if (lv && typeof lv === "object") renameFilterLinks(lv as Filter, map);
+      }
+    } else {
+      renameFilterLinks(v as Filter, map);
+    }
+  }
+}
+
 /** 过滤值是运算符块（{ eq, gt, ... }），不是裸的 { property, from }。判定的唯一出处——
  *  静态核对（本文件 checkOperand）与运行期/下推（features/query/filterOp 等）都从这里取。 */
 export function isOpObject(v: unknown): v is Record<string, unknown> {

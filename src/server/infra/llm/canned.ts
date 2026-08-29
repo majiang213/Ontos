@@ -5,13 +5,12 @@
 import type { QueryRequest } from "../../schema/request";
 import { queryRequestSchema } from "../../schema/request";
 import type { ObjectType, OntologyConfig } from "../../schema/config";
+import { isSharedObjectName } from "../../schema/config";
 import type { TableInfo } from "../../infra/driver";
 import { TEST_WORKSPACE } from "../../infra/workspace";
 import { VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { EngineReject, MSG } from "../../errors";
-import { IDENTITY_COL_RE } from "./identityHint";
-import { prefixedTableName, type LlmSlot } from "./slot";
-
+import { prefixedTableName, type ClassShot, type LlmSlot } from "./slot";
 /** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
  *  allowDate=false 给破格进属性的主键用（主键当识别字段时只分 number/string）。 */
 function columnPropType(rawType: string, allowDate: boolean): "string" | "number" | "date" {
@@ -43,33 +42,32 @@ export class CannedSlot implements LlmSlot {
     for (const { connection, table } of tables) {
       const properties: Record<string, ObjectType["properties"][string]> = {};
       const fields: Record<string, string> = {};
-      let identity: string | undefined;
       const pkCol = table.columns.find((c) => c.pk);
       for (const col of table.columns) {
-        if (col.pk) continue; // 表主键只定位行，不进属性——除非它就是识别字段（见下）
+        if (col.pk) continue; // 表主键只定位行，不进属性——除非它就是业务编号主键（见下）
         properties[col.name] = { type: columnPropType(col.type, true), ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
         fields[col.name] = col.name;
-        if (!identity && IDENTITY_COL_RE.test(col.name)) identity = col.name; // 识别字段先猜编号列（规则单源 identityHint）
       }
-      // 编号列猜不到、主键本身就是业务编号（如 person_no）时：主键当识别字段，破格进属性
-      if (!identity && pkCol) {
+      // 罐头没有语义可读，不按列名形状猜识别字段（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
+      // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）才当识别字段，破格进属性；
+      // 整数自增主键是表内行号，跨源对不上号，宁缺勿错——identity 留空，人到待确认面板①定。
+      let identity: string | undefined;
+      if (pkCol && columnPropType(pkCol.type, false) !== "number") {
         identity = pkCol.name;
-        properties[pkCol.name] = { type: columnPropType(pkCol.type, false), ...(pkCol.comment ? { description: pkCol.comment } : {}) };
-        fields[pkCol.name] = pkCol.name;
+        properties[identity] = { type: columnPropType(pkCol.type, false), ...(pkCol.comment ? { description: pkCol.comment } : {}) };
+        fields[identity] = identity;
       }
       // 撞名带连接前缀（本次已产出或草稿已占用都算撞）：跨连接同名表是裁决主场景，不静默覆盖
       // 前缀规则与落地前硬闸同一出处（slot.prefixedTableName）；仍撞的 _2 升级由硬闸（disambiguateClassNames）兜底
       const clsName = out[table.name] || taken.has(table.name) ? prefixedTableName(connection, table.name) : table.name;
       taken.add(clsName);
-      // 还是猜不到识别字段：不挂 sources 进 manual 桶（有源无 identity 过不了发布闸），人到编辑卡拉列设置
-      out[clsName] = identity
-        ? {
-            kind: "thing",
-            identity,
-            properties,
-            sources: { [connection]: { connection, table: table.name, ...(pkCol ? { pk: pkCol.name } : {}), fields } }, // 主键读不出就不写，不编造
-          }
-        : { kind: "thing", properties };
+      // 来源照挂：没猜到 identity 不丢映射，键在待确认面板①定（草稿允许有源无 identity，发布闸 cfgNoRowKey 拦）
+      out[clsName] = {
+        kind: "thing",
+        ...(identity ? { identity } : {}),
+        properties,
+        sources: { [connection]: { connection, table: table.name, ...(pkCol ? { pk: pkCol.name } : {}), fields } }, // 主键读不出就不写，不编造
+      };
     }
     return out;
   }
@@ -104,10 +102,30 @@ export class CannedSlot implements LlmSlot {
   }
 }
 
-type ClassShot = { name: string; sources: string[]; fields: string[] };
+/** 状态类列名：只当召回线索（生命周期 vs 部分重叠的倾向偏置），不是生命周期判据——列名形状证明不了时期。 */
+const STAGE_FIELD = /status|state|阶段|状态/;
+
+function ownStage(c: ClassShot): boolean {
+  return c.fields.some((f) => STAGE_FIELD.test(f));
+}
 
 function hasStageField(a: ClassShot, b: ClassShot): boolean {
-  return [...a.fields, ...b.fields].some((f) => /status|state|阶段|状态/.test(f));
+  return ownStage(a) || ownStage(b);
+}
+
+/** 留下谁：不留公共对象（判定与 features/sharedName 同一份，住 schema）；字段更多的优先；否则留下先写的那个。 */
+function pickKeep(a: ClassShot, b: ClassShot): string {
+  const aShared = isSharedObjectName(a.name);
+  const bShared = isSharedObjectName(b.name);
+  if (aShared && !bShared) return b.name;
+  if (bShared && !aShared) return a.name;
+  return a.fields.length < b.fields.length ? b.name : a.name;
+}
+
+/** 人只点关系类型；留下谁由建议给出。时期名、谁早谁晚罐头不产（没有语义可读，也不看值域证据）——
+ *  省略 stage，由 executionPlan 的中性占位词兜底，画布上看得见，人事后可改标识。 */
+function withKeep(p: PairAdvice, a: ClassShot, b: ClassShot): PairAdvice {
+  return { ...p, keep: pickKeep(a, b) };
 }
 
 /** 只看名字和字段的倾向：列表建议与看过交集率之后的修订共用。同一库两张表也可以成对；字段名字都不像才不成对。 */
@@ -117,16 +135,16 @@ function schemaAdvice(a: ClassShot, b: ClassShot): PairAdvice | null {
   const nameLike = a.name === b.name || (a.name.length > 2 && b.name.includes(a.name)) || (b.name.length > 2 && a.name.includes(b.name));
   if (ratio < 0.4 && !nameLike) return null; // 字段对不上、名字也不像，不进候选
   if (ratio < 0.4 && nameLike) {
-    return { class_a: a.name, class_b: b.name, tendency: Verdict.NameSimilar, reason: `名字相近（${a.name} / ${b.name}），字段对不上` };
+    return withKeep({ class_a: a.name, class_b: b.name, tendency: Verdict.NameSimilar, reason: `名字相近（${a.name} / ${b.name}），字段对不上` }, a, b);
   }
   const hasStage = hasStageField(a, b);
   const tendency: Tendency = ratio > 0.8 ? Verdict.Same : hasStage ? Verdict.Stage : Verdict.Overlap;
-  return {
+  return withKeep({
     class_a: a.name,
     class_b: b.name,
     tendency,
     reason: `字段重合 ${shared.length}/${Math.max(a.fields.length, b.fields.length)}（${shared.join("、")}）${hasStage ? "；含状态字段" : ""}`,
-  };
+  }, a, b);
 }
 
 function pct(rate: number): string {
@@ -147,30 +165,30 @@ function reviseWithOverlap(
     // 部分重叠要有交集、生命周期要同一个体两头都在，都立不住，改口类等价（命中为零不能否定类等价）。
     const demote = base.tendency === Verdict.Overlap || (!empty && base.tendency === Verdict.Stage);
     const tendency = demote ? Verdict.Same : base.tendency;
-    return {
+    return withKeep({
       class_a: a.name,
       class_b: b.name,
       tendency,
       reason: empty
         ? `有一侧还没有行（${overlap.count_a} / ${overlap.count_b}），交集率说明不了是不是同一批，也不能据此否定${VERDICT_LABELS[Verdict.Same]}。${base.reason}`
         : `交集率 ${pct(overlap.rate)}（${counts}），现在不是同一批个体；命中为零，数据不支持${base.tendency === Verdict.Stage ? `${VERDICT_LABELS[Verdict.Stage]}（${VERDICT_LABELS[Verdict.Stage]}要求同一个体两头都在）` : VERDICT_LABELS[Verdict.Overlap]}，也不能据此否定${VERDICT_LABELS[Verdict.Same]}。${base.reason}`,
-    };
+    }, a, b);
   }
   // 接近全交：命中大于零才谈得上（这一支已保证）。有状态字段且第一版倾向生命周期 → 维持生命周期（第三问答案为「是」）；
   // 否则全交、只看这一批 → 类等价。比率不再单独压过第三问——与 §3.2 合成表、ADR 0004 一致。
   if (overlap.rate >= 0.8) {
     const stage = hasStageField(a, b) && base.tendency === Verdict.Stage;
-    return {
+    return withKeep({
       class_a: a.name,
       class_b: b.name,
       tendency: stage ? Verdict.Stage : Verdict.Same,
       reason: stage
         ? `交集率 ${pct(overlap.rate)}（${counts}），接近全交、有状态字段、第一版已倾向${VERDICT_LABELS[Verdict.Stage]}，维持${VERDICT_LABELS[Verdict.Stage]}——同一批个体的不同时期。`
         : `交集率 ${pct(overlap.rate)}（${counts}），现在多半是同一批个体，倾向${VERDICT_LABELS[Verdict.Same]}。`,
-    };
+    }, a, b);
   }
   const tendency = hasStageField(a, b) ? Verdict.Stage : Verdict.Overlap;
-  return {
+  return withKeep({
     class_a: a.name,
     class_b: b.name,
     tendency,
@@ -178,7 +196,7 @@ function reviseWithOverlap(
       tendency === Verdict.Stage
         ? `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是全交，又有状态字段，倾向${VERDICT_LABELS[Verdict.Stage]}。`
         : `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是同一批，倾向部分重叠。`,
-  };
+  }, a, b);
 }
 
 /* ---------- 演示问数剧本（test 空间离线回退的编译脚本） ----------

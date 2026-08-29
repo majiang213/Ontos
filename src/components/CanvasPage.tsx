@@ -16,11 +16,13 @@ import VersionsCard from "./cards/VersionsCard";
 import SchemaDrawer from "./cards/SchemaDrawer";
 import { effectSummary, formCompatible } from "./forms/actionView";
 import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
+import { sourceLabel } from "./sourceLabel";
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/features/ontology/lineage";
 import { definedPinEnds } from "../server/features/ontology/canvasState";
 import { isUiStateOp } from "../server/schema/ops";
 import type { PairAdvice } from "../server/schema/verdict";
+import { classStages, stageHint, stageSourceKeys } from "../server/features/ontology/stages";
 import type { ObjectType } from "../server/schema/config";
 
 interface IntrospectResp {
@@ -149,6 +151,10 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
     async (body: Record<string, unknown>) =>
       withLocalWrite(async () => {
         await apiPost("/api/edit_draft", body);
+        if (body.op === "update_object" && typeof body.new_name === "string") {
+          const open = cardRef.current;
+          if (open?.kind === "object" && open.name === body.name) setCard({ kind: "object", name: body.new_name });
+        }
         await refresh();
         // 界面状态 op（摆位/弯折）跟着鼠标走且不改类集，不拉计数；其余编辑都可能改变候选对，补拉
         if (!isUiStateOp(String(body.op))) await reloadPairs();
@@ -221,8 +227,25 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         await apiDel("/api/publish");
         return "已放弃改动，回到已发布快照";
       },
-      { confirm: "放弃会连别人刚写的动作和你改的字段一起没。确定放弃？", closeCard: true }
+      { closeCard: true }
     );
+
+  /** 放弃的两段式确认：第一段按钮进入警告态，4 秒内再点才执行。不依赖浏览器原生弹窗（会被「禁止再显示对话框」或自动化环境吞掉）。 */
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  useEffect(() => {
+    if (!confirmDiscard) return;
+    const t = setTimeout(() => setConfirmDiscard(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmDiscard]);
+
+  const discardWithConfirm = () => {
+    if (!confirmDiscard) {
+      setConfirmDiscard(true);
+      return;
+    }
+    setConfirmDiscard(false);
+    discard();
+  };
 
   /** 回到某版：内容覆盖到当前画布（未发布），版本列表在 VersionsCard 自取。 */
   const rollback = (version: number) =>
@@ -270,25 +293,35 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
 
   const objects: CanvasObject[] = useMemo(
     () =>
-      Object.entries(ont?.object_types ?? {}).map(([name, t]) => ({
-        name,
-        description: t.description,
-        kind: t.kind,
-        identity: t.identity,
-        properties: Object.entries(t.properties).map(([p, d]: [string, any]) => ({
-          name: p,
-          type: d.type,
-          derived: Boolean(d.derived),
-          values: d.values,
-          description: d.description,
-        })),
-        sources: Object.entries(t.sources ?? {}).map(([srcName, s]: [string, any]) => ({
-          key: srcName,
-          label: `${s.connection}.${s.table}`,
-        })),
-        actions: Object.keys(t.actions ?? {}),
-        state: ont?.states?.[name],
-      })),
+      Object.entries(ont?.object_types ?? {}).map(([name, t]) => {
+        const st = ont ? classStages(ont, name) : null;
+        const srcLabel = (key: string) => sourceLabel(t.sources, key);
+        return {
+          name,
+          description: t.description,
+          kind: t.kind,
+          identity: t.identity,
+          properties: Object.entries(t.properties).map(([p, d]: [string, any]) => ({
+            name: p,
+            type: d.type,
+            derived: Boolean(d.derived),
+            description: d.description,
+          })),
+          sources: Object.entries(t.sources ?? {}).map(([srcName, s]: [string, any]) => ({
+            key: srcName,
+            label: sourceLabel(t.sources, srcName),
+          })),
+          actions: Object.keys(t.actions ?? {}),
+          state: ont?.states?.[name],
+          stages: st
+            ? {
+                property: st.property,
+                items: st.items.map((it) => ({ value: it.value, hint: stageHint(it.when, srcLabel) })),
+                sourceKeys: stageSourceKeys(st.items),
+              }
+            : undefined,
+        };
+      }),
     [ont]
   );
   const links: CanvasLink[] = useMemo(
@@ -375,7 +408,14 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
                 <button className="btn-cta" title={publishTitle(ont)} onClick={publish} disabled={publishing}>
                   发布 v{(ont?.version ?? 1) + 1}
                 </button>
-                <button className="btn" onClick={discard} disabled={publishing}>放弃</button>
+                <button
+                  className={`btn${confirmDiscard ? " is-danger" : ""}`}
+                  onClick={discardWithConfirm}
+                  disabled={publishing}
+                  title={confirmDiscard ? "再点一次执行放弃" : "回到已发布快照（未发布的改动全部丢弃）"}
+                >
+                  {confirmDiscard ? "确认放弃？" : "放弃"}
+                </button>
               </>
             ) : (
               <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>

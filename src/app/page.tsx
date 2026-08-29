@@ -16,7 +16,6 @@ export default function Home() {
   const brand: ReactNode = (
     <>
       <span className="nav-brand">Ontos</span>
-      <span className="nav-sha" title="当前代码版本（git 短 hash）">{process.env.NEXT_PUBLIC_GIT_SHA}</span>
       <WorkspaceSwitcher workspace={workspace} onChange={switchWorkspace} />
     </>
   );

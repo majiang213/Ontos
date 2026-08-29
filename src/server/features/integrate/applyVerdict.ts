@@ -13,7 +13,7 @@ import { conversionAction, conversionActionName, removeFieldsUpdateKeys } from "
 import { sharedObjectName } from "../ontology/sharedName";
 import type { EngineEnv } from "../env";
 import { commonProperties } from "./eligibility";
-import { Verdict } from "../../schema/verdict";
+import { Verdict, executionPlan, stageValues } from "../../schema/verdict";
 import { MSG } from "../../errors";
 
 export type { Verdict } from "../../schema/verdict";
@@ -139,8 +139,10 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       (d.class_conclusions ??= []).push({ kind: "homonym", classes: [a, b].sort() });
       break;
     case Verdict.Stage: {
-      const from = stageNames?.from ?? `${a}_前`;
-      const to = stageNames?.to ?? `${b}_后`;
+      // 时期标识的兜底单源在 executionPlan（schema/verdict）：缺时期名时用中性占位 early/late，不在这里再造一套
+      const plan = executionPlan(a, b, Verdict.Stage, {});
+      const from = stageNames?.from ?? plan.stage!.from;
+      const to = stageNames?.to ?? plan.stage!.to;
       const A = d.object_types[a];
       if (!A || !d.object_types[b]) throw new Error(MSG.classPairNotFound(a, b));
       // 先并属性与源（与类等价同款），再立生命周期结构
@@ -156,7 +158,7 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       if (A.actions?.[conversionActionName(to)]) throw new Error(MSG.stageActionNameClash(conversionActionName(to)));
       A.properties.status = {
         type: "enum",
-        values: [from, to],
+        values: stageValues(from, to), // 占位词带中文名（早期/晚期），建议词裸 key（中文名由改标识补）
         description: "阶段",
         derived: [
           { when: { [srcA]: true, [srcB]: false }, value: from },

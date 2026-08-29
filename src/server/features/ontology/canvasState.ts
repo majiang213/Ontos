@@ -34,6 +34,14 @@ export function mergeEdgePins(state: DraftState, name: string, pins: PinEnds): v
   state.edgePins[name] = { ...state.edgePins[name], ...pins };
 }
 
+/** 类改名：摆位以类名为键——不跟就成孤儿。 */
+export function renameLayoutKey(state: DraftState, oldName: string, newName: string): void {
+  if (state.layout[oldName]) {
+    state.layout[newName] = state.layout[oldName];
+    delete state.layout[oldName];
+  }
+}
+
 /** 关系改名：钉点与弯折以关系名为键——不跟就成孤儿，改名即丢。 */
 export function renameEdgeState(state: DraftState, oldName: string, newName: string): void {
   if (state.edgePins[oldName]) {

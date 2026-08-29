@@ -1,4 +1,5 @@
-// 撤类 —— 「撤一个类，连同挂着它的关系和类与类结论」：delete_object 与裁决的 mergeInto 共用这一个函数。
+// 撤类 —— 类名是配置里的键：撤掉连同挂着它的关系和类与类结论（delete_object 与裁决的 mergeInto 共用）。
+// 改类名的级联在 ./renameObject（厚不变量一文件一个）。
 
 import type { OntologyConfig } from "../../../schema/config";
 import { DraftReject, MSG } from "../../../errors";

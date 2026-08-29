@@ -13,7 +13,25 @@ export const draftObjectSchema = objectTypeSchema.omit({ actions: true, axioms: 
 
 const createObjectOp = z.object({ op: z.literal("create_object"), name: z.string(), description: z.string().optional(), kind: z.enum(["thing", "event"]) });
 const deleteObjectOp = z.object({ op: z.literal("delete_object"), name: z.string() });
-const updateObjectOp = z.object({ op: z.literal("update_object"), name: z.string(), description: z.string().optional() });
+const updateObjectOp = z.object({
+  op: z.literal("update_object"),
+  name: z.string(),
+  new_name: z.string().optional(),
+  description: z.string().optional(),
+});
+// 一条阶段的线格式：标识 + 条件（+ 中文名）。读侧（features/ontology/stages 的 StageItem）复用这个声明，不写第二份。
+const stageEditItem = z.object({
+  value: z.string(),
+  when: z.record(z.string(), z.unknown()),
+  label: z.string().optional(), // 时期中文名（只给人看）；整份替换时缺了就视为清掉该中文名
+});
+export type StageEditItem = z.infer<typeof stageEditItem>;
+
+const editStagesOp = z.object({
+  op: z.literal("edit_stages"),
+  object: z.string(),
+  items: z.array(stageEditItem).min(1),
+});
 const addPropertyOp = z.object({
   op: z.literal("add_property"),
   object: z.string(),
@@ -85,6 +103,7 @@ const CONTENT_OP_SCHEMAS = [
   createObjectOp,
   deleteObjectOp,
   updateObjectOp,
+  editStagesOp,
   addPropertyOp,
   removePropertyOp,
   updatePropertyOp,
@@ -111,9 +130,12 @@ export function affectedNames(op: DraftOpInput): string[] {
   switch (op.op) {
     case "create_object":
     case "delete_object":
-    case "update_object":
     case "replace_object":
       return [op.name];
+    case "update_object":
+      return [op.new_name ?? op.name];
+    case "edit_stages":
+      return [op.object];
     case "update_link":
       return [op.new_name ?? op.name]; // 改名时给新名
     case "add_property":

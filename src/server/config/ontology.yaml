@@ -21,7 +21,10 @@ object_types:
       status:
         type: enum
         description: 阶段
-        values: [in_transit, in_service, scrapped]
+        values:                              # key 进配置与动作字面量；label 只给人看
+          - { value: in_transit, label: 在途 }
+          - { value: in_service, label: 在役 }
+          - { value: scrapped, label: 报废 }
         derived:                               # 不进 fields。从上到下第一条命中
           - when:
               device:

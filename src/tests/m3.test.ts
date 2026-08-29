@@ -280,7 +280,7 @@ describe("裁决流水线", () => {
     expect(dec.evidence?.count_hit).toBe(40);
     expect(dec.version).toBeNull();
     await s.publish();
-    expect((await meta.listDecisions("default"))[0].version).toBe(2);
+    expect((await meta.listDecisions("default"))[0].version).toBe(1); // default 首发布即 v1（注册不产生已发布版本）
   });
 
   it("decide：校验闸回退时不留幻影记录", async () => {
@@ -521,8 +521,8 @@ describe("裁决流水线", () => {
       llm: stubLlm(() => {
         calls++;
         return [
-          { class_a: "a", class_b: "b", tendency: Verdict.Same, reason: "1" },
-          { class_a: "b", class_b: "c", tendency: Verdict.Overlap, reason: "2" },
+          { class_a: "a", class_b: "b", tendency: Verdict.Same, reason: "1", keep: "a" },
+          { class_a: "b", class_b: "c", tendency: Verdict.Stage, reason: "2", keep: "c", stage: { earlier: "b", from: "in_transit", to: "in_service" } },
         ];
       }),
     };
@@ -539,6 +539,8 @@ describe("裁决流水线", () => {
     expect(ac?.pending).toBe(true);
     expect(ac?.reason).toContain("还该问");
     expect(ac?.reason).not.toBe("2");
+    expect(ac?.keep).toBe("c"); // 原 keep=c，并掉 b 之后还是 c
+    expect(ac?.stage?.earlier).toBe("a"); // 原 earlier=b，b 并进 a
   });
 
   it("疑似重复串：「阶段」之后 B–C 改问 A–C；不再问模型", async () => {

@@ -143,7 +143,7 @@ export default function DecisionPanel({
             {pairs.length === 0 && <div className="decide-empty">没有发现疑似重复的对象，可以直接发布。</div>}
             {pairs.length > 0 && (
               <>
-                {pairs.length > 1 && <div className="decide-kicker">还剩 {pairs.length} 对，先裁这一对</div>}
+                {pairs.length > 1 && <div className="decide-kicker">还剩 {pairs.length} 对</div>}
                 <PairCard key={`${pairs[0].class_a}|${pairs[0].class_b}`} pair={pairs[0]} onDone={onPairDone} />
               </>
             )}

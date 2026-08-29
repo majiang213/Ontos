@@ -1,6 +1,7 @@
 // 画布上的类与类结论投影：只画配置 class_conclusions 里还活着的行。不猜 shared_A_B。
 
 import type { ClassConclusion } from "../../server/schema/config";
+import { VERDICT_LABELS, Verdict } from "../../server/schema/verdict";
 import type { CanvasLink } from "./layout";
 
 export const SHARED_COLOR = "#9a94b8"; // = var(--shared)；SVG marker 不吃 CSS var
@@ -37,4 +38,16 @@ export function homonymPeerMap(rows: ClassConclusion[]): Map<string, string[]> {
     }
   }
   return m;
+}
+
+/** 节点头上的裁决结论徽章：这个对象被哪些结论点名——部分重叠的原类、公共对象（部分重叠立出的上位对象）、
+ *  生命周期（带自环转化，调用方以 stage 告知）、同形异义。类等价合并后不留痕，不标。 */
+export function verdictBadgesOf(rows: ClassConclusion[], name: string, opts?: { stage?: boolean }): string[] {
+  const mine = rows.filter((r) => r.classes.includes(name) || r.shared === name);
+  const badges: string[] = [];
+  if (mine.some((r) => r.kind === "overlap" && r.classes.includes(name))) badges.push(VERDICT_LABELS[Verdict.Overlap]);
+  if (mine.some((r) => r.kind === "overlap" && r.shared === name)) badges.push("公共对象");
+  if (opts?.stage) badges.push(VERDICT_LABELS[Verdict.Stage]);
+  if (mine.some((r) => r.kind === "homonym")) badges.push(VERDICT_LABELS[Verdict.NameSimilar]);
+  return badges;
 }

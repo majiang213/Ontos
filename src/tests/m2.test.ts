@@ -5,12 +5,66 @@ import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configSchema } from "../server/schema/config";
+import { enumValueKey, enumValueLabel } from "../server/schema/config";
 import { listClasses, readClass, search } from "../server/features/ontology/views";
 import { VERDICT_LABELS, Verdict } from "../server/schema/verdict";
 import { conclusionsAbout, liveConclusions } from "../server/features/ontology/classConclusions";
 import { CannedSlot } from "../server/infra/llm/canned";
+import { classStages, explainWhen, moveStageItem } from "../server/features/ontology/stages";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
+
+const equipmentSrcLabel = (key: string) => {
+  const s = config.object_types.equipment.sources?.[key];
+  return s ? `${s.connection}.${s.table}` : key;
+};
+
+describe("classStages（类上的阶段从配置读）", () => {
+  it("种子设备：在途、在役、报废三条，不限两条", () => {
+    const s = classStages(config, "equipment")!;
+    expect(s.property).toBe("status");
+    expect(s.items.map((i) => i.value)).toEqual(["in_transit", "in_service", "scrapped"]);
+    expect(s.items.map((i) => i.label)).toEqual(["在途", "在役", "报废"]); // 中文名从值域项带出来
+    expect(s.items[0].when).toEqual({ purchase: true, device: false });
+    expect(s.items[1].when).toEqual({ device: true });
+    expect(s.items[2].when).toEqual({ device: { mark: "scrapped" } });
+  });
+  it("没有转化的类没有阶段", () => {
+    expect(classStages(config, "department")).toBeNull();
+  });
+  it("附带出向转化：converted 把在途转为在役，执行动作是 convert", () => {
+    const s = classStages(config, "equipment")!;
+    expect(s.conversions).toEqual([{ link: "converted", from: "in_transit", to: "in_service", action: "convert" }]);
+  });
+});
+
+describe("explainWhen（阶段条件的全文白话）", () => {
+  it("布尔规则说哪个源有这台、没有这台", () => {
+    const s = classStages(config, "equipment")!;
+    expect(explainWhen(s.items[0].when, equipmentSrcLabel)).toBe("purchase_sys.po_item 有这台、device_sys.device 没有这台");
+    expect(explainWhen(s.items[1].when, equipmentSrcLabel)).toBe("device_sys.device 有这台");
+  });
+  it("嵌套条件完整展开，不再「按规则」", () => {
+    const s = classStages(config, "equipment")!;
+    expect(explainWhen(s.items[2].when, equipmentSrcLabel)).toBe("device_sys.device 有这台，且 mark 是 scrapped");
+  });
+});
+
+describe("moveStageItem（阶段重排）", () => {
+  it("中文名随块走；越界原样返回；不动原数组", () => {
+    const items = [
+      { value: "a", when: { x: true }, label: "甲" },
+      { value: "b", when: { y: true } },
+      { value: "c", when: { z: true }, label: "丙" },
+    ];
+    const moved = moveStageItem(items, 0, 1);
+    expect(moved.map((i) => i.value)).toEqual(["b", "a", "c"]);
+    expect(moved[1].label).toBe("甲"); // 名字跟着块，不丢
+    expect(moved[0].label).toBeUndefined();
+    expect(items.map((i) => i.value)).toEqual(["a", "b", "c"]); // 原数组不动
+    expect(moveStageItem(items, 0, -1)).toBe(items); // 越界原样
+  });
+});
 
 describe("配置三视图", () => {
   it("列出类：只有名字和说明", () => {
@@ -24,7 +78,8 @@ describe("配置三视图", () => {
     const v = readClass(config, "equipment");
     const status = v.properties.find((p) => p.name === "status");
     expect(status?.derived).toBe("when");
-    expect(status?.values).toContain("in_service");
+    expect(status?.values?.map((x) => enumValueKey(x))).toContain("in_service");
+    expect(status?.values?.map((x) => enumValueLabel(x))).toContain("在役"); // 值域项的中文名跟着出来
     const inWarranty = v.properties.find((p) => p.name === "in_warranty");
     expect(inWarranty?.derived).toBe("filter");
     expect(v.relations.map((r) => r.name)).toContain("belongs_to");
@@ -143,8 +198,8 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
       return { text: JSON.stringify({ class_a: "device", class_b: "asset", tendency: "same", reason: "空表不算不相干" }) };
     }) as never);
     const advice = await slot.proposePair({
-      class_a: { name: "device", sources: ["device_sys"], fields: ["sn"] },
-      class_b: { name: "asset", sources: ["asset_sys"], fields: ["sn"] },
+      class_a: { name: "device", sources: ["device_sys"], fields: ["sn"], enums: [] },
+      class_b: { name: "asset", sources: ["asset_sys"], fields: ["sn"], enums: [] },
       overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 },
       base: { tendency: Verdict.Overlap, reason: "字段部分重合" },
     });
@@ -157,6 +212,8 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen.prompt).toContain("第一版建议");
     expect(seen.prompt).toContain(`命中大于零不许给${VERDICT_LABELS[Verdict.NameSimilar]}`);
     expect(seen.prompt).toContain("命中为零不许给部分重叠");
+    expect(seen.prompt).toContain("keep");
+    expect(seen.prompt).toContain("stage.earlier");
   });
 
   it("AiSdkSlot 失败落盘：原始产出写临时目录，OPENAI_API_KEY 字面值打码", async () => {
@@ -211,7 +268,7 @@ describe("LLM 槽位离线回退", () => {
     });
   });
 
-  it("逆向建模：表结构产草稿，识别字段猜编号列，主键不进属性", async () => {
+  it("逆向建模：不按列名形状猜识别字段（_no 结尾同样可能是代理键），整数主键宁缺勿错", async () => {
     const draft = await slot.proposeObjects([
       {
         connection: "mes_sys",
@@ -225,10 +282,29 @@ describe("LLM 槽位离线回退", () => {
         },
       },
     ]);
-    expect(draft.meter.identity).toBe("meter_no");
+    expect(draft.meter.identity).toBeUndefined(); // meter_no 形状像编号证明不了唯一：键留待人定
     expect(draft.meter.properties).not.toHaveProperty("id"); // 主键不当属性
     expect(draft.meter.properties.reading.type).toBe("number");
-    expect(draft.meter.sources?.mes_sys.table).toBe("meter");
+    expect(draft.meter.sources?.mes_sys.table).toBe("meter"); // 没猜到键不丢来源：键在待确认面板①定（发布闸拦有源无键）
+  });
+
+  it("逆向建模：整数自增主键不当唯一键（po_item 形状：po_id 是行号，sn 才是序列号）", async () => {
+    const draft = await slot.proposeObjects([
+      {
+        connection: "purchase_sys",
+        table: {
+          name: "po_item",
+          columns: [
+            { name: "po_id", type: "INTEGER", pk: true },
+            { name: "item_name", type: "TEXT", pk: false },
+            { name: "sn", type: "TEXT", pk: false, comment: "设备序列号" },
+          ],
+        },
+      },
+    ]);
+    expect(draft.po_item.identity).toBeUndefined(); // po_id 跨源对不上号，不能当 identity
+    expect(draft.po_item.properties.sn.description).toBe("设备序列号");
+    expect(draft.po_item.sources?.purchase_sys.pk).toBe("po_id"); // pk 照记：仅供台账与展示
   });
 
   it("逆向建模：列注释存成字段说明，没注释的字段说明为空", async () => {
@@ -261,19 +337,37 @@ describe("LLM 槽位离线回退", () => {
 
   it("候选对建议：字段重合才成对；同一库两张表也可以成对", async () => {
     const pairs = await slot.proposePairs([
-      { name: "a", sources: ["s1"], fields: ["sn", "name"] },
-      { name: "b", sources: ["s2"], fields: ["sn", "name", "status"] },
-      { name: "c", sources: ["s1"], fields: ["sn", "name"] }, // 与 a 同一连接、不同类
-      { name: "d", sources: ["s2"], fields: ["xyz"] },
+      { name: "a", sources: ["s1"], fields: ["sn", "name"], enums: [] },
+      { name: "b", sources: ["s2"], fields: ["sn", "name", "status"], enums: [] },
+      { name: "c", sources: ["s1"], fields: ["sn", "name"], enums: [] }, // 与 a 同一连接、不同类
+      { name: "d", sources: ["s2"], fields: ["xyz"], enums: [] },
     ]);
     // a-b、b-c 跨源字段重合；a-c 同一库也可以成对；d 字段对不上
     expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "a-c", "b-c"]);
     expect(pairs.find((p) => p.class_a === "a" && p.class_b === "b")?.tendency).toBe(Verdict.Stage); // 含状态字段
   });
 
+  it("候选对建议：留下谁由建议给；谁早、时期名不猜（引擎占位 early/late）", async () => {
+    const pairs = await slot.proposePairs([
+      { name: "shared_x", sources: ["s1"], fields: ["sn", "name"], enums: [] },
+      { name: "device", sources: ["s2"], fields: ["sn", "name"], enums: [] },
+      { name: "po", sources: ["s3"], fields: ["sn", "name"], enums: [] },
+      { name: "dev", sources: ["s4"], fields: ["sn", "name", "status"], enums: [] },
+    ]);
+    const same = pairs.find((p) => p.class_a === "shared_x" && p.class_b === "device");
+    expect(same?.tendency).toBe(Verdict.Same);
+    expect(same?.keep).toBe("device"); // 不留下 shared_
+    expect(same?.stage).toBeUndefined(); // 离线回退不产时期名：词与序交给引擎占位/人定
+
+    const stage = pairs.find((p) => p.class_a === "po" && p.class_b === "dev");
+    expect(stage?.tendency).toBe(Verdict.Stage); // 有状态类字段只是召回偏置
+    expect(stage?.keep).toBe("dev"); // 字段更多
+    expect(stage?.stage).toBeUndefined(); // 谁早谁晚、时期名都不猜
+  });
+
   it("看过交集率再建议：命中为零不改口同形异义；空表不否定类等价", async () => {
-    const a = { name: "device", sources: ["device_sys"], fields: ["sn", "name"] };
-    const b = { name: "asset", sources: ["asset_sys"], fields: ["sn", "name"] };
+    const a = { name: "device", sources: ["device_sys"], fields: ["sn", "name"], enums: [] };
+    const b = { name: "asset", sources: ["asset_sys"], fields: ["sn", "name"], enums: [] };
     const empty = await slot.proposePair({ class_a: a, class_b: b, overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 } });
     expect(empty.tendency).toBe(Verdict.Same);
     expect(empty.reason).toContain("还没有行");
@@ -281,17 +375,19 @@ describe("LLM 槽位离线回退", () => {
     expect(miss.tendency).toBe(Verdict.Same); // 不是同一批，但不能据此否定同一
     expect(miss.reason).toContain("不是同一批");
     const mid = await slot.proposePair({
-      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] },
-      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] },
+      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },
+      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] },
       overlap: { rate: 0.33, count_a: 121, count_b: 100, count_hit: 40 },
     });
     expect(mid.tendency).toBe(Verdict.Stage);
+    expect(mid.stage).toBeUndefined(); // 离线回退仍不产时期名与先后（引擎占位）
+    expect(empty.keep).toBe("device"); // 字段一样多，留下先写的
   });
 
   it("看过交集率再建议：命中为零则数据不支持部分重叠，空表改口同一", async () => {
     const advice = await slot.proposePair({
-      class_a: { name: "asset", sources: ["asset_sys"], fields: ["asset_id", "sn"] },
-      class_b: { name: "device", sources: ["device_sys"], fields: ["dev_id", "serial_no"] },
+      class_a: { name: "asset", sources: ["asset_sys"], fields: ["asset_id", "sn"], enums: [] },
+      class_b: { name: "device", sources: ["device_sys"], fields: ["dev_id", "serial_no"], enums: [] },
       overlap: { rate: 0, count_a: 0, count_b: 100, count_hit: 0 },
       base: { tendency: Verdict.Overlap, reason: "第一版按语义对应给的" },
     });
@@ -300,8 +396,8 @@ describe("LLM 槽位离线回退", () => {
   });
 
   it("看过交集率再建议：接近全交不压过第三问——有状态字段且第一版是生命周期则维持生命周期", async () => {
-    const a = { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] };
-    const b = { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] };
+    const a = { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] };
+    const b = { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] };
     const full = { rate: 0.92, count_a: 100, count_b: 100, count_hit: 92 };
     const stage = await slot.proposePair({ class_a: a, class_b: b, overlap: full, base: { tendency: Verdict.Stage, reason: "字段像阶段" } });
     expect(stage.tendency).toBe(Verdict.Stage); // 合成表「是 | 命中大于零 | 是 → 阶段」，比率不单独压过第三问
@@ -312,8 +408,8 @@ describe("LLM 槽位离线回退", () => {
 
   it("看过交集率再建议：两边都有行、命中为零，阶段立不住——改口同一（空表才沉默）", async () => {
     const advice = await slot.proposePair({
-      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"] },
-      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"] },
+      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },
+      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] },
       overlap: { rate: 0, count_a: 100, count_b: 80, count_hit: 0 },
       base: { tendency: Verdict.Stage, reason: "字段像阶段" },
     });

@@ -9,15 +9,12 @@ export class WorkspacesStore extends ConcernStore {
     return names.includes("default") ? names : ["default", ...names];
   }
 
-  /** 注册（若不存在）并插入 v1 快照。返回该空间的 id。
-   *  并发注册同名空间：两行 insert 都走 insert-ignore（撞 UNIQUE 的败者无害），与 wsId 同一条纪律（基座 runInsertIgnore）。 */
-  async ensureWorkspace(name: string, seedYaml: string, seedFrom = "template"): Promise<number> {
+  /** 注册（若不存在）。注册只落空间行——不产生已发布版本（首版由人发布）；演示模板的 v1 由调用方对 test 显式发布。
+   *  并发注册同名空间：insert-ignore（撞 UNIQUE 的败者无害），与 wsId 同一条纪律（基座 runInsertIgnore）。 */
+  async ensureWorkspace(name: string, seedFrom = "template"): Promise<number> {
     const existing = await this.datasource.get(`SELECT id FROM onto_workspace WHERE name = ?`, [name]);
     if (existing) return existing.id as number;
     await this.runInsertIgnore(`onto_workspace (name, seed_from) VALUES (?, ?)`, [name, seedFrom]);
-    const row = await this.datasource.get(`SELECT id FROM onto_workspace WHERE name = ?`, [name]);
-    const id = row!.id as number;
-    await this.runInsertIgnore(`onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]);
-    return id;
+    return (await this.datasource.get(`SELECT id FROM onto_workspace WHERE name = ?`, [name]))!.id as number;
   }
 }

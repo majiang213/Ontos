@@ -27,21 +27,23 @@ export function seedYamlFor(workspace: string): string {
 export async function listWorkspaces(): Promise<Result<string[]>> {
   return toResult(async () => {
     const names = await metaStore().listWorkspaces();
-    return names.includes(TEST_WORKSPACE) ? names : [...names, TEST_WORKSPACE]; // test 常驻列表，首次访问才真正注册（latestVersion 播种）
+    return names.includes(TEST_WORKSPACE) ? names : [...names, TEST_WORKSPACE]; // test 常驻列表，首次访问才真正注册（test 的演示模板随注册发布成 v1）
   }, (v) => MSG.resultWorkspaces(v.length));
 }
 
-/** 注册（若不存在）并把种子插成该空间的 v1。 */
-export function ensureWorkspace(workspace: string): Promise<number> {
+/** 注册（若不存在）。注册不产生已发布版本；test 的演示模板随注册发布成 v1（问数/动作在演示空间开箱即用）。 */
+export async function ensureWorkspace(workspace: string): Promise<number> {
   if (!isWorkspaceName(workspace)) throw new WorkspaceReject(MSG.workspaceNameBad(workspace));
-  return metaStore().ensureWorkspace(workspace, seedYamlFor(workspace));
+  const id = await metaStore().ensureWorkspace(workspace);
+  if (workspace === TEST_WORKSPACE) await metaStore().ensureSeedVersion(workspace, seedYamlFor(workspace));
+  return id;
 }
 
-/** 新建空间（空白起步：空本体、无连接，从连接数据源开始玩）。 */
+/** 新建空间（空白起步：空本体、无连接，从连接数据源开始玩；不产生已发布版本，首版由人发布）。 */
 export async function createWorkspace(name: string): Promise<Result<void>> {
   return toResult(async () => {
     if (!isWorkspaceName(name)) throw new WorkspaceReject(MSG.workspaceNameBad(name));
     if ((await metaStore().listWorkspaces()).includes(name)) throw new WorkspaceReject(MSG.workspaceExists(name));
-    await metaStore().ensureWorkspace(name, seedYamlFor(name));
+    await metaStore().ensureWorkspace(name);
   }, () => MSG.resultWorkspaceCreated(name));
 }

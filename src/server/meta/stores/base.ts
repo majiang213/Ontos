@@ -1,5 +1,5 @@
 // 关切 store 的基座：共享后端与「空间名 → workspace_id」的注册纪律（未注册的先注册）。
-// 版本行由 latestVersion 播种——元数据写（留痕/连接/问题集）可能先于配置访问碰到新空间。
+// 注册不产生已发布版本（首版由人发布）；无发布时 latestVersion 回退种子（version 0），不落库。
 
 import type { MetaDatasource, DatasourceDialect } from "../datasource";
 

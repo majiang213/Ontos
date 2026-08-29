@@ -15,18 +15,18 @@ export const QUESTION_PACKS: QuestionPack[] = [
   {
     key: "wave1",
     name: "第一波",
-    // 物：设备 × 资产同一、点检 × 设备部分重叠、采购 × 设备阶段（早 in_transit / 晚 in_service）之后
+    // 物：设备 × 资产类等价、点检 × 设备部分重叠、采购 × 设备生命周期（早 in_transit / 晚 in_service）之后
     questions: [
-      { question: "在役设备一共多少台", expected: "100" }, // 设备源 100 行（含 3 台台账 scrapped）；来源标签认设备台账那张表，不是上位对象
+      { question: "在役设备一共多少台", expected: "100" }, // 设备源 100 行（含 3 台台账 scrapped）；来源标签认设备台账那张表，不是公共对象
       { question: "在途设备一共多少台", expected: "81" }, // 121 − 40
       { question: "序列号 SN-40217 且处于在途阶段的设备有多少台", expected: "1" }, // 主角还在采购源
-      { question: "维修工单有多少条", expected: "15" }, // 独立库；误裁同一这条会红
+      { question: "维修工单有多少条", expected: "15" }, // 独立库；误裁类等价这条会红
     ],
   },
   {
     key: "wave2",
     name: "第二波",
-    // 人：办公账号 × 员工部分重叠（唯一键 person_no）、候选人 × 员工阶段（身份证，早 candidate / 晚 employed）之后
+    // 人：办公账号 × 员工部分重叠（唯一键 person_no）、候选人 × 员工生命周期（身份证，早 candidate / 晚 employed）之后
     questions: [
       { question: "在职人员一共多少人", expected: "50" }, // {hr: true}，含 30 个两边都有身份证的
       { question: "还停在候选人阶段、人事还没有行的人一共多少", expected: "50" }, // {recruit: true, hr: false}

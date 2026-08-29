@@ -15,14 +15,14 @@ afterEach(async () => {
 });
 
 describe("空间隔离", () => {
-  it("两个空间各自发布升级，互不干扰；新空间与 default 空白起步，演示模板与 fixture 只属于 test", async () => {
+  it("两个空间各自发布升级，互不干扰；新空间与 default 空白起步（注册不产生已发布版本），演示模板与 fixture 只属于 test", async () => {
     const s = await draftEngine();
     const meta = (await import("../server/meta/store")).metaStore();
-    // default 建对象并发布 → v2
+    // default 建对象并发布 → v1（首版由人发布）
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, "default");
-    expect(unwrap(await s.publish("default")).version).toBe(2);
-    // lab 首次访问：空白起步（v1、空本体）；default 也空白起步（没有模板类）——模板只属于 test
-    expect((await s.getPublished("lab")).version).toBe(1);
+    expect(unwrap(await s.publish("default")).version).toBe(1);
+    // lab 首次访问：空白起步（从未发布，version 0）——模板只属于 test
+    expect((await s.getPublished("lab")).version).toBe(0);
     expect(Object.keys((await s.getPublished("lab")).config.object_types)).toEqual([]);
     expect((await s.getPublished("default")).config.object_types.equipment).toBeUndefined();
     expect((await s.getPublished("test")).config.object_types.equipment).toBeDefined();
@@ -32,14 +32,14 @@ describe("空间隔离", () => {
     expect((await getDriverRegistry("default")).connectionNames()).toEqual([]);
     // lab 自己发布：default 的版本与内容都不受影响
     await s.editDraft({ op: "create_object", name: "person_x", kind: "thing" }, "lab");
-    expect(unwrap(await s.publish("lab")).version).toBe(2);
-    expect((await s.getPublished("default")).version).toBe(2);
+    expect(unwrap(await s.publish("lab")).version).toBe(1);
+    expect((await s.getPublished("default")).version).toBe(1);
     expect((await s.getPublished("default")).config.object_types.person_x).toBeUndefined();
-    // 版本链在同一元库里按 workspace_id 分开：两个空间各有自己的 v2
-    expect(await meta.versionYaml("default", 2)).toBeDefined();
-    expect(await meta.versionYaml("lab", 2)).toBeDefined();
-    expect((await meta.listVersions("default")).map((v) => v.version)).toEqual([1, 2]);
-    expect((await meta.listVersions("lab")).map((v) => v.version)).toEqual([1, 2]);
+    // 版本链在同一元库里按 workspace_id 分开：两个空间各有自己的 v1
+    expect(await meta.versionYaml("default", 1)).toBeDefined();
+    expect(await meta.versionYaml("lab", 1)).toBeDefined();
+    expect((await meta.listVersions("default")).map((v) => v.version)).toEqual([1]);
+    expect((await meta.listVersions("lab")).map((v) => v.version)).toEqual([1]);
   });
 
   it("元数据按 workspace_id 隔离：一个空间留痕不进另一个", async () => {

@@ -5,6 +5,7 @@
 // 先动 fields 再扫引用：拦截失败靠 editDraft 的整份回退（backup）不留半截，本文件不手工改回。
 
 import type { ObjectType, OntologyConfig } from "../../../schema/config";
+import { enumValueKey, enumValueLabel } from "../../../schema/config";
 import { NAME_RE, type DraftOpInput as DraftOp } from "../../../schema/ops";
 import { DraftReject, MSG } from "../../../errors";
 import { referencesOf } from "../refs";
@@ -57,7 +58,16 @@ export function updateProperty(d: OntologyConfig, input: UpdatePropertyOp): void
     prop.type = input.type;
     if (input.type !== "enum") delete prop.values; // 类型离开 enum，枚举值跟着清
   }
-  if (input.values !== undefined) prop.values = input.values.length ? input.values : undefined; // 空数组 = 清掉
+  if (input.values !== undefined) {
+    // 换枚举值列表时按 key 保留已有中文名（操作数的 values 只谈 key；中文名由阶段页管理，这里不丢）
+    const labels = new Map((prop.values ?? []).map((v) => [String(enumValueKey(v)), enumValueLabel(v)]));
+    prop.values = input.values.length
+      ? input.values.map((v) => {
+          const label = labels.get(String(v));
+          return label ? { value: v, label } : v;
+        })
+      : undefined; // 空数组 = 清掉
+  }
   if (input.new_name && input.new_name !== input.name) {
     if (!NAME_RE.test(input.new_name)) throw new DraftReject(MSG.propNameBad);
     if (t.properties[input.new_name]) throw new DraftReject(MSG.propExists(input.new_name));

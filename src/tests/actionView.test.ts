@@ -1,11 +1,11 @@
-// 对象卡动作区纯函数测试：effectSummary 摘要、formCompatible 白名单、动作表单往返恒等。轮询 toast 与收卡策略见 ontFrame.test。
+// 对象卡动作区纯函数测试：effectSummary / preSummary 摘要、formCompatible 白名单、动作表单往返恒等。轮询 toast 与收卡策略见 ontFrame.test。
 // 演示五条动作（convert/transfer/scrap/register/finish_repair）必须都不兼容——超出表单子集的动作只展示、只许删。
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
-import { effectSummary, formCompatible, buildActionDef, prefillEff, prefillPre } from "../components/forms/actionView";
+import { effectSummary, preSummary, formCompatible, buildActionDef, prefillEff, prefillPre } from "../components/forms/actionView";
 import { configSchema, type ActionDef } from "../server/schema/config";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
@@ -117,5 +117,48 @@ describe("effectSummary（效应摘要）", () => {
     const a = effectSummary({ effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: { from: "request" } } } }] } as ActionDef);
     const b = effectSummary({ effect: [{ update: { object: "equipment", identity: { from: "identity" }, properties: { dept: "D01" } } }] } as ActionDef);
     expect(a).toEqual(b);
+  });
+});
+
+describe("preSummary（动作前置的白话，不落 JSON）", () => {
+  it("convert：阶段等值 + 转化未发生（按转化说，不按关系说）", () => {
+    expect(preSummary(config.object_types.equipment.actions!.convert, config, "equipment")).toEqual([
+      "status 是 in_transit",
+      "转化 converted 还没发生",
+    ]);
+  });
+
+  it("transfer：不等于复合取值、关系已建立、请求参数认类", () => {
+    expect(preSummary(config.object_types.equipment.actions!.transfer, config, "equipment")).toEqual([
+      "status 是 in_service",
+      "dept 不是 请求里的 dept",
+      "关系 belongs_to 已建立",
+      "请求里的 dept 必须能认到 department",
+    ]);
+  });
+
+  it("register：对象还不存在 + 请求参数认类", () => {
+    expect(preSummary(config.object_types.equipment.actions!.register, config, "equipment")).toEqual([
+      "这个对象还不存在",
+      "请求里的 dept 必须能认到 department",
+    ]);
+  });
+
+  it("register_assignment：日期比较按不晚于说", () => {
+    expect(preSummary(config.object_types.equipment.actions!.register_assignment, config, "equipment")).toEqual([
+      "这个对象还不存在",
+      "请求里的 valid_from 不晚于 请求里的 valid_to",
+      "请求里的 dept_id 必须能认到 department",
+    ]);
+  });
+
+  it("finish_repair：关系上带条件的子过滤就地展开", () => {
+    expect(preSummary(config.object_types.equipment.actions!.finish_repair, config, "equipment")).toEqual([
+      "关系 under_repair 连着的对象：is_open 是 true",
+    ]);
+  });
+
+  it("无前置给空数组", () => {
+    expect(preSummary({}, config, "equipment")).toEqual([]);
   });
 });

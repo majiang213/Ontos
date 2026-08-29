@@ -37,6 +37,8 @@
 | 同形异义 | 两个类不是在描述同一种东西 | 两类都留下，写入 `class_conclusions`，不建个体边、源映射不共用 |
 | 跳过 | 这次不定 | 不是类与类关系，配置不动 |
 | 子类型 | 一类完全含于另一类 | 声明子类型；本期不定案 |
+| 部分与整体 | 一个是另一个的组成部分；部分的个体不是整体的个体 | 本期不定案 |
+| 不相交 | 两类没有共同的个体 | 本期不定案 |
 
 **判定办法（三问）**：
 
@@ -252,14 +254,14 @@ link_types:
 
 平台只存元数据。表结构按数据边界定：任何表没有业务数据列；交集只存计数与比率，标识值集合不落盘；日志存请求与成败，不存结果集；连接账号演示期明文存（加密为后续项），不进 ontology.yaml。验收问题集同样存平台库，不进 ontology.yaml。
 
-表名按类别加前缀，新表先归类、再起名（现行 8 张）：
+表名按类别加前缀，新表先归类、再起名（现行 9 张）：
 
 | 前缀 | 类别 | 表 |
 |---|---|---|
 | `conn_` | 接入 | conn_source（`type` 为 mysql / pg / sqlite） |
 | `onto_` | 本体 / 空间 | onto_workspace、onto_version（编号行是已发布快照；`version IS NULL` 的工作行是画布活体，草稿修订号 `rev` 与唯一锚 `draft_key` 也在这行） |
 | `ont_` | 验收 | ont_question |
-| `adj_` | 裁决 | adj_decision、adj_overlap |
+| `adj_` | 裁决 | adj_decision、adj_overlap、adj_candidates |
 | `log_` | 留痕 | log_query、log_action |
 
 > 下面这份 DDL 是工作空间 B 方案前的形态，仅作历史记录。B 方案落地后：ontology_id 外键全部换成 workspace_id；onto_ontology 与 onto_draft 取消；onto_question 改名 ont_question；adj_overlap 的 computed_at 即 created_at；二级索引本期未建（代码里只有唯一约束）。**现行表结构以 §6「工作空间」节与 `src/server/meta/ddl/` 为准**（SQLite / MySQL / PostgreSQL 各一份，不做字符串替换派生）。
@@ -492,6 +494,7 @@ CREATE TABLE onto_version (                    -- 版本链 + 工作行（一表
 | 可计算谓词 | 一个是非判断，如「是否在保」 | 已落地。即布尔派生属性 |
 | 函数 | 给定对象唯一确定结果 | 不单设构造。逐个体的计算统一写成派生属性 |
 | 部分与整体 | A 是 B 的部分 | 未做 |
+| 不相交 | 两类没有共同的个体 | 未做 |
 | 公理 | 必须成立的约束 | 已落地。效应定完后、投影前校验；本期一种类型 `mutex` |
 | 动作 | 一个对象允许发生什么变化 | 已落地。`pre` / `effect`，写回按 `sources` 推出 |
 | 变更事件与告知 | 把变更发给没有映射的系统 | 拼装已落地（随 `run_action` 结果返回，`delivered: false`）；外发本期不交付。`inform` + `outlets` |

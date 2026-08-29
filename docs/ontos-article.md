@@ -121,9 +121,11 @@ flowchart TD
 | 部分重叠 | 两个类描述的个体有交集、又不是同一批 | 另立**上位对象**。同名公共属性移上去；没有同名则上位对象只带同一性标准。特有属性留在原类。写入 `class_conclusions` |
 | 生命周期 | 两个类描述的是同一个体的不同时期 | 立一个**对象类型**；阶段是**派生属性**，读时按规则现算；**转化关系**由**动作**写入时记录 |
 | 同形异义 | 两个类不是在描述同一种东西 | 两类都留下，写入 `class_conclusions`，不建个体边、源映射也不共用 |
-| 子类型 | 一类完全含于另一类 | 声明**子类型**：个体自动是上位类的个体，继承它的全部属性 |
+| 子类型 | 一类完全含于另一类 | 声明**子类型**：个体自动是上位类的个体，继承它的全部属性。本期不定案 |
+| 部分与整体 | 一个是另一个的组成部分；部分的个体不是整体的个体 | 本期不定案（概念见第 2 节） |
+| 不相交 | 两类没有共同的个体 | 本期不定案 |
 
-注意部分重叠和子类型的区别：上位对象不带继承语义，属性是移上去的，不是继承来的。对齐时的判定都不靠名字、不靠表结构是否相似。类与类关系不只这些，见第 2 节（含部分与整体）；不相交本期不定案。
+注意部分重叠和子类型的区别：上位对象不带继承语义，属性是移上去的，不是继承来的。对齐时的判定都不靠名字、不靠表结构是否相似。标「本期不定案」的结论对齐时不判，配置里也没有对应构造；它们的概念定义见第 2 节。
 
 #### 判定办法
 
@@ -213,7 +215,10 @@ object_types:
       status:
         type: enum
         description: 阶段
-        values: [in_transit, in_service, scrapped]   # 只列出有规则能算出的值
+        values:                     # key 进配置与动作字面量；label 只给人看，引擎不读它
+          - { value: in_transit, label: 在途 }
+          - { value: in_service, label: 在役 }
+          - { value: scrapped, label: 报废 }
         derived:                   # 派生：不对应源列。规则里写到的源，引擎才访问
           - when:
               device:
@@ -1336,7 +1341,7 @@ actions:
 |---|---|
 | `type` | `string` / `number` / `boolean` / `date` / `enum` |
 | `description` | 给人 / Agent 读 |
-| `values` | `enum` 的可取值；只列出有规则能算出的值 |
+| `values` | `enum` 的可取值；只列出有规则能算出的值。项为裸字面量，或 `{ value, label }`（`label` 是给人看的中文名，引擎不读它） |
 | `derived` | 有它就是派生属性，禁止再出现在任何源的 `fields` 里 |
 | `generate` | 可选。列表，按顺序拼成该属性的值。项为：字面量；与效应相同的取值；`{ date: now/d, format: yyyyMMdd }`（UTC，记号 `yyyy` `MM` `dd` `HH` `mm` `ss`）；`{ snowflake: true }`（64 位雪花号十进制串：41 位毫秒时间戳 + 10 位实例 + 12 位序列，实例位来自 `ONTOS_SNOWFLAKE_INSTANCE_ID` 或随机派生）；`{ uuid: v7 }`。效应写 `{ from: generated }` |
 
@@ -1489,7 +1494,10 @@ object_types:
       status:
         type: enum
         description: 阶段
-        values: [in_transit, in_service, scrapped]
+        values:                               # key 进配置与动作字面量；label 只给人看，引擎不读它
+          - { value: in_transit, label: 在途 }
+          - { value: in_service, label: 在役 }
+          - { value: scrapped, label: 报废 }
         derived:                               # 不进 fields。从上到下第一条命中
           - when:
               device:

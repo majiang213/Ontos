@@ -82,11 +82,6 @@ input { font-family: inherit; outline: none; }
   letter-spacing: 0.01em;
   padding: 4px 8px 4px 10px;
 }
-.nav-sha {
-  font-size: 10px;
-  color: var(--ink-3);
-  user-select: none;
-}
 /* ---------- 空间切换器（触发器 + 下拉面板） ---------- */
 .workspace-trigger {
   display: inline-flex;
@@ -152,7 +147,6 @@ input { font-family: inherit; outline: none; }
 }
 .verdict-row:last-child { border-bottom: none; }
 .verdict-row:hover { background: var(--panel-2); }
-.verdict-row.is-on { background: var(--accent-soft); }
 .verdict-row[aria-disabled="true"] { opacity: 0.45; cursor: default; }
 .verdict-row[aria-disabled="true"]:hover { background: transparent; }
 .verdict-name { font-size: 13px; font-weight: 600; color: var(--ink); flex-shrink: 0; min-width: 66px; }
@@ -167,7 +161,6 @@ input { font-family: inherit; outline: none; }
 }
 .verdict-hint { font-size: 12px; color: var(--ink-3); flex: 1; }
 
-.verdict-stage { flex-basis: 100%; margin-left: 76px; display: inline-flex; gap: 6px; align-items: center; }
 .pair { padding: 4px 0 8px; }
 .pair-names { font-size: 16px; font-weight: 600; }
 .pair-and {
@@ -234,26 +227,6 @@ input { font-family: inherit; outline: none; }
   vertical-align: -1px;
 }
 .pair-q { font-size: 13px; margin-top: 14px; }
-.pair-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.pair-hint { font-size: 12px; color: var(--ink-3); margin-top: 8px; line-height: 1.5; }
-.pair-next {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--panel-2);
-  border-radius: 10px;
-}
-.pair-next-q { font-size: 13px; margin-bottom: 8px; }
-.pair-next .btn { margin: 0 6px 6px 0; }
-.pair-stage-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--ink-3);
-}
-.pair-stage-fields .ctl { width: 120px; }
 
 /* ---------- Double-Bezel（外壳托盘 + 内核） ---------- */
 .bezel {
@@ -313,6 +286,12 @@ input { font-family: inherit; outline: none; }
   border-color: var(--accent);
   color: var(--accent-ink);
   background: var(--accent-soft);
+}
+/* 危险动作的二次确认态（放弃按钮的两段式确认）：黄色警告，与 tag-warn 同语义 */
+.btn.is-danger {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 /* 按钮内计数牌：等着人处理的条数（「待确认」上的疑似重复对数 + 没定唯一键对象数）。暖黄与 tag-warn / 新节点虚线同语义 */
 .btn-badge {
@@ -431,7 +410,19 @@ input { font-family: inherit; outline: none; }
   padding: 12px 14px;
 }
 .node-title { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
-.node-kind { font-size: 11px; color: var(--ink-3); }
+/* 对象类型徽章：事物=纸面中性，事件=品牌暖色——扫一眼分得出个体是持续存在还是一段时间内发生 */
+.node-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: var(--r-chip);
+  padding: 2px 9px;
+}
+.node-kind-thing { border: 1px solid var(--hairline-strong); color: var(--ink-2); background: var(--panel-2); }
+.node-kind-event { color: var(--accent-ink); background: var(--accent-soft); }
 .node-desc { color: var(--ink-2); font-size: 12px; margin: 2px 0 6px; }
 .node-props { border-top: 1px solid var(--hairline); padding-top: 6px; }
 .node-prop { display: flex; justify-content: space-between; gap: 8px; line-height: 1.75; font-size: 12px; }
@@ -440,6 +431,79 @@ input { font-family: inherit; outline: none; }
 .node-key { display: inline-flex; color: var(--ink-3); } /* 唯一键记号：安静可查，不抢眼 */
 .node-prop .t { color: var(--ink-3); font-size: 11px; }
 .node-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.node-stages {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.node-stage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.node-stage code { font-family: var(--font-mono); font-size: 11.5px; }
+
+/* 对象编辑卡：标签页行（is-on 选中；表单开着锁其余页，见 ObjectCard） */
+.card-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.card-tabs .btn { padding: 4px 10px; font-size: 12px; box-shadow: none; }
+
+/* 列表末尾的「再加一条」幽灵行（字段/动作同款）：弱于按钮、强于文字；虚线+悬停点亮与新节点虚线同语义 */
+.ghost-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
+}
+.ghost-add:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.ghost-add:disabled { opacity: 0.5; cursor: default; }
+
+/* 对象编辑卡阶段页：一块一个阶段，条件全文可换行，出向转化缩进一块 */
+.stage-rows { display: flex; flex-direction: column; }
+.stage-block { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); }
+.stage-block:first-child { border-top: none; padding-top: 0; }
+.stage-head { display: flex; align-items: center; gap: 6px; }
+.stage-head .ctl { flex: 1; min-width: 0; font-family: var(--font-mono); }
+/* 阶段两级名字：中文名为主（点击轻改，内联），标识(key)是配置标识，只读展示、走「改标识」级联改名 */
+.stage-name {
+  border: none;
+  background: none;
+  padding: 0;
+  min-width: 0;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: text;
+  text-align: left;
+}
+.stage-name:hover { text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px; }
+.stage-key { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+.stage-rename { padding: 1px 7px; font-size: 11px; }
+.stage-cond { color: var(--ink-3); font-size: 11px; line-height: 1.6; }
+.stage-move { display: flex; gap: 2px; }
+.stage-move .chip { padding: 1px 7px; }
+.stage-conv { border-left: 2px solid var(--hairline-strong); padding-left: 8px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.stage-conv code { font-family: var(--font-mono); font-size: 11.5px; }
 
 /* ReactFlow 换肤 */
 .edge-label {
@@ -724,7 +788,6 @@ select.ctl { background: var(--panel); }
 
 /* ---------- 响应式：窄视口阶梯收窄 ---------- */
 @media (max-width: 900px) {
-  .nav-sha { display: none; } /* 窄屏隐藏版本号 */
   .nav-brand { padding: 4px 6px 4px 0; }
   .workspace-trigger { max-width: 110px; }
 }

@@ -1,9 +1,10 @@
-// 本体画布 —— 节点是对象类型；边是配置里的关系，加上 class_conclusions 投影的由来边和同形异义芯片。
+// 本体画布 —— 节点是对象类型；边是两个对象之间的关系，加上 class_conclusions 投影的由来边和同形异义芯片。
+// 转化是对象上的阶段（节点阶段条），不画自己连自己。
 // 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Key } from "@phosphor-icons/react";
+import { CalendarBlank, Cube, Key } from "@phosphor-icons/react";
 import {
   Background,
   ConnectionMode,
@@ -27,7 +28,7 @@ import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
-import { SHARED_COLOR, homonymPeerMap, isSharedLink, overlapLinksOf } from "./sharedOrigin";
+import { SHARED_COLOR, homonymPeerMap, isSharedLink, overlapLinksOf, verdictBadgesOf } from "./sharedOrigin";
 import type { ClassConclusion } from "../../server/schema/config";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
@@ -64,15 +65,30 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
         <div key={side} className={`connect-strip ${side} source nodrag nopan`} onPointerDown={onStripDown} />
       ))}
       <div className="node-core">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 4, gap: 8 }}>
           <span className="node-title">{data.label}</span>
-          <span className="node-kind">{data.kind === "thing" ? "事物" : "事件"}</span>
+          {data.kind === "event" ? (
+            <span className="node-kind node-kind-event" title="事件：一段时间内发生的个体（履历、维修、变更）">
+              <CalendarBlank size={11} weight="bold" />
+              事件
+            </span>
+          ) : (
+            <span className="node-kind node-kind-thing" title="事物：持续存在的个体（设备、部门、保修卡）">
+              <Cube size={11} weight="bold" />
+              事物
+            </span>
+          )}
+          {(data.verdicts ?? []).map((v) => (
+            <span key={v} className="tag tag-ok" title={`裁决结论：${v}`}>
+              {v}
+            </span>
+          ))}
           {data.state === "new" && <span className="tag tag-warn">草稿</span>}
           {data.state === "modified" && <span className="tag tag-warn">待发布</span>}
         </div>
         {data.description && <div className="node-desc">{data.description}</div>}
         <div className="node-props">
-          {data.properties.map((p) => (
+          {data.properties.filter((p) => p.name !== data.stages?.property).map((p) => (
             <div key={p.name} className="node-prop">
               <span className="node-prop-name">
                 <code>{p.name}</code>
@@ -90,8 +106,18 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
             </div>
           ))}
         </div>
+        {data.stages && data.stages.items.length > 0 && (
+          <div className="node-stages">
+            {data.stages.items.map((it) => (
+              <div key={it.value} className="node-stage">
+                <span className="t" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.hint}</span>
+                <code>{it.value}</code>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="node-tags">
-          {data.sources.map((s) => (
+          {data.sources.filter((s) => !data.stages?.sourceKeys.includes(s.key)).map((s) => (
             <span key={s.key} className="tag">{s.label}</span>
           ))}
           {data.actions.map((a) => (
@@ -146,7 +172,6 @@ export default function OntologyCanvas(props: CanvasProps) {
 /** 边色一处判：点中 > 由来 > 转化 > 默认；style 与 markerEnd 同产（hex 与 globals.css 的 --accent/--warn/--shared 同值——SVG marker 不吃 CSS var，故常量单源）。
  *  默认边也必须显式给 marker 颜色：color 缺省时不渲染箭头（marker 不继承边的描边色）。 */
 const EDGE_ACCENT = "#3b36b0"; // = var(--accent)
-const EDGE_WARN = "#8a5f0b"; // = var(--warn)
 const EDGE_DEFAULT = "#b1b1b7"; // = xyflow 默认边色（.react-flow__edge-path 的默认 stroke）
 function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["style"]; markerEnd: Edge["markerEnd"] } {
   if (isSharedLink(l)) {
@@ -156,15 +181,17 @@ function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["s
     };
   }
   const selected = l.name === selectedLink;
-  const transition = l.kind === "transition";
   return {
-    style: selected ? { stroke: "var(--accent)", strokeWidth: 2.5 } : transition ? { strokeDasharray: "6 4", stroke: "var(--warn)" } : undefined,
-    markerEnd: { type: MarkerType.ArrowClosed, color: selected ? EDGE_ACCENT : transition ? EDGE_WARN : EDGE_DEFAULT },
+    style: selected ? { stroke: "var(--accent)", strokeWidth: 2.5 } : undefined,
+    markerEnd: { type: MarkerType.ArrowClosed, color: selected ? EDGE_ACCENT : EDGE_DEFAULT },
   };
 }
 
 function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange, classConclusions = [] }: CanvasProps) {
-  const viewLinks = useMemo(() => [...links, ...overlapLinksOf(classConclusions)], [links, classConclusions]);
+  const viewLinks = useMemo(
+    () => [...links.filter((l) => l.kind !== "transition"), ...overlapLinksOf(classConclusions)],
+    [links, classConclusions]
+  );
   const homonymPeers = useMemo(() => homonymPeerMap(classConclusions), [classConclusions]);
   const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
@@ -180,6 +207,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
           ...o,
           label: o.name,
           homonyms: peers,
+          verdicts: verdictBadgesOf(classConclusions, o.name, { stage: Boolean(o.stages) }),
           homonymHot: homonymHot !== null && (o.name === homonymHot || peers.includes(homonymHot)),
           onHomonymHot: setHomonymHot,
         },

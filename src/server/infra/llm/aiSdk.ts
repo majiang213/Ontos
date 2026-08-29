@@ -13,11 +13,11 @@ import { generateText, type LanguageModel } from "ai";
 import { MSG } from "../../errors";
 import type { QueryRequest } from "../../schema/request";
 import { queryRequestSchema } from "../../schema/request";
-import { objectTypeSchema, type ObjectType, type OntologyConfig } from "../../schema/config";
+import { enumValueKey, objectTypeSchema, type ObjectType, type OntologyConfig } from "../../schema/config";
 import type { TableInfo } from "../../infra/driver";
 import { TENDENCIES, VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { IDENTITY_COL_RULE } from "./identityHint";
-import type { LlmSlot } from "./slot";
+import type { ClassShot, LlmSlot } from "./slot";
 
 type Gen = typeof generateText;
 
@@ -27,6 +27,8 @@ const pairAdviceSchema = z.object({
   class_b: z.string(),
   tendency: z.enum(TENDENCIES),
   reason: z.string(),
+  keep: z.string().optional(),
+  stage: z.object({ earlier: z.string(), from: z.string(), to: z.string() }).optional(),
 });
 const pairsSchema = z.object({
   pairs: z.array(pairAdviceSchema),
@@ -106,8 +108,9 @@ export class AiSdkSlot implements LlmSlot {
     const classes = Object.entries(config.object_types).map(([name, t]) => ({
       name,
       description: t.description,
-      // 属性带类型与枚举值：过滤值必须按 values 里的字面量编（in_service，不是「在役」），否则编译过但查出来 0 行
-      properties: Object.entries(t.properties).map(([p, d]) => ({ name: p, type: d.type, ...(d.values ? { values: d.values } : {}) })),
+      // 属性带类型与枚举值：过滤值必须按 values 里的 key 编（in_service，不是「在役」），否则编译过但查出来 0 行。
+      // values 在配置里是 { value, label } 或裸字面量，这里只把 key 序列化给模型——提示词里的「字面量」才名实相符
+      properties: Object.entries(t.properties).map(([p, d]) => ({ name: p, type: d.type, ...(d.values?.length ? { values: d.values.map(enumValueKey) } : {}) })),
       identity: t.identity,
       relations: Object.entries(config.link_types)
         .filter(([, l]) => l.from === name || l.to === name)
@@ -143,7 +146,7 @@ $link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开�
           ...DECODING,
           prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。${shapeOf(draftSchema)}
 规则：类名=表名的小写下划线形；kind 默 "thing"（记录事件的表用 "event"）；${IDENTITY_COL_RULE}；
-properties 的类型只用 string/number/boolean/date/enum；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
+properties 的类型只用 string/number/boolean/date/enum；状态/阶段类列选 enum 并给 values（从列注释或取值里找现成词，原样照抄）；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
 列带 comment 时把它的意思写进属性的 description（中文白话，别抄英文列名）。
 不要把两张表合成一个类。
 ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}。表名撞上已占用类名时，类名写成 {连接名}_{表名}（小写下划线，如 crm_sys_customer）。` : ""}
@@ -153,7 +156,7 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
     );
   }
 
-  async proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]> {
+  async proposePairs(classes: ClassShot[]): Promise<PairAdvice[]> {
     return this.runWithFailureDump(
       "proposePairs",
       { classes: classes.map((c) => c.name) },
@@ -162,8 +165,10 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
           model: this.model,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           ...DECODING,
-          prompt: `你是本体平台的整合顾问。下面是已上画布、有来源的对象（名字、来源连接集合、字段名）。${shapeOf(pairsSchema)}
-找出可能描述同一种或同一批现实事物的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。同一连接上的两张表也可以成对（候选人表和员工表）。这是召回，不是判定：表可以是多行对多列，字段可以完全对不上，仍可能是${VERDICT_LABELS[Verdict.Same]}。
+          prompt: `你是本体平台的整合顾问。下面是已上画布、有来源的对象（名字、来源连接集合、字段名、枚举属性 enums 的取值 key）。${shapeOf(pairsSchema)}
+找出可能描述同一种或同一批现实事物的对，每对给倾向（枚举值 ${TENDENCIES.map((t) => `${t}=${VERDICT_LABELS[t]}`).join("、")}）与一句依据。每对都必须写 keep（两个类名之一，合并后留下的类；不要留下 shared_ 开头的公共对象）。
+倾向生命周期时：写 stage.earlier（较早时期的类，个体先以哪一类存在）和 stage.from / stage.to——必须原样取自 enums 里同一属性的两个取值（早→晚），不许新造词、不许留空；没有可取的现成取值就整个省略 stage（引擎会用中性占位词）。其余倾向不要写 stage。人只点关系类型，留下谁、谁早谁晚按这几项执行。
+同一连接上的两张表也可以成对——资格只看有没有源，不看跨不跨库。编号类字段即使名字不同（sn ≈ serial_no）也常常指向同一个体，是强召回线索。这是召回，不是判定：表可以是多行对多列，字段可以完全对不上，仍可能是${VERDICT_LABELS[Verdict.Same]}。
 对象：${JSON.stringify(classes)}`,
         }),
       (output) => pairsSchema.parse(output).pairs
@@ -171,8 +176,8 @@ ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}
   }
 
   async proposePair(input: {
-    class_a: { name: string; sources: string[]; fields: string[] };
-    class_b: { name: string; sources: string[]; fields: string[] };
+    class_a: ClassShot;
+    class_b: ClassShot;
     overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
     base?: { tendency: Tendency; reason: string };
   }): Promise<PairAdvice> {
@@ -196,7 +201,8 @@ ${base ? `第一版建议（只看字段和名字时给的）：「${VERDICT_LAB
 1. 有一侧取不出取值：第二问沉默，证据不足以改口${base ? `——第一版若是${VERDICT_LABELS[Verdict.Overlap]}则改口${VERDICT_LABELS[Verdict.Same]}（没有交集）` : `——倾向${VERDICT_LABELS[Verdict.Same]}，不能定${VERDICT_LABELS[Verdict.NameSimilar]}`}。依据写清一侧还没行。
 2. 两边都有取值、命中为零：现在不是同一批；不能定${VERDICT_LABELS[Verdict.Overlap]}；不能据此否定${VERDICT_LABELS[Verdict.Same]}。第一版是${VERDICT_LABELS[Verdict.NameSimilar]}可维持，否则倾向${VERDICT_LABELS[Verdict.Same]}。
 3. 命中大于零、接近全交：接近全交本身只答「现在是同一批」。有状态字段、且第一版倾向${VERDICT_LABELS[Verdict.Stage]} → 维持${VERDICT_LABELS[Verdict.Stage]}（第三问为「是」）；否则 → ${VERDICT_LABELS[Verdict.Same]}。介于中间、有状态或日期 → ${VERDICT_LABELS[Verdict.Stage]}；介于中间否则 → ${VERDICT_LABELS[Verdict.Overlap]}。依据必须带比率与对得上号的条数。
-4. 依据写一句人话，不要列编号。
+4. 不论倾向是什么，都必须写 keep（两个类名之一；不要留下 shared_ 开头的公共对象）。倾向生命周期时再写 stage.earlier（较早时期的类，个体先以哪一类存在）和 stage.from / stage.to——必须原样取自给出的 enums 里同一属性的两个取值（早→晚），不许新造词、不许留空；没有可取的现成取值就整个省略 stage（引擎会用中性占位词）。其余倾向不要写 stage。人只点关系类型，融合按这几项执行。
+5. 依据写一句人话，不要列编号。
 对象：${JSON.stringify({ class_a: input.class_a, class_b: input.class_b, overlap: input.overlap })}`,
         }),
       (output) => pairAdviceSchema.parse(output)

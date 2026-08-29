@@ -67,3 +67,96 @@ describe("edgePath（边的最终路径）", () => {
     expect(crosses(pts, inflated(obstacles), from.point, to.point)).toBe(false);
   });
 });
+
+/** 极简 SVG 路径采样：路由只产 M/L/Q/C 四种指令，展成密集折线供验障/验弯。 */
+function samplePath(d: string): Pt[] {
+  const quadAt = (p0: Pt, c: Pt, p1: Pt, t: number): Pt => {
+    const u = 1 - t;
+    return { x: u * u * p0.x + 2 * u * t * c.x + t * t * p1.x, y: u * u * p0.y + 2 * u * t * c.y + t * t * p1.y };
+  };
+  const cubicAt = (p0: Pt, c1: Pt, c2: Pt, p1: Pt, t: number): Pt => {
+    const u = 1 - t;
+    return {
+      x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x,
+      y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y,
+    };
+  };
+  const out: Pt[] = [];
+  let cur: Pt = { x: 0, y: 0 };
+  for (const m of d.matchAll(/([MLQC])([^MLQC]+)/g)) {
+    const coords = [...m[2].matchAll(/(-?\d+(?:\.\d+)?(?:e-?\d+)?),(-?\d+(?:\.\d+)?(?:e-?\d+)?)/g)].map((mm) => ({ x: Number(mm[1]), y: Number(mm[2]) }));
+    if (m[1] === "Q") {
+      for (let i = 0; i < coords.length; i += 2) {
+        for (let k = 1; k <= 16; k++) out.push(quadAt(cur, coords[i], coords[i + 1], k / 16));
+        cur = coords[i + 1];
+      }
+    } else if (m[1] === "C") {
+      for (let i = 0; i < coords.length; i += 3) {
+        for (let k = 1; k <= 16; k++) out.push(cubicAt(cur, coords[i], coords[i + 1], coords[i + 2], k / 16));
+        cur = coords[i + 2];
+      }
+    } else {
+      for (const p of coords) {
+        out.push(p);
+        cur = p;
+      }
+    }
+  }
+  return out;
+}
+
+function nearestOf(pts: Pt[], p: Pt): number {
+  return Math.min(...pts.map((q) => Math.hypot(q.x - p.x, q.y - p.y)));
+}
+
+/** 途经点邻域（弦长 radius 内）相邻采样段的最大折角（度）。圆滑曲线每步只有几度；旧实现在捏点处是 90° 直角。 */
+function maxKinkNear(pts: Pt[], p: Pt, radius = 40): number {
+  let idx = 0;
+  for (let i = 1; i < pts.length; i++) if (Math.hypot(pts[i].x - p.x, pts[i].y - p.y) < Math.hypot(pts[idx].x - p.x, pts[idx].y - p.y)) idx = i;
+  let lo = idx;
+  for (let acc = 0; lo > 0 && acc <= radius; lo--) acc += Math.hypot(pts[lo].x - pts[lo - 1].x, pts[lo].y - pts[lo - 1].y);
+  let hi = idx;
+  for (let acc = 0; hi < pts.length - 1 && acc <= radius; hi++) acc += Math.hypot(pts[hi].x - pts[hi + 1].x, pts[hi].y - pts[hi + 1].y);
+  let worst = 0;
+  for (let i = lo + 1; i < hi; i++) {
+    const ax = pts[i].x - pts[i - 1].x, ay = pts[i].y - pts[i - 1].y;
+    const bx = pts[i + 1].x - pts[i].x, by = pts[i + 1].y - pts[i].y;
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    if (la < 1e-6 || lb < 1e-6) continue;
+    const cos = Math.min(1, Math.max(-1, (ax * bx + ay * by) / (la * lb)));
+    worst = Math.max(worst, (Math.acos(cos) * 180) / Math.PI);
+  }
+  return worst;
+}
+
+describe("edgePath 弯折（捏点必经、全程圆滑）", () => {
+  const wp = { x: 250, y: -80 };
+
+  it("空障首选过点双段曲线：恰好途经捏点，且捏点处无折角", () => {
+    const { d } = edgePath(from, to, [], wp);
+    expect(d.match(/ C /g)).toHaveLength(2); // 两段三次贝塞尔，没走正交
+    const pts = samplePath(d);
+    expect(nearestOf(pts, wp)).toBeLessThan(2);
+    expect(maxKinkNear(pts, wp)).toBeLessThan(40);
+  });
+
+  it("过点曲线从节点外侧贴上边框：抵达端切向逆法线，路径不闯进目标节点（回归：抵达切向曾沿 +法线，尾部扫进节点、几乎必掉兜底出折角）", () => {
+    const obstacles = [A, C];
+    const bottom: RouteEnd = { point: { x: 450, y: 60 }, side: "bottom" }; // 目标挂在节点底边
+    const { d } = edgePath(from, bottom, obstacles, { x: 250, y: 200 });
+    expect(d.match(/ C /g)).toHaveLength(2); // 过点双段曲线成立，没掉兜底
+    const pts = samplePath(d);
+    expect(nearestOf(pts, { x: 250, y: 200 })).toBeLessThan(2);
+    expect(crosses(pts, inflated(obstacles), from.point, bottom.point)).toBe(false);
+  });
+
+  it("兜底路由的捏点处无折角：曲线恰好途经捏点、邻域切向连续（旧实现在此处硬拼两段，~90° 直角）", () => {
+    const LID: RouteRect = { x: 150, y: -200, w: 80, h: 150 }; // 压住过点曲线的弧、又不包含捏点本体 → 逼出正交兜底
+    const obstacles = [A, BLOCK, C, LID];
+    const { d } = edgePath(from, to, obstacles, wp);
+    expect(d).toMatch(/ Q | L /); // 确实走了绕障平滑，不是过点双段曲线
+    const pts = samplePath(d);
+    expect(nearestOf(pts, wp)).toBeLessThan(2);
+    expect(maxKinkNear(pts, wp)).toBeLessThan(40);
+  });
+});

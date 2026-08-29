@@ -14,7 +14,7 @@
 | 仓库 | `/Users/majiang/Documents/freespace/js/ontos` |
 | 产品约束 | 画布仍是工作台；ReAct / 工具循环留在 Claude Code / Codex / 任意 MCP 客户端；Ontos 一次调用一次结果；不在页内加对话列、Copilot 侧栏、「再说一句」再生卡 |
 
-下文是当时的设计。现行入口、工具清单与轮询纪律以 README、`skills/`、AGENTS.md 为准；op 以 `src/server/schema/ops.ts` 为准（16 个：14 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`）。
+下文是当时的设计。现行入口、工具清单与轮询纪律以 README、`skills/`、AGENTS.md 为准；op 以 `src/server/schema/ops.ts` 为准（17 个：15 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`）。
 
 ---
 

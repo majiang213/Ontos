@@ -5,17 +5,31 @@ import { describe, expect, it } from "vitest";
 import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { configSchema } from "../server/schema/config";
+import { configSchema, enumValueKey, enumValueLabel } from "../server/schema/config";
 import { draftOpSchema, mcpDraftOpSchema } from "../server/schema/ops";
 import { EXPR_LIKE, FROM_KEY_SET, isFromOnly, isPlainLiteral, propertyRef } from "../server/schema/spec/valueSpec";
 import { actionRequestSchema, queryRequestSchema } from "../server/schema/request";
 import { walkFilter } from "../server/schema/spec/filterSpec";
+import { cleanAdvice, executionPlan, stageValues, Verdict } from "../server/schema/verdict";
 
 describe("configSchema", () => {
   it("种子配置全收（正例骨架）", () => {
     const cfg = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
     expect(cfg.object_types.equipment).toBeDefined();
   });
+
+  it("枚举值域两种形状：裸字面量与 { value, label }；accessor 取 key 与中文名", () => {
+    const cfg = configSchema.parse({
+      object_types: {
+        a: { kind: "thing", properties: { s: { type: "enum", values: ["x", { value: "y", label: "为何" }, { value: "z" }] } } },
+      },
+      link_types: {},
+    });
+    const values = cfg.object_types.a.properties.s.values!;
+    expect(values.map((v) => enumValueKey(v))).toEqual(["x", "y", "z"]);
+    expect(values.map((v) => enumValueLabel(v))).toEqual([undefined, "为何", undefined]);
+  });
+
   it("关系 match 与 transition 同写或都不写，都拒", () => {
     expect(() => configSchema.parse({ object_types: {}, link_types: { l: { from: "a", to: "b" } } })).toThrow(/必须且只能写一种/);
     expect(() =>
@@ -62,16 +76,19 @@ describe("configSchema", () => {
 });
 
 describe("draftOpSchema", () => {
-  it("十五种操作各收一例", () => {
+  it("全部操作各收一例（15 内容 + 2 界面状态）", () => {
     const ops: unknown[] = [
       { op: "create_object", name: "vendor", kind: "thing" },
       { op: "delete_object", name: "vendor" },
       { op: "update_object", name: "vendor", description: "供应商" },
+      { op: "update_object", name: "vendor", new_name: "supplier" },
+      { op: "edit_stages", object: "equipment", items: [{ value: "in_transit", when: { purchase: true } }, { value: "in_service", when: { device: true } }] },
       { op: "add_property", object: "vendor", name: "vendor_no", type: "string" },
       { op: "remove_property", object: "vendor", name: "vendor_no" },
       { op: "update_property", object: "vendor", name: "vendor_no", new_name: "vendor_code", type: "string", description: "供应商编号" },
       { op: "set_identity", object: "vendor", name: "vendor_no" },
       { op: "save_layout", positions: { vendor: { x: 10, y: 20 } } },
+      { op: "save_edge_bend", name: "supplies", bend: { dx: 12, dy: -8 } },
       { op: "create_link", name: "supplies", from: "vendor", to: "equipment", match: { from: "vendor_no", to: "vendor_no" } },
       { op: "delete_link", name: "supplies" },
       { op: "update_link", name: "supplies", new_name: "supplied_by", description: "供应关系" },
@@ -215,5 +232,54 @@ describe("valueSpec（取值来源词表的唯一事实源）", () => {
     expect(isPlainLiteral(null)).toBe(true);
     expect(isPlainLiteral("now/d")).toBe(false);
     expect(isPlainLiteral({ from: "request" })).toBe(false);
+  });
+});
+
+describe("executionPlan（人点的关系类型 → 定案顺序与时期名）", () => {
+  const a = "device";
+  const b = "asset";
+
+  it("类等价：建议留下谁就先写谁；点名不在这一对上或没给，留下 class_a", () => {
+    expect(executionPlan(a, b, Verdict.Same, { keep: b }).order).toEqual([b, a]);
+    expect(executionPlan(a, b, Verdict.Same, { keep: a }).order).toEqual([a, b]);
+    expect(executionPlan(a, b, Verdict.Same, { keep: "ghost" }).order).toEqual([a, b]);
+    expect(executionPlan(a, b, Verdict.Same, {}).order).toEqual([a, b]);
+  });
+
+  it("生命周期：较早的类先写；时期名缺了用中性占位 early / late", () => {
+    expect(executionPlan(a, b, Verdict.Stage, { stage: { earlier: b, from: "candidate", to: "employed" } })).toEqual({
+      order: [b, a],
+      stage: { from: "candidate", to: "employed" },
+    });
+    expect(executionPlan(a, b, Verdict.Stage, {})).toEqual({
+      order: [a, b],
+      stage: { from: "early", to: "late" },
+    });
+  });
+
+  it("stageValues：占位词带中文名（早期/晚期），建议词裸 key", () => {
+    expect(stageValues("early", "late")).toEqual([
+      { value: "early", label: "早期" },
+      { value: "late", label: "晚期" },
+    ]);
+    expect(stageValues("in_transit", "in_service")).toEqual([{ value: "in_transit" }, { value: "in_service" }]);
+  });
+
+  it("cleanAdvice：stage 只在生命周期倾向保留；词空就整个去掉", () => {
+    const base = { class_a: "a", class_b: "b", reason: "r" };
+    expect(cleanAdvice({ ...base, tendency: Verdict.Same, stage: { earlier: "a", from: "x", to: "y" } }).stage).toBeUndefined();
+    expect(cleanAdvice({ ...base, tendency: Verdict.Stage, stage: { earlier: "a", from: "", to: "y" } }).stage).toBeUndefined();
+    expect(cleanAdvice({ ...base, tendency: Verdict.Stage }).stage).toBeUndefined();
+    expect(cleanAdvice({ ...base, tendency: Verdict.Stage, stage: { earlier: "a", from: "x", to: "y" } }).stage).toEqual({
+      earlier: "a",
+      from: "x",
+      to: "y",
+    });
+  });
+
+  it("部分重叠 / 同形异义 / 跳过：顺序就是这一对，不带时期名", () => {
+    expect(executionPlan(a, b, Verdict.Overlap, { keep: b }).order).toEqual([a, b]);
+    expect(executionPlan(a, b, Verdict.NameSimilar, { stage: { earlier: b, from: "x", to: "y" } }).stage).toBeUndefined();
+    expect(executionPlan(a, b, Verdict.Skip, {}).order).toEqual([a, b]);
   });
 });

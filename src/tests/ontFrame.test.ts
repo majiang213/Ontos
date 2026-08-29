@@ -1,7 +1,7 @@
 // 帧 → 视图模型测试：externalToast 判定顺序 + 收卡策略 + 版本/发布钮文案。
 
 import { describe, expect, it } from "vitest";
-import { externalToast, isBlankSeed, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "../components/ontFrame";
+import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "../components/ontFrame";
 
 const frame = (names: string[], ac?: { added?: string[]; overwritten?: string[]; removed?: string[] }) => ({
   object_types: Object.fromEntries(names.map((n) => [n, {}])),
@@ -38,12 +38,10 @@ describe("shouldCloseObjectCard（收卡策略）", () => {
   });
 });
 
-describe("isBlankSeed / versionLabel（空白种子不算发布过）", () => {
-  it("v1 且无对象 = 空白种子（未发布）；有对象或 v2+ = 已发布", () => {
-    expect(isBlankSeed({ version: 1, object_types: {} })).toBe(true);
-    expect(isBlankSeed({ version: 1, object_types: { equipment: {} } })).toBe(false);
-    expect(isBlankSeed({ version: 2, object_types: {} })).toBe(false);
-    expect(versionLabel({ version: 1, object_types: {} })).toBe("未发布");
+describe("versionLabel（从未发布 = version 0）", () => {
+  it("version 0（注册不产生已发布版本）显示未发布；有版本显示已发布 vN", () => {
+    expect(versionLabel({ version: 0, object_types: { equipment: {} } })).toBe("未发布");
+    expect(versionLabel({ version: 1, object_types: { equipment: {} } })).toBe("已发布 v1");
     expect(versionLabel({ version: 3, object_types: { equipment: {} } })).toBe("已发布 v3");
   });
 });

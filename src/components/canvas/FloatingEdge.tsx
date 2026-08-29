@@ -28,7 +28,7 @@ export default function FloatingEdge(props: EdgeProps) {
   const targetNode = useInternalNode(target);
   if (!sourceNode || !targetNode) return null;
 
-  // 自环：节点上方一个小半环（不提供弯折）
+  // 自环：节点上方一个小半环（不提供弯折）。转化关系不走这里——画布不画自己连自己。
   if (source === target) {
     const r = rectOf(sourceNode);
     const cx = r.x + r.w / 2;

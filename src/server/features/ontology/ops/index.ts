@@ -1,6 +1,6 @@
-// op 分派 —— 16 条草稿编辑 op 的唯一解释入口（REST 画布与 MCP edit_draft 同走这里）：只做内存修改。
+// op 分派 —— 草稿编辑 op 的唯一解释入口（REST 画布与 MCP edit_draft 同走这里）：只做内存修改。
 // 浅 case（没有跨键不变量：单点赋值 + 存在性/格式检查）留本文件；厚不变量各自成文件——
-// 撤类连带 editObject、删/改名字段跟随 editProperty、关系变动 editLink、整批原子 importObjects、整份替换锁定 replaceObject。
+// 撤类/改类名 editObject、删/改名字段跟随 editProperty、关系变动 editLink、改阶段 editStages、整批原子 importObjects、整份替换锁定 replaceObject。
 // 落库、校验、rev、dirty 全由 editDraft 决定；界面状态三键的写一律走 canvasState 原语。
 
 import type { OntologyConfig } from "../../../schema/config";
@@ -9,10 +9,12 @@ import { DraftReject, MSG } from "../../../errors";
 import { setEdgeBend, setLayout } from "../canvasState";
 import type { DraftState } from "../canvasPack";
 import { deleteObject } from "./editObject";
+import { renameObject } from "./renameObject";
 import { removeProperty, updateProperty } from "./editProperty";
 import { createLink, deleteLink, updateLink } from "./editLink";
 import { importObjects } from "./importObjects";
 import { replaceObject } from "./replaceObject";
+import { editStages } from "./editStages";
 import { mustClass } from "./classMustExist";
 
 /** 解释一个 op：只改内存（state.draft 与界面状态三键）。落库、校验、rev、dirty 全由 editDraft 决定。 */
@@ -29,10 +31,18 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
       deleteObject(d, input);
       break;
     case "update_object": {
-      const t = mustClass(d, input.name);
+      let name = input.name;
+      if (input.new_name && input.new_name !== input.name) {
+        renameObject(state, input.name, input.new_name);
+        name = input.new_name;
+      }
+      const t = mustClass(d, name);
       if (input.description !== undefined) t.description = input.description;
       break;
     }
+    case "edit_stages":
+      editStages(state, input);
+      break;
     case "add_property": {
       const t = mustClass(d, input.object);
       if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.propNameBad);

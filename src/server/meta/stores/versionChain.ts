@@ -4,14 +4,18 @@ import { ConcernStore } from "./base";
 import { MSG } from "../../errors";
 
 export class VersionChainStore extends ConcernStore {
+  /** 无已发布行时回退种子（version 0 = 从未发布），**不再落库**——注册不产生已发布版本，首版由人发布。 */
   async latestVersion(workspace: string, seedYaml: string): Promise<{ version: number; yaml: string }> {
     const id = await this.wsId(workspace);
     const row = await this.datasource.get(`SELECT version, yaml FROM onto_version WHERE workspace_id = ? AND version IS NOT NULL ORDER BY version DESC LIMIT 1`, [id]);
     if (row) return { version: row.version as number, yaml: row.yaml as string };
-    // 被元数据写抢注的空间：种子补成 v1。并发首访各插一行撞 UNIQUE(workspace_id, version)——
-    // insert-ignore 让败者无害（与 wsId/ensureWorkspace 同一条纪律，基座 runInsertIgnore）
-    await this.runInsertIgnore(`onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, seedYaml]);
-    return { version: 1, yaml: seedYaml };
+    return { version: 0, yaml: seedYaml };
+  }
+
+  /** 演示模板随注册发布成 v1（仅 test 调用）：insert-ignore，并发首访败者无害。 */
+  async ensureSeedVersion(workspace: string, yaml: string): Promise<void> {
+    const id = await this.wsId(workspace);
+    await this.runInsertIgnore(`onto_version (workspace_id, version, yaml, origin) VALUES (?, 1, ?, 'publish')`, [id, yaml]);
   }
 
   async insertVersion(workspace: string, version: number, yaml: string, origin: "publish", canvas?: unknown): Promise<void> {

@@ -1,13 +1,13 @@
 ---
 name: ontos-canvas
-description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：把表建成对象、增删字段、建关系、整份替换未锁定的类。当任务涉及 Ontos、本体/Ontology、逆向建模、改画布、加对象/字段/关系时使用。触发词：ontos、本体、ontology、改画布、建模、生成对象、edit_draft。
+description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：把表建成对象、增删字段、建关系、改阶段（时期）、整份替换未锁定的类。当任务涉及 Ontos、本体/Ontology、逆向建模、改画布、加对象/字段/关系、改阶段/时期时使用。触发词：ontos、本体、ontology、改画布、建模、生成对象、阶段、时期、edit_draft。
 ---
 
 # Ontos 改画布（草稿世界 · 读写）
 
 画布上的内容 = 工作副本（草稿）：已发布 + 没发布的改动。你经 `edit_draft` 写的就是这份草稿——**写完不生效**：问数（`query`）与已发布动作（`run_action`）只读已发布快照，人在画布上点「发布」才生效。发布、放弃、裁决、回滚都是人的关卡，**没有这些工具，也不要去找**。
 
-这个 skill 管对象/字段/关系/导入/整份替换。写动作定义（`set_action` / `remove_action`）归 `ontos-action`；查数归 `ontos-query`；执行动作归 `ontos-action-run`。
+这个 skill 管对象/字段/关系/阶段/导入/整份替换。写动作定义（`set_action` / `remove_action`）归 `ontos-action`；查数归 `ontos-query`；执行动作归 `ontos-action-run`。
 
 ## 接入
 
@@ -49,7 +49,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 ## 方法论（四步）：发现草稿 → 组装 op → 应用 → 停下请人发布
 
 1. **发现（草稿）**：`list_classes { space: "draft" }` 拿类清单和 **`rev`**；`read_class { name, space: "draft" }` 看字段与来源对照。需要表名时用 `list_tables`，不要编连接名。`query` 读的是已发布快照，**不能当画布真相**。
-2. **组装**：严格按下表拼**一条** op。从某张表建新对象：先 `propose_objects`（不落地），检查类名是否已在草稿里。
+2. **组装**：严格按下表拼**一条** op。从某张表建新对象：先 `propose_objects`（只建议，不写草稿），检查类名是否已在草稿里。
 3. **应用**：`edit_draft`，带上刚读到的 `rev` 作为 `base_rev`。`-32000` 说「草稿已变」就是 rev 过期——重新 `list_classes { space: "draft" }` 拿新 `rev` 再发；别的 `-32000` 读 message 修 op 再发。**同一个错误不要原样重发。**
 4. **停下**：告诉人「草稿已改，请到画布上看；要问数/动作生效，请在画布上点发布」。新建了有来源的对象时（同一库两张表也可能成对），走下面「待确认」手递，不要自己裁。**不要**寻找发布、放弃、裁决、回滚、算交集率的工具——没有这些工具。
 
@@ -68,7 +68,8 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 |---|---|---|
 | `create_object` | `{ name, kind: "thing"\|"event", description? }` | 新建空对象（手工建模，无来源） |
 | `delete_object` | `{ name }` | 删对象，挂着它的关系一起撤；删已发布类只进草稿，发布才生效 |
-| `update_object` | `{ name, description? }` | 改对象说明 |
+| `update_object` | `{ name, description?, new_name? }` | 改对象说明或对象名（改名跟着关系和摆位走） |
+| `edit_stages` | `{ object, items: [{ value, when, label? }] }` | 改阶段列表（条数与现有规则相同）：时期标识、顺序、中文名（label，只给人看，缺了=清掉）；改标识会联动改写值域与派生规则、转化关系两端与自动名、动作前置里的平铺等值字面量（嵌套运算符里的不跟） |
 | `add_property` | `{ object, name, type, description?, values? }` | 加字段；type ∈ `string/number/boolean/date/enum` |
 | `remove_property` | `{ object, name }` | 删字段（被引用的拒） |
 | `update_property` | `{ object, name, new_name?, type?, values?, description? }` | 改字段 |
@@ -80,7 +81,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 
 `replace_object` 的 `def` **只**取 `propose_objects` 返回的 `object_types[类名]`（单个类体，不是整张 map）。禁止把 `read_class` 的返回塞回去（那是视图，形状不合法）。锁定规则（`read_class` 的 `replace_blockers` 会列出来）：已经发布过 / 含派生字段 / 含动作 / 含公理 / 挂了多个来源 / 有来源且含未对照到表列的字段——命中一条就拒，改走 `add_property` 等逐步操作。
 
-落地建议的分支（不要发明第三条路）：
+把建议写进草稿的分支（不要发明第三条路）：
 
 ```
 propose_objects 得到 object_types

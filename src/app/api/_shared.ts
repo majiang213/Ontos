@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { DraftReject, EngineReject, ConnectionReject, WorkspaceReject, MSG, logReject } from "@/server/errors";
-import { isWorkspaceName } from "@/server/infra/workspace";
+import { ensureWorkspace, isWorkspaceName, TEST_WORKSPACE } from "@/server/infra/workspace";
 
 /** 请求体不是合法 JSON 时抛它——裸 SyntaxError 落进 catch 会被当成 500。 */
 export class BadRequest extends Error {}
@@ -61,10 +61,12 @@ export async function respond(fn: () => Promise<unknown>, opts: { zod?: { status
   }
 }
 
-/** 工作空间来自 URL 路径段（/api/<空间名>/…）：Next 动态段经这里校验，名字不合法抛 BadRequest。 */
+/** 工作空间来自 URL 路径段（/api/<空间名>/…）：Next 动态段经这里校验，名字不合法抛 BadRequest。
+ *  test 空间首访在此注册（演示模板发布成 v1）；其余空间由各 store 的 wsId 惰性注册，不产生已发布版本。 */
 export async function workspaceOf(params: Promise<{ workspace: string }>): Promise<string> {
   const workspace = (await params).workspace;
   if (!isWorkspaceName(workspace)) throw new BadRequest(MSG.workspaceNameBad(workspace));
+  if (workspace === TEST_WORKSPACE) await ensureWorkspace(workspace);
   return workspace;
 }
 

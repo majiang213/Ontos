@@ -8,6 +8,7 @@ import { MSG } from "../../server/errors";
 import { isFromOnly } from "../../server/schema/spec/valueSpec";
 import { formLinkOk, formPreOk, formValueKind, inFormSubset, walkEffectItems, walkEffectValues } from "../../server/schema/spec/actionSpec";
 import { walkFilter } from "../../server/schema/spec/filterSpec";
+import { conditionText, filterText } from "../../server/features/ontology/filterText";
 
 /** 效应摘要：一条效应一行白话，inform 另列。类名/属性名/关系名用配置里的机器名。
  *  不展示 from / 字面量 / filter / identity——同一属性换取值来源或字面量，摘要一行不变（摘要是给人看的告警，不是审计）。 */
@@ -20,6 +21,38 @@ export function effectSummary(def: ActionDef): string[] {
     link: (name) => lines.push(`转化 ${name}`),
   });
   for (const inf of def.inform ?? []) lines.push(`告知 ${inf.to.join("、")}（${inf.object}）`);
+  return lines;
+}
+
+/* ---------- 前置的白话（对象卡动作区与阶段页的转化动作共用） ----------
+   一条前置一行:属性条件/关系(转化按已发生、还没发生说)/$exists/$request 逐参数。
+   条件与取值的白话渲染在 features/ontology/filterText(与阶段条件全文同一份),这里只管 $ 键的动作语义。 */
+
+/** 动作前置的白话,一行一条;无前置给空数组。config 给了才能把转化关系按「转化」说,否则一律按「关系」。 */
+export function preSummary(def: Pick<ActionDef, "pre">, config?: OntologyConfig | null, clsName?: string): string[] {
+  const lines: string[] = [];
+  walkFilter(config ?? null, clsName ?? "", def.pre ?? {}, {
+    prop: (_cls, key, v) => lines.push(conditionText(key, v)),
+    link: (_cls, ln, _target, sub) => {
+      const isTransition = Boolean(config?.link_types[ln]?.transition);
+      if (sub === true) lines.push(isTransition ? `转化 ${ln} 已发生` : `关系 ${ln} 已建立`);
+      else if (sub === false) lines.push(isTransition ? `转化 ${ln} 还没发生` : `关系 ${ln} 还没建立`);
+      else lines.push(`关系 ${ln} 连着的对象：${filterText(sub as Record<string, unknown>)}`);
+      return false; // 子条件已就地展开,不再走查
+    },
+    special: (_cls, k, v) => {
+      if (k === "$exists") lines.push(Boolean(v) ? "这个对象已存在" : "这个对象还不存在");
+      else if (k === "$request") {
+        for (const [param, cv] of Object.entries(v as Record<string, unknown>)) {
+          if (cv !== null && typeof cv === "object" && !Array.isArray(cv) && "object" in (cv as Record<string, unknown>)) {
+            lines.push(`请求里的 ${param} 必须能认到 ${String((cv as Record<string, unknown>).object)}`);
+          } else {
+            lines.push(conditionText(`请求里的 ${param}`, cv));
+          }
+        }
+      }
+    },
+  });
   return lines;
 }
 

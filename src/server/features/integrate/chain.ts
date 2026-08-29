@@ -2,7 +2,7 @@
 // 清单上的对是牵线。类等价/生命周期把被并掉的类改写成留下的类；部分重叠不新增与公共对象的对；
 // 同形异义/跳过不改清单（定案过滤在读时套）。上一对的结论不写进下一对。
 
-import { Verdict, type PairAdvice } from "../../schema/verdict";
+import { Verdict, onPair, type PairAdvice } from "../../schema/verdict";
 import { pairKey } from "./eligibility";
 
 /** 按刚裁的这一对改写还没问完的对。proposals 是裁之前快照里的清单（含刚裁的这一对）。
@@ -36,7 +36,20 @@ export function rewriteAfterVerdict(
       out.push(p);
       continue;
     }
-    out.push({ class_a: a, class_b: b, tendency: p.tendency, reason: "并完之后还该问这一对，按三问定案", pending: true });
+    const dying = class_b;
+    const survivor = class_a;
+    const remap = (name: string) => (name === dying ? survivor : name);
+    const keep = p.keep ? remap(p.keep) : undefined;
+    const earlier = p.stage ? remap(p.stage.earlier) : undefined;
+    out.push({
+      class_a: a,
+      class_b: b,
+      tendency: p.tendency,
+      reason: "并完之后还该问这一对，按三问定案",
+      pending: true,
+      ...(onPair(keep, a, b) ? { keep } : {}),
+      ...(p.stage && onPair(earlier, a, b) ? { stage: { earlier, from: p.stage.from, to: p.stage.to } } : {}),
+    });
   }
   return out;
 }

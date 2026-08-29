@@ -45,12 +45,29 @@ export type WhenRule = z.infer<typeof whenRuleSchema>;
 export const derivedSchema = z.union([z.array(whenRuleSchema).nonempty(), filterSchema]);
 export type Derived = z.infer<typeof derivedSchema>;
 
+/* ---------- 枚举值域项的两种形状 ----------
+   裸字面量（无中文名）或 { value, label }。key 进配置与动作字面量；中文名只给人看。
+   取 key 与中文名的唯一出处是下面两个函数，消费方不许自己摸形状。 */
+export const enumValueSchema = z.union([
+  literalSchema,
+  z.object({ value: literalSchema, label: z.string().min(1).optional() }),
+]);
+export type EnumValue = z.infer<typeof enumValueSchema>;
+
+export function enumValueKey(v: EnumValue): Literal {
+  return typeof v === "object" && v !== null && "value" in v ? v.value : v;
+}
+
+export function enumValueLabel(v: EnumValue): string | undefined {
+  return typeof v === "object" && v !== null && "label" in v ? v.label : undefined;
+}
+
 /* ---------- 属性 ---------- */
 export const generateItemSchema = z.union([z.string(), z.record(z.string(), z.unknown())]);
 export const propertySchema = z.object({
   type: z.enum(["string", "number", "boolean", "date", "enum"]),
   description: z.string().optional(),
-  values: z.array(z.union([z.string(), z.number()])).optional(),
+  values: z.array(enumValueSchema).optional(),
   derived: derivedSchema.optional(),
   generate: z.array(generateItemSchema).optional(),
 });
@@ -173,6 +190,20 @@ export const classConclusionSchema = z
     }
   });
 export type ClassConclusion = z.infer<typeof classConclusionSchema>;
+
+/* ---------- 公共对象名（唯一出处） ----------
+   部分重叠立出的上位对象：shared_${a}_${b}。起名与判定都住 schema——infra/llm 的离线建议也要认它，
+   又不许 infra 上指 features，这里是最低的可共居层。 */
+const SHARED_PREFIX = "shared_";
+
+export function isSharedObjectName(name: string): boolean {
+  return name.startsWith(SHARED_PREFIX);
+}
+
+/** 裁决立公共对象时的类名。画布由来边读 class_conclusions.shared，不猜这个名字。 */
+export function sharedObjectName(a: string, b: string): string {
+  return `${SHARED_PREFIX}${a}_${b}`;
+}
 
 /* ---------- 根 ---------- */
 export const outletSchema = z.object({

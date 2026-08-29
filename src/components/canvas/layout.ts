@@ -12,11 +12,18 @@ export interface CanvasObject {
   description?: string;
   kind: "thing" | "event";
   identity?: string; // 唯一键字段名：节点在对应字段旁画钥匙记号
-  properties: { name: string; type: string; derived: boolean; values?: (string | number)[]; description?: string }[];
+  properties: { name: string; type: string; derived: boolean; description?: string }[];
   sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
   actions: string[];
   state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
   homonyms?: string[]; // 同形异义的对方类名（配置投影，不是关系）
+  verdicts?: string[]; // 头上的裁决结论徽章（部分重叠/公共对象/生命周期/同形异义），见 sharedOrigin.verdictBadgesOf
+  /** 有转化时：派生枚举的全部时期。来源已写进 hint 的不再进普通标签。 */
+  stages?: {
+    property: string;
+    items: { value: string; hint: string }[];
+    sourceKeys: string[];
+  };
 }
 
 export interface CanvasLink {
@@ -36,8 +43,12 @@ export const NODE_H = 160;
 
 /** 节点高度按内容估算：题头 + 属性行 + 标签行。 */
 function estimateHeight(o: CanvasObject): number {
-  const tags = o.sources.length + o.actions.length > 0 ? 30 : 0;
-  return 92 + o.properties.length * 21 + tags;
+  const stageKeys = o.stages ? new Set(o.stages.sourceKeys) : null;
+  const extraSources = o.sources.filter((s) => !stageKeys?.has(s.key)).length;
+  const props = o.properties.filter((p) => p.name !== o.stages?.property).length;
+  const tags = extraSources + o.actions.length > 0 ? 30 : 0;
+  const stage = o.stages ? o.stages.items.length * 20 + 12 : 0;
+  return 92 + props * 21 + stage + tags;
 }
 
 /** 铺排参数：列数（单层折行时等于网格列数）、列距、行距。 */

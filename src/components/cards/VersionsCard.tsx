@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import Bezel from "./Bezel";
 import { apiGet } from "../workspaceClient";
-import { isBlankSeed, type OntologyResp } from "../ontFrame";
+import type { OntologyResp } from "../ontFrame";
 
 export default function VersionsCard({
   ont,
@@ -35,8 +35,8 @@ export default function VersionsCard({
           <button className="chip" aria-label="关闭" onClick={onClose}>✕</button>
         </div>
         {versions === null && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>读着呢…</div>}
-        {versions !== null && ont && isBlankSeed(ont) ? (
-          // 空白种子版本（注册时自动落的空本体 v1）不算发布史
+        {versions !== null && ont && !ont.version ? (
+          // 从未发布（注册不产生已发布版本，首版由人发布）
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>还没有发布过——发布一次之后这里会列出历史版本</div>
         ) : (
           (versions ?? []).map((v) => (

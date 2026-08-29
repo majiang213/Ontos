@@ -40,17 +40,17 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 |---|---|---|
 | `search` | 按文本检索类名与关系名（缺省已发布） | `{ text }` |
 | `list_classes` | 列出已发布的类（名字+说明） | `{}` |
-| `read_class` | 读一个已发布类的完整视图：属性（**枚举附 values**）、关系、动作及前置、该类参与的类与类结论（部分重叠由来、同形异义） | `{ name }` |
+| `read_class` | 读一个已发布类的完整视图：属性（**枚举附 values**：裸值或 `{ value, label }` 两形状）、关系、动作及前置、该类参与的类与类结论（部分重叠由来、同形异义） | `{ name }` |
 | `query` | 执行结构化查询（只读） | `{ query: 查询JSON }` |
 
-这四个工具都有可选 `space` 参数，但**查数一律不传**（缺省 `published` 就是你要的世界；`query` 传了会被 `-32602` 拒绝）。`tools/list` 里你还会看到 `run_action` / `edit_draft` 等写工具——本 skill 不碰。
+`search` / `list_classes` / `read_class` 有可选 `space` 参数（不传 = 读已发布，正是你要的世界）；`query` 不接受 `space`，传了会被 `-32602` 拒绝。`tools/list` 里你还会看到 `run_action` / `edit_draft` 等写工具——本 skill 不碰。
 
 ## 总方法论：发现 → 组装 → 执行 → 纠错
 
 **永远不要直接凭用户的话组 JSON。** 按这四步走：
 
-1. **发现**：用户说的概念对应哪个类？`search` 或直接 `list_classes`。找到类名后 `read_class`——它给你：属性名和类型、**枚举的合法取值**（`values`）、从该类出发的关系名（含反向名）、`class_conclusions`（同形异义的两类不是同一种东西，不要当同一个类去问；部分重叠的公共部分在上位对象上）。
-2. **组装**：严格用读到的名字组查询 JSON。filter 的枚举值从 `values` 里选，关系名从 `relations` 里选。
+1. **发现**：用户说的概念对应哪个类？`search` 或直接 `list_classes`。找到类名后 `read_class`——它给你：属性名和类型、**枚举的合法取值**（`values`；项为裸值或 `{ value, label }`——`value` 是写进 filter 的键，`label` 是给人看的中文名）、从该类出发的关系名（含反向名）、`class_conclusions`（同形异义的两类不是同一种东西，不要当同一个类去问；部分重叠的公共部分在公共对象上）。
+2. **组装**：严格用读到的名字组查询 JSON。filter 的枚举值从 `values` 里选 `value`——项是 `{ value, label }` 形状时只取它的 `value`，不要把整项抄进 filter；关系名从 `relations` 里选。
 3. **执行**：`query`。
 4. **纠错**：失败时读错误消息修正后重发。`-32000` 的 message 会点名错处（如"名字对不上配置：equipment.statuss"——属性名拼错），这正是给你修的，修一次通常就对。**同一个错误不要原样重发。**
 
@@ -62,7 +62,7 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 ```json
 {
   "object": "equipment",                      // 必填。根类：从哪个类查
-  "identity": "SN-40217",                     // 可选。认准一个体（识别字段的取值）
+  "identity": "SN-40217",                     // 可选。认准一个体（唯一键的取值）
   "properties": ["name", "status"],           // 可选。只取这些属性；省略=返回全部属性（含派生），空值属性不出现
   "filter": { ... },                          // 可选。见下
   "order": { "name": "asc" },                 // 可选。单键 asc/desc；排序字段必须是返回的属性（在 properties 里；不写 properties 则任意属性均可）
@@ -115,7 +115,7 @@ Ontos 把一份**本体**（YAML 配置：类、属性、关系、动作）盖�
 ## 完整剧本示范：聚合问数——"每个部门多少台在役设备？"
 
 1. `search { text: "设备" }` → 类 `equipment`。
-2. `read_class { name: "equipment" }` → `status` 是枚举，`values: [in_transit, in_service, scrapped]`；`dept` 是部门编号。
+2. `read_class { name: "equipment" }` → `status` 是枚举，`values` 三项形如 `{ value: "in_transit", label: "在途" }`（filter 里写 `value`）；`dept` 是部门编号。
 3. 组装：`{ object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } }`。
 4. `query` 执行 → `structuredContent.rows` 是分组结果，`path` 是取数路径（可展示给用户，说明数据来自哪些源库）。
 

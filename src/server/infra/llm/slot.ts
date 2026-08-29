@@ -5,28 +5,36 @@
 // 实现在同目录：罐头 canned.ts（离线确定性 + 演示剧本），真模型 aiSdk.ts（提示词工程）。
 
 import type { QueryRequest } from "../../schema/request";
-import type { ObjectType, OntologyConfig } from "../../schema/config";
+import type { Literal, ObjectType, OntologyConfig } from "../../schema/config";
 import type { TableInfo } from "../../infra/driver";
 import type { PairAdvice, Tendency } from "../../schema/verdict";
 import type { DriverRegistry } from "../../infra/registry";
 import { resolveTableInfos } from "../../infra/tables";
 import { MSG, toResult, type Result } from "../../errors";
 
+/** 建议输入里的一个类的快照：名字、连接集、字段名，外加枚举属性的取值（时期名判据的证据——建议词必须从这里面原样取）。 */
+export interface ClassShot {
+  name: string;
+  sources: string[];
+  fields: string[];
+  enums: { name: string; values: Literal[] }[];
+}
+
 export interface LlmSlot {
   /** 实现名，留痕用（离线回退 / 真模型名） */
   readonly name: string;
-  /** NL → 查询 JSON（问数槽位）。workspace 说出「哪个空间在问」：罐头剧本只服务 test 空间（演示数据），
+  /** NL → 查询 JSON（问数调用口）。workspace 说出「哪个空间在问」：离线回退的剧本只服务 test 空间（演示数据），
    *  没有这条论元守卫只能借 config 拐弯——任何空间恰好有同名类就会被静默编成演示查询。 */
   nlToQuery(question: string, config: OntologyConfig, workspace: string): Promise<QueryRequest>;
-  /** 表结构 → 本体草稿（逆向建模槽位）。occupied = 草稿里已有的类名：撞名时实现按 {connection}_{table} 起名，不静默覆盖。 */
+  /** 表结构 → 本体草稿（逆向建模调用口）。occupied = 草稿里已有的类名：撞名时实现按 {connection}_{table} 起名，不静默覆盖。 */
   proposeObjects(tables: { connection: string; table: TableInfo }[], occupied?: string[]): Promise<Record<string, ObjectType>>;
-  /** 有源类两两比对 → 候选对与倾向（整合槽位）。sources 是该类的连接集合；同一连接的两张表也可以成对。资格闸在 eligibility，实现里不做跨源判定。 */
-  proposePairs(classes: { name: string; sources: string[]; fields: string[] }[]): Promise<PairAdvice[]>;
-  /** 看过交集率之后，对这一对再给倾向（仍是整合槽位）。比率由调用方算好传入，槽位不当计算器。
+  /** 有源类两两比对 → 候选对、倾向与可执行方案（整合调用口）。sources 是该类的连接集合；同一连接的两张表也可以成对。资格闸在 eligibility，实现里不做跨源判定。 */
+  proposePairs(classes: ClassShot[]): Promise<PairAdvice[]>;
+  /** 看过交集率之后，对这一对再给倾向与可执行方案（仍是整合调用口）。比率由调用方算好传入，实现不当计算器。
    *  base 是清单里的第一版建议（候选快照钉住的同一裁判）：第二版以它为锚——维持，或由证据驱动改口，不另起炉灶。 */
   proposePair(input: {
-    class_a: { name: string; sources: string[]; fields: string[] };
-    class_b: { name: string; sources: string[]; fields: string[] };
+    class_a: ClassShot;
+    class_b: ClassShot;
     overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
     base?: { tendency: Tendency; reason: string };
   }): Promise<PairAdvice>;

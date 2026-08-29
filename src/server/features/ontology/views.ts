@@ -2,7 +2,7 @@
 // 列出类 / 读取一个类 / 检索。description 供阅读；填进 JSON 的是 name。
 // 已发布视图不返回 sources/pk（问数 Agent 不绑表）；草稿视图（space=draft）带状态与来源对照，供改画布。
 
-import type { ActionDef, ClassConclusion, OntologyConfig } from "../../schema/config";
+import type { ActionDef, ClassConclusion, EnumValue, OntologyConfig } from "../../schema/config";
 import { replaceBlockers } from "./ops/replaceObject";
 import { sameConfig } from "./sameConfig";
 import { conclusionsAbout } from "./classConclusions";
@@ -63,7 +63,7 @@ export interface ClassView {
     name: string;
     type: string;
     description?: string;
-    values?: (string | number)[]; // 枚举附 values
+    values?: EnumValue[]; // 枚举附 values（裸字面量或 { value, label }）
     derived?: "when" | "filter"; // 派生附形式
   }[];
   relations: { name: string; description?: string; to: string; kind: "match" | "transition" }[]; // 从该类出发的（含反向名）；kind 区分普通配对与转化

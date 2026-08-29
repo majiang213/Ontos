@@ -90,7 +90,7 @@ _UI 说法_：映射。_Avoid_：新系统、出码、运行中、对象列表�
 _UI 说法_：本体（产品核心词，保留）。
 
 **工作空间** 🔴：
-隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链与**工作副本**同在 `onto_version`（`version IS NULL` 的一行是可变头，画布全部内容——本体+摆位+弯折+钉点——只活在它的 `canvas_json`；草稿修订号 `rev` 也持久化在这行，写走 CAS（`UPDATE … WHERE rev = ?`，0 行=冲突）；发布 = 工作行复制成编号行），其余各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL，`postgres://…` / `postgresql://…` 走 PostgreSQL）。**无状态**：草稿/已发布快照全部读库、无进程内写队列与内存缓存——同一份元库下任意多实例行为一致；多实例部署 = MySQL 或 PG 元库 + 每实例分配 `ONTOS_SNOWFLAKE_INSTANCE_ID`（0–1023，雪花号实例位；不分配则随机派生，碰撞概率极低但存在）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册）——按空间名判断填充，与是否配置 LLM Key 无关；fixture 各实例各自播种，多实例下对 `test` 空间的写会分叉（演示空间不承诺多实例一致）；API 用 `/api/<空间名>/…` 路径段指定。
+隔离单位：一个空间一套完整的本体配置、版本链、平台元数据、画布摆位。共享元库 + `workspace_id`（B 方案）：台账是 `onto_workspace` 注册表，版本链与**工作副本**同在 `onto_version`（`version IS NULL` 的一行是可变头，画布全部内容——本体+摆位+弯折+钉点——只活在它的 `canvas_json`；草稿修订号 `rev` 也持久化在这行，写走 CAS（`UPDATE … WHERE rev = ?`，0 行=冲突）；发布 = 工作行复制成编号行），其余各表都带 `workspace_id`；后端可换（默认单文件 SQLite `src/server/config/ontos-meta.db`，`ONTOS_META_DSN=mysql://…` 走 MySQL，`postgres://…` / `postgresql://…` 走 PostgreSQL）。**无状态**：草稿/已发布快照全部读库、无进程内写队列与内存缓存——同一份元库下任意多实例行为一致；多实例部署 = MySQL 或 PG 元库 + 每实例分配 `ONTOS_SNOWFLAKE_INSTANCE_ID`（0–1023，雪花号实例位；不分配则随机派生，碰撞概率极低但存在）。切换空间整套换掉，互不串。**default 与新建空间一样空白起步**（空本体、无连接，从连接数据源开始玩）；演示模板（`src/server/config/ontology.yaml`）与四个演示 fixture 连接只属于 `test`（测试工作空间，常驻空间列表，首次访问才注册，演示模板随注册发布成 v1——其余空间注册**不产生已发布版本**，首版由人发布）——按空间名判断填充，与是否配置 LLM Key 无关；fixture 各实例各自播种，多实例下对 `test` 空间的写会分叉（演示空间不承诺多实例一致）；API 用 `/api/<空间名>/…` 路径段指定。
 _UI 说法_：工作空间（左上角下拉）。
 
 **对象类型 / 属性 / 关系** 🔶：
@@ -109,6 +109,10 @@ _UI 说法_：唯一键。_Avoid_：identity 直出、识别字段、认出同�
 无源字段可映射、按规则推导的属性（如 person.status 由"记录出现在哪些源"推出），规则写进对象定义。
 _UI 说法_：派生字段（规则随字段展示）。
 
+**时期中文名 / 时期标识** 🔴：
+枚举值域项的两半：中文名（label）给人看，阶段块主显、点击轻改；标识（key）进配置与动作字面量，「改标识」级联改写值域、派生规则、转化关系与动作前置里的同名等值（带确认）。
+_UI 说法_：中文名、改标识。
+
 ### 整合方法论（差异化核心）
 
 **对齐判定** 🔴：
@@ -116,11 +120,11 @@ _UI 说法_：派生字段（规则随字段展示）。
 _UI 说法_：裁决按钮「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」（`VERDICT_LABELS`；decisions API 与 adj_decision 留痕存英文键 `same / overlap / stage / name_similar / skip`，汉字只当描述不当 Key）。_Avoid_: 五种结论（当类与类关系的章节名或穷尽表）
 
 **裁决** 🔴：
-人对候选对选择关系类型的定案动作。LLM 只建议，裁决权永远在人；裁决+证据快照全部留痕、可回滚。
+人对候选对选择关系类型的定案动作。LLM 只建议，裁决权永远在人；留下谁、谁早谁晚、时期名由建议给出，人不另选。裁决+证据快照全部留痕、可回滚。
 _UI 说法_：裁决（产品核心词，保留）。
 
 **候选对** 🔴：
-定义见 CONTEXT「候选对」。工程纪律：模型提议按草稿内容快照落 `adj_candidates`——同一投喂形状（类名/连接集/字段名）只问一次模型，定案过滤在读时套，计数因此稳定，不当计算器的模型只补倾向。
+定义见 CONTEXT「候选对」。工程纪律：模型提议按草稿内容快照落 `adj_candidates`——同一投喂形状（类名/连接集/字段名）只问一次模型，定案过滤在读时套，计数因此稳定，不当计算器的模型只补倾向与可执行方案（留下谁 / 谁早 / 时期名）。
 _UI 说法_：疑似重复（面板②区块标题「疑似重复」，入口按钮「待确认」——它同时装唯一键确认）；「候选对」只留在文档与代码。
 
 **疑似重复串** 🔴：
@@ -195,13 +199,13 @@ _UI 说法_：取数路径。
 | 看过交集率再建议 | 算完交集率后自动再问（面板上「看过交集率」） | `/api/propose_pair` | `proposePair` | 无（关卡在人） |
 | 裁决 | 「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」 | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | 无（关卡在人） |
 | 发布 / 放弃 | 「发布 vN+1」「放弃」 | `/api/publish` | `publish` / `discard` | 无（关卡在人） |
-| 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，16 个 op（14 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`，没有独立 op） | `edit_draft`（吃同一批内容 op，不含界面状态） |
+| 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，17 个 op（15 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`，没有独立 op） | `edit_draft`（吃同一批内容 op，不含界面状态） |
 | 问数 | 问题集「全量跑一遍」/「对草稿跑一遍」 | `/api/questions`（`?run=1`，可选 `&target=draft`）、`/api/query` | `nlToQuery` + `query` | `query`（入参已是结构化查询，Ontos 不编） |
 | 动作执行 | 无（站外 Agent 驱动） | — | `runAction` | `run_action` |
 
 五条纪律：
 - 同名同义才许同名：路由、引擎、MCP 三层同一个名字指同一个行为；行为不同必须不同名。`propose_objects` 只建议、不落地；落地一律 `edit_draft` + `import_objects`。画布按钮把这两步连着发，不另开一键路由。
-- 通道与载荷分开：`edit_draft` 是通道（路由、引擎、MCP 同名），16 个 op 是载荷（MCP 抽掉 2 条界面状态，剩 14 条）——op 名在页面内部调用和 MCP 入参里是同一个词。
+- 通道与载荷分开：`edit_draft` 是通道（路由、引擎、MCP 同名），17 个 op 是载荷（MCP 抽掉 2 条界面状态，剩 15 条）——op 名在页面内部调用和 MCP 入参里是同一个词。
 - 页面暴露任务层（一个按钮一个动作），MCP 暴露 op 层——粒度不同是设计，不是遗漏。裁决、发布、交集率、看过交集率再建议没有 MCP 工具是刻意的：关卡留给人。疑似重复清单只读开放（`list_candidates`），定案仍在人。
 - 新加入口时词干从本表已有工程词里取，不另造。只建议不落地的工具一律 `propose_` 前缀（`propose_objects` / `propose_action` / `propose_pair`）。
 - 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀；schema 也是**共享内核**——跨域词汇（对齐判定的 `schema/verdict`：机器键、展示文案、建议形状）住这里，领域与前端都能安全引用。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
@@ -211,10 +215,10 @@ _UI 说法_：取数路径。
 每次 review（含 `/code-review` 的 Standards 轴）按这六条过。能机器化的条目必须有守门测试，不靠人扫——`src/tests/structureGuard.test.ts` 与 `purityBoundary.test.ts` 是现行守门，违规先红测试，不靠记忆。
 
 1. **调用方向**。层级：`schema` 最底（只引 errors 纯叶子）→ `meta` / `infra`（不反向依赖 features）→ `features` 各领域包 → 路由 / 前端。读路径不依赖写路径：`features/ontology/views` 只消费纯函数（`refs` / `sameConfig` / `ops/replaceObject` 的纯判定）；读引擎（`features/query/`）经 `Env` / `SourceDriver` 接口，不摸写解释器。值侧无环；type-only 引用编译期擦除，不算越界。
-2. **不变量落在哪**。一条不变量一个家，且家是文件不是注释：每步改动的「落定」在 `commit.ts`、引用扫描在 `refs.ts`、界面状态跟随在 `canvasState.ts`、op 分派在 `ops/index.ts`、厚不变量一文件一个（`editObject` / `editProperty` / `editLink` / `importObjects` / `replaceObject`）。文件头注释第一行写它回答的问题，不写谁调它。
-3. **打开文件能否读完一个问题**。切分轴是「编辑一份规定这条链上的问题」，不是按本体要素（类/关系/动作）分，也不是按 16 个 op 一人一个文件。浅 case（单点赋值级）留分派，厚不变量（跨键跟随级）独立成文件。一个概念要跨三个以上文件才能读完，就是切错了。
+2. **不变量落在哪**。一条不变量一个家，且家是文件不是注释：每步改动的「落定」在 `commit.ts`、引用扫描在 `refs.ts`、界面状态跟随在 `canvasState.ts`、op 分派在 `ops/index.ts`、厚不变量一文件一个（`editObject` / `renameObject` / `editStages` / `editProperty` / `editLink` / `importObjects` / `replaceObject`）。文件头注释第一行写它回答的问题，不写谁调它。
+3. **打开文件能否读完一个问题**。切分轴是「编辑一份规定这条链上的问题」，不是按本体要素（类/关系/动作）分，也不是按 17 个 op 一人一个文件。浅 case（单点赋值级）留分派，厚不变量（跨键跟随级）独立成文件。一个概念要跨三个以上文件才能读完，就是切错了。
 4. **命名谓宾搭配**。主语要真：`configStore` 那种「声称存 config 实际不是」的假主语不许再出现。谓语和宾语要对得上：被 apply 的是 op 不是 draft，所以通道叫 `editDraft` 不叫 applyDraft。动词短语不当模块名（`editProperty` 这种「做什么编辑」的动名允许，因为它说的是住着的知识；`mustType` 这种纯调用句不行）。读路径和写路径共用规则时，规则放纯函数层，不许读 import 写。
-5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、聚合产出列名 `metricColumn`（features/query/assemble）、转化动作名 `conversionActionName`（features/ontology/skeletons）、公共对象名 `sharedObjectName`（features/ontology/sharedName）、类与类结论 `class_conclusions`（schema/config；画布投影 `overlapLinksOf` / `homonymPeerMap`）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、insert-ignore 与方言 upsert `insertIgnoreSql` / `upsertSql`（meta/stores/base）、元库 DSN 方言 `metaDialectOf`（meta/datasource）、边界入口 Result 收尾 `toResult`（server/errors，各入口不再自写 try/catch 阶梯）、业务拒绝落日志 `logReject`（server/errors，REST 与 MCP 的收尾共用一处）、元库 PG 占位符 `toPgPlaceholders`（meta/datasource；源驱动下推另有 `renderPlaceholders`，不互相 import）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**、十二套演示系统的清单/注释/文件播种与 sidecar 读写 `DEMO_SYSTEMS` / `DEMO_COMMENTS` / `writeDemoFiles` / `readSidecarComments`（infra/demoSystems，叶子模块：裸 node 可跑）、生成撞名改名规则 `prefixedTableName` 与落地前硬闸 `disambiguateClassNames`（infra/llm/slot）、三波对错板 `QUESTION_PACKS`（features/acceptance/questionPacks）。新单源先登记本表再落地。
+5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、运算符块判定 `isOpObject`（spec/filterSpec）、聚合产出列名 `metricColumn`（features/query/assemble）、转化动作名 `conversionActionName`（features/ontology/skeletons）、公共对象名 `sharedObjectName` / `isSharedObjectName`（schema/config；features/ontology/sharedName 原地再出口）、过滤条件白话 `conditionText` / `filterText` / `operandText`（features/ontology/filterText，阶段条件全文与动作前置摘要共用）、枚举值域取 key 与中文名 `enumValueKey` / `enumValueLabel`（schema/config）、转化动作判定 `conversionActionOf`（features/ontology/stages）、对齐判定执行计划 `executionPlan` 与成对点名 `onPair`（schema/verdict）、类与类结论 `class_conclusions`（schema/config；画布投影 `overlapLinksOf` / `homonymPeerMap` / `verdictBadgesOf`）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、insert-ignore 与方言 upsert `insertIgnoreSql` / `upsertSql`（meta/stores/base）、元库 DSN 方言 `metaDialectOf`（meta/datasource）、边界入口 Result 收尾 `toResult`（server/errors，各入口不再自写 try/catch 阶梯）、业务拒绝落日志 `logReject`（server/errors，REST 与 MCP 的收尾共用一处）、元库 PG 占位符 `toPgPlaceholders`（meta/datasource；源驱动下推另有 `renderPlaceholders`，不互相 import）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**、十二套演示系统的清单/注释/文件播种与 sidecar 读写 `DEMO_SYSTEMS` / `DEMO_COMMENTS` / `writeDemoFiles` / `readSidecarComments`（infra/demoSystems，叶子模块：裸 node 可跑）、生成撞名改名规则 `prefixedTableName` 与落地前硬闸 `disambiguateClassNames`（infra/llm/slot）、三波对错板 `QUESTION_PACKS`（features/acceptance/questionPacks）。新单源先登记本表再落地。
 6. **代码坏味道**。报错文案不当机器判据（判定走结构参数，如 `exceptAction`）；吞错必须注释说清为什么安全；错误类型按域归一（EngineReject / DraftReject / ConnectionReject / WorkspaceReject），调用方不猜类型；内部形状（SQL / 主机 / 路径 / 堆栈）不进用户可见输出，生产只给「内部错误」（`_shared.internalErrorMessage` 单闸）；无调试残留（console.log / dbg）；无死导出。
 
 ## 本体论要素 × 落地（附录对照，写代码按此表）

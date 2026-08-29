@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { engineEnv, installRuntime, makeRuntime, type OntosRuntime } from "@/server/runtime";
+import { ensureWorkspace, TEST_WORKSPACE } from "@/server/infra/workspace";
 import type { EngineEnv } from "@/server/features/env";
 import type { Result } from "@/server/errors";
 
@@ -25,12 +26,14 @@ export async function expectRejected<T>(p: Promise<Result<T>>, match?: string | 
 }
 
 /** 建临时目录、拷种子配置、装一个 cwd 指向它的全新运行态。返回临时目录路径。
- *  overrides 可注入 clock / uuid 等（确定性测试钉死时间与随机源）。 */
+ *  overrides 可注入 clock / uuid 等（确定性测试钉死时间与随机源）。
+ *  test 空间随运行态注册（演示模板发布成 v1）——与生产首访 workspaceOf 同一条路径。 */
 export async function setupRuntime(prefix: string, overrides: Partial<OntosRuntime> = {}): Promise<string> {
   const tmp = mkdtempSync(join(tmpdir(), prefix));
   mkdirSync(join(tmp, "src/server/config"), { recursive: true });
   cpSync(join(process.cwd(), "src/server/config/ontology.yaml"), join(tmp, "src/server/config/ontology.yaml"));
   await installRuntime(makeRuntime({ cwd: tmp, ...overrides }));
+  await ensureWorkspace(TEST_WORKSPACE);
   return tmp;
 }
 

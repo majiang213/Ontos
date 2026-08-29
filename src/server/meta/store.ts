@@ -38,13 +38,16 @@ export class MetaStore {
   listWorkspaces() {
     return this.workspaces.listWorkspaces();
   }
-  ensureWorkspace(name: string, seedYaml: string, seedFrom = "template") {
-    return this.workspaces.ensureWorkspace(name, seedYaml, seedFrom);
+  ensureWorkspace(name: string, seedFrom = "template") {
+    return this.workspaces.ensureWorkspace(name, seedFrom);
   }
 
   /* 版本链与工作行 */
   latestVersion(workspace: string, seedYaml: string) {
     return this.versions.latestVersion(workspace, seedYaml);
+  }
+  ensureSeedVersion(workspace: string, yaml: string) {
+    return this.versions.ensureSeedVersion(workspace, yaml);
   }
   insertVersion(workspace: string, version: number, yaml: string, origin: "publish", canvas?: unknown) {
     return this.versions.insertVersion(workspace, version, yaml, origin, canvas);

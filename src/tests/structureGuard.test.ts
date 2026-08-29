@@ -55,7 +55,7 @@ const COPY_PATTERNS: [RegExp, string][] = [
 
 /* ---------- ② 调用方向：区域 → 禁止的值侧 import 前缀（src 相对路径） ---------- */
 
-const DIRECTION_RULES: { area: RegExp; forbidden: string[]; why: string }[] = [
+const DIRECTION_RULES: { area: RegExp; forbidden: string[]; exempt?: string[]; why: string }[] = [
   {
     area: /^server\/schema\//,
     forbidden: ["server/features/", "server/meta/", "server/app/"],
@@ -105,26 +105,21 @@ const DIRECTION_RULES: { area: RegExp; forbidden: string[]; why: string }[] = [
     why: "acceptance 只许依赖 query（跑批编译链）+ ontology（草稿/已发布取数）",
   },
   {
-    // ontology 读路径纯函数层：refs / sameConfig / canvasState / lineage 不许碰域内任何写路径与 op 解释
-    area: /^server\/features\/ontology\/(refs|sameConfig|canvasState|lineage)\.ts$/,
-    forbidden: ["server/features/ontology/"],
-    why: "读路径纯函数层不 import 写路径（type-only 的 DraftState 引用放行）",
-  },
-  {
-    // views 是读路径：只许消费纯函数（refs/sameConfig/ops/replaceObject 的纯判定），不碰写路径与分派
-    area: /^server\/features\/ontology\/views\.ts$/,
+    // 读路径不依赖写路径（反转枚举）：写路径按文件枚举（editDraft/commit/versions/current/canvasPack/skeletons/ops/），
+    // 其余 ontology 文件都是读路径，自动被罩住——新增读文件不用改守门。
+    // 唯一放行 ops/replaceObject 的纯判定（replaceBlockers，views 与叶子共用同一条）。
+    area: /^server\/features\/ontology\/(?!editDraft\.ts$|commit\.ts$|versions\.ts$|current\.ts$|canvasPack\.ts$|skeletons\.ts$|ops\/)/,
     forbidden: [
       "server/features/ontology/editDraft",
       "server/features/ontology/commit",
       "server/features/ontology/versions",
       "server/features/ontology/current",
       "server/features/ontology/canvasPack",
-      "server/features/ontology/ops/index",
-      "server/features/ontology/ops/edit",
-      "server/features/ontology/ops/importObjects",
-      "server/features/ontology/ops/classMustExist",
+      "server/features/ontology/skeletons",
+      "server/features/ontology/ops/",
     ],
-    why: "读路径不依赖写路径：views 只消费纯函数（ops/replaceObject 的 replaceBlockers 是纯判定，放行）",
+    exempt: ["server/features/ontology/ops/replaceObject"],
+    why: "读路径不 import 写路径；唯一放行 ops/replaceObject 的纯判定（replaceBlockers）",
   },
   {
     // errors.ts 是文案与错误类型的家：必须保持纯叶子（前端经 purityBoundary 引它），一个相对 import 都不许有
@@ -160,6 +155,7 @@ describe("结构守门", () => {
           if (typeOnly) continue; // 类型边编译期擦除，放行（DraftState 这类形状引用）
           const target = resolveSpec(spec, f);
           if (!target) continue;
+          if (rule.exempt?.some((e) => target === e || target.startsWith(e))) continue; // 纯判定豁免（ops/replaceObject）
           for (const bad of rule.forbidden) {
             if (target === bad.replace(/\/$/, "") || target.startsWith(bad)) offenders.push(`${rel} → ${spec}（${rule.why}）`);
           }

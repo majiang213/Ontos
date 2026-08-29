@@ -100,6 +100,54 @@ describe("DecisionPanel 渲染冒烟（react-dom/server，无 DOM 环境）", ()
     expect(html).toContain(VERDICT_LABELS[Verdict.Skip]);
     expect(html).not.toContain("仅名称相似");
     expect(html).not.toMatch(/>同一</);
+    expect(html).not.toContain("哪个时期更早");
+    expect(html).not.toContain("点了之后还要选谁早");
+    expect(html).toContain("谁早谁晚、时期名由建议给出");
+    expect(html).toContain("留下哪一个由建议给出");
+    expect(html).toContain("点「生命周期」会落"); // 建议不倾向生命周期也常显按钮落点：占位词点击前看得见
+  });
+
+  it("建议里的留下谁、谁早直接写在卡上，不另开选择器", () => {
+    const html = strip(
+      renderToString(
+        <PairCard
+          pair={{
+            class_a: "po",
+            class_b: "device",
+            tendency: Verdict.Stage,
+            reason: "同一批设备的不同时期",
+            keep: "device",
+            stage: { earlier: "po", from: "in_transit", to: "in_service" },
+          }}
+          onDone={() => {}}
+        />
+      )
+    );
+    expect(html).toContain("po 更早");
+    expect(html).toContain("in_transit");
+    expect(html).toContain("in_service");
+    expect(html).not.toContain("哪个时期更早");
+    expect(html).not.toContain("定案");
+  });
+
+  it("建议没给时期名：卡上显示引擎占位 early → late 并提示可改标识", () => {
+    const html = strip(
+      renderToString(
+        <PairCard
+          pair={{
+            class_a: "po",
+            class_b: "device",
+            tendency: Verdict.Stage,
+            reason: "同一批设备的不同时期",
+            keep: "device",
+          }}
+          onDone={() => {}}
+        />
+      )
+    );
+    expect(html).toContain("po 更早");
+    expect(html).toContain("early → late");
+    expect(html).toContain("占位词，可改标识");
   });
 
   it("唯一键未设置时确认按钮不可点", () => {

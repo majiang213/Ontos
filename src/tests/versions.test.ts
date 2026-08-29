@@ -14,9 +14,12 @@ describe("版本历史与回滚", () => {
   });
 
   it("回到某版：覆盖当前工作副本，不插入新版本；问数仍读已发布；版本不存在拒绝", async () => {
-    const s = await freshStore(tmp); // 从干净内存态开始（default 空间，自带空白 v1）
+    const s = await freshStore(tmp); // default 空间：从未发布（注册不落 v1），首版由人发布
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" });
-    await s.publish(); // v2 含 vendor
+    await s.publish(); // v1 含 vendor（首版）
+    expect((await s.getPublished()).version).toBe(1);
+    await s.editDraft({ op: "create_object", name: "client", kind: "thing" });
+    await s.publish(); // v2 含 client
     expect((await s.getPublished()).version).toBe(2);
     const { version } = unwrap(await s.rollbackTo(1)); // 用 v1 覆盖草稿
     expect(version).toBe(1);
@@ -24,7 +27,7 @@ describe("版本历史与回滚", () => {
     expect((await s.getPublished()).config.object_types.vendor).toBeDefined();
     expect((await s.listVersions()).map((v) => v.version)).toEqual([1, 2]); // 没有 v3
     expect((await s.getDraft()).dirty).toBe(true);
-    expect((await s.getDraft()).draft.object_types.vendor).toBeUndefined(); // 未发布改动直接覆盖
+    expect((await s.getDraft()).draft.object_types.client).toBeUndefined(); // 未发布改动直接覆盖
     await expectRejected(s.rollbackTo(99), "版本不存在");
   });
 });

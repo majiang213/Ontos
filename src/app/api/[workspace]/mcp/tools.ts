@@ -179,7 +179,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "edit_draft",
     description:
-      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、增删字段、设认出同一对象靠的字段、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（set_action / remove_action）。不能发布、放弃、裁决、回滚；摆位、线的弯折和端点钉点是界面状态，也不归这里。不接受 space。",
+      "改草稿，一次只改一步。草稿还没发布，问数和已发布动作看不见。入参 { op, ... }，必带 base_rev（先 list_classes space=draft 拿 rev）。op 与草稿编辑同一套：创建/删除对象、对象改名、增删字段、设唯一键字段、改阶段列表（时期与中文名）、创建/删除关系、导入对象、整份替换（未发布且未锁定的类）、设置/删除一条动作（set_action / remove_action）。不能发布、放弃、裁决、回滚；摆位、线的弯折和端点钉点是界面状态，也不归这里。不接受 space。",
     inputSchema: editDraftInputSchema,
     auth: true,
     handler: async (ctx, args) => {

@@ -53,14 +53,9 @@ export function shouldCloseObjectCard(openName: string | null, data: OntologyRes
   return openName !== null && !(openName in data.object_types);
 }
 
-/** 空白种子版本：v1 且没有任何对象——空白空间注册时自动落的空本体 v1，不算「发布过」。 */
-export function isBlankSeed(ont: Pick<OntologyResp, "version" | "object_types">): boolean {
-  return ont.version === 1 && Object.keys(ont.object_types).length === 0;
-}
-
-/** 左上版本钮的标签（加载中占位不在此处：调用方对 null 帧自己写「已发布 v…」）。 */
+/** 左上版本钮的标签：从未发布（version 0 = 注册不产生已发布版本）显示「未发布」。 */
 export function versionLabel(ont: Pick<OntologyResp, "version" | "object_types">): string {
-  return isBlankSeed(ont) ? "未发布" : `已发布 v${ont.version}`;
+  return ont.version ? `已发布 v${ont.version}` : "未发布";
 }
 
 /** 发布钮的 title 点名将发生的变化：将删除的类 + 动作差集里实际发生的子集（三个动词不永远并排）。

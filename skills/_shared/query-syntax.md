@@ -1,7 +1,7 @@
 ```json
 {
   "object": "equipment",                      // 必填。根类：从哪个类查
-  "identity": "SN-40217",                     // 可选。认准一个体（识别字段的取值）
+  "identity": "SN-40217",                     // 可选。认准一个体（唯一键的取值）
   "properties": ["name", "status"],           // 可选。只取这些属性；省略=返回全部属性（含派生），空值属性不出现
   "filter": { ... },                          // 可选。见下
   "order": { "name": "asc" },                 // 可选。单键 asc/desc；排序字段必须是返回的属性（在 properties 里；不写 properties 则任意属性均可）

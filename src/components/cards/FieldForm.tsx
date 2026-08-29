@@ -3,7 +3,7 @@
 "use client";
 
 import { useState } from "react";
-import { propertySchema } from "../../server/schema/config";
+import { enumValueKey, propertySchema } from "../../server/schema/config";
 
 /** 字段类型词表：与 schema/config.ts 的 propertySchema 同一出处（派生，不写第二份）。 */
 export const PROP_TYPES = propertySchema.shape.type.options;
@@ -31,7 +31,7 @@ export function FieldForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<(typeof PROP_TYPES)[number]>(initial?.type ?? "string");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [values, setValues] = useState((initial?.values ?? []).join(","));
+  const [values, setValues] = useState((initial?.values ?? []).map((v) => String(enumValueKey(v))).join(","));
   const [busy, setBusy] = useState(false);
   const labelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--ink-3)" };
   return (
