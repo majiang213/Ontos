@@ -449,6 +449,8 @@ describe("LLM 演示实现（离线）", () => {
     expect(new Set(pairs.map((p) => `${p.class_a}-${p.class_b}`)).size).toBe(pairs.length);
     expect(pairs.some((p) => p.class_a === "room" || p.class_b === "room")).toBe(false);
     expect(pairs.some((p) => p.class_a === "supply" || p.class_b === "supply")).toBe(false);
+    // 剧本外正向启发式仍工作：字段重合率够就成对（it_device × it_ticket 共 asset_tag/status → 含状态字段）
+    expect(byPair.get("it_device-it_ticket")?.tendency).toBe(Verdict.Stage);
   });
 
   it("候选对建议：留下谁由建议给；谁早、时期名不猜（引擎占位 early/late）", async () => {
