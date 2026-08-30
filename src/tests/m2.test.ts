@@ -417,6 +417,40 @@ describe("LLM 演示实现（离线）", () => {
     expect(pairs.find((p) => p.class_a === "a" && p.class_b === "b")?.tendency).toBe(Verdict.Stage); // 含状态字段
   });
 
+  it("候选对剧本（ADR 0012 合并世界投影）：模板类提 6 对、倾向按故事，剧本外仍走字段启发式", async () => {
+    const cls = (name: string, fields: string[]) => ({ name, sources: ["s"], fields, enums: [] });
+    const classes = [
+      cls("equipment", ["name", "serial_no", "status"]),
+      cls("department", ["name", "dept_id"]),
+      cls("warranty_card", ["serial_no", "expiry"]),
+      cls("instrument", ["serial_no", "name"]),
+      cls("it_device", ["sn", "status"]),
+      cls("it_ticket", ["ticket_no", "status"]),
+      cls("account", ["login", "name"]),
+      cls("card_holder", ["card_no", "name"]),
+      cls("oa_dept", ["dept_id", "name"]),
+      cls("repair", ["repair_no", "serial_no"]),
+      cls("room", ["room_no", "name", "capacity"]),
+      cls("booking", ["booking_no", "room_no", "booker", "booked_date", "slot"]),
+      cls("supply", ["item_no", "name", "stock"]),
+      cls("requisition", ["req_no", "item_no", "requester", "qty", "req_date"]),
+      cls("assignment", ["asgn_no", "serial_no"]),
+    ];
+    const pairs = await slot.proposePairs(classes);
+    const byPair = new Map(pairs.map((p) => [`${p.class_a}-${p.class_b}`, p]));
+    // 剧本六对齐全、倾向按故事（跳过由人裁，建议只给四档）
+    expect(byPair.get("equipment-it_device")?.tendency).toBe(Verdict.NameSimilar);
+    expect(byPair.get("equipment-instrument")?.tendency).toBe(Verdict.Overlap);
+    expect(byPair.get("equipment-warranty_card")?.tendency).toBe(Verdict.Overlap);
+    expect(byPair.get("department-oa_dept")?.tendency).toBe(Verdict.NameSimilar);
+    expect(byPair.get("account-card_holder")?.tendency).toBe(Verdict.Overlap);
+    expect(byPair.get("repair-it_ticket")?.tendency).toBe(Verdict.NameSimilar);
+    // 剧本对不重复；剧本外字段对不上的不硬凑
+    expect(new Set(pairs.map((p) => `${p.class_a}-${p.class_b}`)).size).toBe(pairs.length);
+    expect(pairs.some((p) => p.class_a === "room" || p.class_b === "room")).toBe(false);
+    expect(pairs.some((p) => p.class_a === "supply" || p.class_b === "supply")).toBe(false);
+  });
+
   it("候选对建议：留下谁由建议给；谁早、时期名不猜（引擎占位 early/late）", async () => {
     const pairs = await slot.proposePairs([
       { name: "shared_x", sources: ["s1"], fields: ["sn", "name"], enums: [] },

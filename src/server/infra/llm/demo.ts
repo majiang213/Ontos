@@ -79,9 +79,19 @@ export class DemoLlm implements Llm {
   }
 
   async proposePairs(classes: ClassShot[]): Promise<PairAdvice[]> {
+    const byName = new Map(classes.map((c) => [c.name, c]));
     const pairs: PairAdvice[] = [];
+    // 候选对剧本（ADR 0012 在合并世界里的投影——类等价已合并，剩 6 对）：无 Key 的演示用这份讲同一个故事。
+    // 建议倾向只有四档（Tendency 不含跳过），跳过案由人裁——剧本里给中性倾向 + 白话理由。
+    for (const p of DEMO_PAIRS) {
+      const a = byName.get(p.a);
+      const b = byName.get(p.b);
+      if (!a || !b) continue;
+      pairs.push(withKeep({ class_a: p.a, class_b: p.b, tendency: p.tendency, reason: p.reason }, a, b));
+    }
     for (let i = 0; i < classes.length; i++) {
       for (let j = i + 1; j < classes.length; j++) {
+        if (DEMO_PAIRS.some((p) => (p.a === classes[i].name && p.b === classes[j].name) || (p.a === classes[j].name && p.b === classes[i].name))) continue; // 剧本对不重复提
         const advice = schemaAdvice(classes[i], classes[j]);
         if (advice) pairs.push(advice);
       }
@@ -229,6 +239,17 @@ function reviseWithOverlap(
 
 /* ---------- 演示问数剧本（test 空间演示实现的编译脚本） ----------
    正则 → 查询，顺序即优先级，最后一条兜底。这是演示数据，不是引擎逻辑。 */
+
+/** test 空间候选对剧本（ADR 0012 在合并世界里的投影）：类等价已合并进设备类，剩 6 对可演。
+ *  倾向只给四档（跳过是人的动作，不在建议档位里）。 */
+const DEMO_PAIRS: { a: string; b: string; tendency: Tendency; reason: string }[] = [
+  { a: "equipment", b: "it_device", tendency: Verdict.NameSimilar, reason: "都叫设备、都有序列号，但生产设备与办公设备不是同一种东西" },
+  { a: "equipment", b: "instrument", tendency: Verdict.Overlap, reason: "点检对象覆盖部分设备（60 个点检对象里 40 台对得上设备序列号）" },
+  { a: "equipment", b: "warranty_card", tendency: Verdict.Overlap, reason: "都有序列号，但保修卡是设备的附属记录，不是设备本身——跳过也是一种答案" },
+  { a: "department", b: "oa_dept", tendency: Verdict.NameSimilar, reason: "都叫部门：台账按车间/产线、OA 按行政组织，两套编码没有交集" },
+  { a: "account", b: "card_holder", tendency: Verdict.Overlap, reason: "正式账号都有门禁卡（35/40），外包账号没有" },
+  { a: "repair", b: "it_ticket", tendency: Verdict.NameSimilar, reason: "都叫维修/报修，一个管生产设备、一个管办公设备" },
+];
 
 export const demoQueries: { pattern: RegExp; query: QueryRequest }[] = [
   // 设备线（具体词在前：在途/报废/点检先于泛化的「多少台」，否则都被计数题截走）
