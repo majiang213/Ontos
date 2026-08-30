@@ -25,6 +25,19 @@ export function getWorkspace(): string {
   return current;
 }
 
+/* ---------- 上次打开的工作空间（cookie：SSR 首屏直接渲染，不闪不切） ----------
+   服务端渲染时读 cookie 决定初始空间；客户端切换时写回。写不进（隐私模式等）只是下次回 default，不拦。 */
+const LAST_WORKSPACE_KEY = "ontos.lastWorkspace";
+
+export function rememberWorkspace(workspace: string): void {
+  try {
+    if (typeof document === "undefined") return;
+    document.cookie = `${LAST_WORKSPACE_KEY}=${encodeURIComponent(workspace)}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {
+    // 记不住不拦主流程
+  }
+}
+
 function apiUrl(path: string): string {
   // 全局注册表路由（/api/workspaces 列表与新建）不按空间前缀；其余都挂在 /api/<空间名>/ 下
   if (path === "/api/workspaces") return path;
