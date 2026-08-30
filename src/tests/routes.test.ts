@@ -89,6 +89,38 @@ describe("错误分层：400 / 422 / 500", () => {
     expect(r.data.reason).toBeTruthy();
   });
 
+  it("propose_key：只建议不落地——无源类 422；数据试算出建议且不写草稿", async () => {
+    const s = await draftEngine();
+    await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源
+    expect((await post("propose_key", JSON.stringify({ object: "vendor" }), undefined, TEST)).status).toBe(422);
+    await s.editDraft(
+      {
+        op: "import_objects",
+        objects: {
+          po_item: {
+            kind: "thing",
+            properties: { item_name: { type: "string" }, sn: { type: "string" } },
+            sources: { purchase_sys: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { item_name: "item_name", sn: "sn" } } },
+          },
+          device_b: {
+            kind: "thing",
+            properties: { name: { type: "string" }, sn: { type: "string" } },
+            sources: { device_sys: { connection: "device_sys", table: "device", pk: "dev_id", fields: { name: "name", sn: "serial_no" } } },
+          },
+        },
+      },
+      TEST
+    );
+    const r = await post("propose_key", JSON.stringify({ object: "po_item" }), undefined, TEST);
+    expect(r.status).toBe(200);
+    expect(r.data.key).toBe("sn");
+    expect(r.data.hard).toBe(true); // sn 有唯一约束（硬保证）
+    expect(r.data.reason).toContain("对上 40 条");
+    expect(Array.isArray(r.data.evidence)).toBe(true);
+    // 只建议不落地：草稿 identity 没被写
+    expect((await s.getDraft(TEST)).draft.object_types.po_item.identity).toBeUndefined();
+  });
+
   it("overlap：无源类 422（幻影 rate 不产）；同一库两张表可以算", async () => {
     const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源

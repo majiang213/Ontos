@@ -17,7 +17,7 @@ import { enumValueKey, objectTypeSchema, type ObjectType, type OntologyConfig } 
 import type { TableInfo } from "../../infra/driver";
 import { TENDENCIES, VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { IDENTITY_COL_RULE } from "./identityHint";
-import type { ClassShot, Llm } from "./llm";
+import type { ClassShot, KeyCandidateShot, KeySuggestion, Llm } from "./llm";
 
 type Gen = typeof generateText;
 
@@ -33,6 +33,7 @@ const pairAdviceSchema = z.object({
 const pairsSchema = z.object({
   pairs: z.array(pairAdviceSchema),
 });
+const keySuggestionSchema = z.object({ key: z.string().nullable(), reason: z.string() });
 
 /** 输出形状的提示词片段：response_format 完全不下发，形状只靠提示词给（zod → JSON Schema 的唯一渲染处）。 */
 function shapeOf(schema: z.ZodType): string {
@@ -206,6 +207,31 @@ ${base ? `第一版建议（只看字段和名字时给的）：「${VERDICT_LAB
 对象：${JSON.stringify({ class_a: input.class_a, class_b: input.class_b, overlap: input.overlap })}`,
         }),
       (output) => pairAdviceSchema.parse(output)
+    );
+  }
+
+  async proposeKey(input: { name: string; current?: string; candidates: KeyCandidateShot[] }): Promise<KeySuggestion> {
+    return this.runWithFailureDump(
+      "proposeKey",
+      { name: input.name, candidates: input.candidates.map((c) => c.name) },
+      () =>
+        this.gen({
+          model: this.model,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          ...DECODING,
+          prompt: `你是本体平台的唯一键顾问。给一个类从候选列里选唯一键（identity），选不出就明确说。${shapeOf(keySuggestionSchema)}
+对象：${JSON.stringify(input)}
+规则：唯一键 = 跨源能对上同一个体的业务编号列（序列号、单号、证件号这类）。
+1. 数据命中是硬证据：hits 里 hit > 0 的候选优先，命中越多越强；命中数少但值像业务编号的，按语义判断。
+2. 表内唯一性：intraUnique 为 false 的候选在源表内就有重复，不能当唯一键。
+3. 硬信号（unique / pk 标记）与数据命中一致最稳；pk / unique 标记都可能只是多列主键、多列唯一索引的一员——单列不唯一由 intraUnique 兜底；命中为 0 不否定候选——只说明没有数据佐证，可维持 current。
+4. key 只能从候选列里选，不许新造；选不出就给 null，留给人定。reason 写一句白话，带依据（命中数、硬/软保证）。`,
+        }),
+      (output) => {
+        const s = keySuggestionSchema.parse(output);
+        if (s.key !== null && !input.candidates.some((c) => c.name === s.key)) return { key: null, reason: s.reason }; // 候选外乱选 = 没选
+        return s;
+      }
     );
   }
 }

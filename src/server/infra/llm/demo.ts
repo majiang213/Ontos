@@ -11,7 +11,7 @@ import type { TableInfo } from "../../infra/driver";
 import { TEST_WORKSPACE } from "../../infra/workspace";
 import { VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { EngineReject, MSG } from "../../errors";
-import { prefixedTableName, type ClassShot, type Llm } from "./llm";
+import { prefixedTableName, type ClassShot, type KeyCandidateShot, type KeySuggestion, type Llm } from "./llm";
 /** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
  *  allowDate=false 给破格进属性的主键用（主键当唯一键时只分 number/string）。 */
 function columnPropType(rawType: string, allowDate: boolean): "string" | "number" | "date" {
@@ -43,7 +43,8 @@ export class DemoLlm implements Llm {
     for (const { connection, table } of tables) {
       const properties: Record<string, ObjectType["properties"][string]> = {};
       const fields: Record<string, string> = {};
-      const pkCol = table.columns.find((c) => c.pk);
+      const pkCols = table.columns.filter((c) => c.pk);
+      const pkCol = pkCols.length === 1 ? pkCols[0] : undefined; // 复合主键的单列不唯一，不用主键当唯一键（与识别路径同口径）
       for (const col of table.columns) {
         if (col.pk) continue; // 表主键只定位行，不进属性——除非它就是业务编号主键（见下）
         properties[col.name] = { type: columnPropType(col.type, true), ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
@@ -71,7 +72,7 @@ export class DemoLlm implements Llm {
         kind: "thing",
         ...(identity ? { identity } : {}),
         properties,
-        sources: { [connection]: { connection, table: table.name, ...(pkCol ? { pk: pkCol.name } : {}), fields } }, // 主键读不出就不写，不编造
+        sources: { [connection]: { connection, table: table.name, ...(pkCol ? { pk: pkCol.name } : {}), fields } }, // 主键读不出/读不全就不写，不编造
       };
     }
     return out;
@@ -104,6 +105,28 @@ export class DemoLlm implements Llm {
           reason: `名字和字段都不像（${input.class_a.name} / ${input.class_b.name}）`,
         });
     return reviseWithOverlap(base, input.class_a, input.class_b, input.overlap);
+  }
+
+  async proposeKey(input: { name: string; current?: string; candidates: KeyCandidateShot[] }): Promise<KeySuggestion> {
+    // 演示实现没有语义可读，按数据机械选：表内不唯一的出局 → 单对命中最高者胜，平手硬信号（unique/pk）优先；
+    // 全 0 命中不否定（维持导入时的建议）；没有候选或全出局给 null，留给人定。
+    if (input.candidates.length === 0) return { key: null, reason: `${input.name} 没有候选列（没找到像唯一键的字段），留给人定` };
+    const usable = input.candidates.filter((c) => c.intraUnique);
+    if (usable.length === 0) return { key: null, reason: "候选列在表内都有重复，不能当唯一键" };
+    const bestHit = (c: KeyCandidateShot) => c.hits.reduce((m, h) => Math.max(m, h.hit), 0);
+    const best = [...usable].sort(
+      (x, y) => bestHit(y) - bestHit(x) || Number(Boolean(y.unique || y.pk)) - Number(Boolean(x.unique || x.pk))
+    )[0];
+    const top = best.hits.reduce((m, h) => (h.hit > m.hit ? h : m), { class_b: "", column: "", hit: 0, total_a: 0, total_b: 0 });
+    if (top.hit > 0) {
+      return {
+        key: best.name,
+        reason: `与 ${top.class_b}.${top.column} 对上 ${top.hit} 条${best.unique || best.pk ? "，有唯一索引（硬保证）" : "，仅数据验证（软保证）"}`,
+      };
+    }
+    const cur = usable.find((c) => c.name === input.current);
+    if (cur) return { key: cur.name, reason: "试算没有对上号（0 命中不否定），维持导入时的建议" };
+    return { key: null, reason: "没有数据证据，留给人定" };
   }
 }
 

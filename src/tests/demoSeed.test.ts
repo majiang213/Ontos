@@ -87,6 +87,10 @@ describe("writeDemoFiles：十二套文件库", () => {
     const po = await d.introspect("purchase_sys");
     expect(po.find((t) => t.name === "po_item")?.columns.find((c) => c.name === "sn")?.comment).toBe("设备序列号");
     expect(po.find((t) => t.name === "order")?.columns.find((c) => c.name === "supplier_name")?.comment).toBe("供应商");
+    // 唯一约束随内省下发（唯一键判据的硬信号）：po_item.sn UNIQUE、order.order_no 主键即唯一
+    expect(po.find((t) => t.name === "po_item")?.columns.find((c) => c.name === "sn")?.unique).toBe(true);
+    expect(po.find((t) => t.name === "po_item")?.columns.find((c) => c.name === "po_id")?.unique).toBeUndefined(); // 自增主键列不被误标（唯一性只认显式唯一索引）
+    expect(po.find((t) => t.name === "order")?.columns.find((c) => c.name === "order_no")?.unique).toBe(true);
     const rep = await d.introspect("repair_sys");
     expect(rep[0].columns.find((c) => c.name === "symptom")?.comment).toBe("故障现象");
     // 注释不是库里的表：sqlite_master 只有业务表（表清单断言在上面用例，这里钉「没有 _ontos_comments 这类东西」）

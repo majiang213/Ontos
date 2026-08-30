@@ -78,7 +78,7 @@ export function getLlm(workspace: string): Llm {
     rt.llmDemo ??= new DemoLlm();
     return rt.llmDemo;
   }
-  if (rt.llmAiSdk && typeof rt.llmAiSdk.proposePair !== "function") rt.llmAiSdk = undefined; // 热更留下的旧实例没有新方法，丢掉重做
+  if (rt.llmAiSdk && (typeof rt.llmAiSdk.proposePair !== "function" || typeof rt.llmAiSdk.proposeKey !== "function")) rt.llmAiSdk = undefined; // 热更留下的旧实例没有新方法，丢掉重做
   if (!rt.llmAiSdk) {
     const model = process.env.OPENAI_MODEL;
     if (!model) throw new Error(MSG.openaiModelMissing);

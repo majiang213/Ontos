@@ -36,8 +36,9 @@ export async function editDraft(env: EngineEnv, input: DraftOp, workspace: strin
       // 拦截或校验失败时任何抛出都整份回退——不留「源上已是新键、properties 仍是旧名」的半截草稿。
       try {
         applyOp(state, input, published);
-        // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在字段的坏草稿不能攒到发布一刻才炸）
-        validateFull(state.draft);
+        // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在字段的坏草稿不能攒到发布一刻才炸）。
+        // 草稿放开「有源无键」一条（allowKeyless）：键在待确认面板①定，发布闸拦——模型没猜到唯一键不能卡死导入。
+        validateFull(state.draft, { allowKeyless: true });
       } catch (e) {
         state.draft = backup;
         throw e instanceof DraftReject ? e : new DraftReject(e instanceof Error ? e.message : String(e));
@@ -62,7 +63,7 @@ export async function mutateDraft(env: EngineEnv, fn: (draft: OntologyConfig) =>
     state.draft = backup; // 回退
     throw new DraftReject(e instanceof Error ? e.message : String(e));
   }
-  validateDraftOrThrow(state, backup); // 与 editDraft 同闸：裁决产物也得过动作形状四查
+  validateDraftOrThrow(state, backup, { allowKeyless: true }); // 与 editDraft 同闸：裁决产物也得过动作形状四查（键待定同草稿放开）
   const saved = await commitDraft(env, workspace, state, expectedRev, true); // 被撤的类/关系顺手清摆位、弯折、钉点（裁决的 dropClass 不走 delete_object）
   if (!saved) throw new DraftReject(MSG.draftChanged(await getRev(env, workspace)));
   return state;

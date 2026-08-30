@@ -343,6 +343,40 @@ describe("LLM 演示实现（离线）", () => {
     expect(intDraft.po_item.identity).toBeUndefined();
   });
 
+  it("逆向建模：复合主键的单列不唯一——不用主键当唯一键，也不写 pk", async () => {
+    const draft = await slot.proposeObjects([
+      {
+        connection: "purchase_sys",
+        table: {
+          name: "po_line",
+          columns: [
+            { name: "order_no", type: "TEXT", pk: true },
+            { name: "line_no", type: "TEXT", pk: true },
+            { name: "sku", type: "TEXT", pk: false },
+          ],
+        },
+      },
+    ]);
+    expect(draft.po_line.identity).toBeUndefined(); // 复合主键首列不是唯一键（宁缺勿错）
+    expect(draft.po_line.properties.order_no).toBeUndefined(); // 主键不进属性
+    expect(draft.po_line.sources?.purchase_sys.pk).toBeUndefined(); // 主键读不全就不写，不编造
+    // 复合主键 + 唯一业务列：唯一列当唯一键
+    const withUnique = await slot.proposeObjects([
+      {
+        connection: "purchase_sys",
+        table: {
+          name: "po_line",
+          columns: [
+            { name: "order_no", type: "TEXT", pk: true },
+            { name: "line_no", type: "TEXT", pk: true },
+            { name: "sn", type: "TEXT", pk: false, unique: true },
+          ],
+        },
+      },
+    ]);
+    expect(withUnique.po_line.identity).toBe("sn");
+  });
+
   it("逆向建模：列注释存成字段说明，没注释的字段说明为空", async () => {
     const draft = await slot.proposeObjects([
       {

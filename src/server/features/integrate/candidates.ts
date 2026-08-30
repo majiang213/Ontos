@@ -21,7 +21,7 @@ import { isSharedObjectName } from "../ontology/sharedName";
 const ADVICE_RULES_VERSION = 5;
 
 /** 投喂形状的哈希：类名 + 连接集 + 字段名 + 枚举值域（各自排序后序列化），前缀建议规则版本。快照的失效键——
- *  唯一键、字段类型、来源列对照、摆位都不在里头，改了不重算（它们不影响成对资格，也不在模型的输入里）。
+ *  唯一键、字段类型、来源列对照、摆位都不在里头，改了不重算（它们不在模型的输入里；唯一键只是读时过滤清单，见 listCandidates）。
  *  排序一律按码元（不用 localeCompare）：多实例 ICU 本地化不同会把同一份内容排出两种序，哈希就白算了。 */
 function shotHash(classes: ClassShot[]): string {
   const canon = [
@@ -71,39 +71,53 @@ function nameChangeIsVerdict(prev: string[] | undefined, now: string[]): boolean
   return gained.every(isSharedObjectName);
 }
 
-/** 已上画布、有来源的候选对（同一库两张表也算）：快照命中直接用；失配时若只是并类/立公共对象，沿用还活着的对；
- *  否则问实现并重写快照。定案过滤在读时套——已放弃的裁决（version=-1）不算定案。 */
+/** 候选对建议原语（快照命中或问实现）：键未定的类同样在列——识别唯一键要用它当可比对象；
+ *  疑似重复清单的键过滤见 listCandidates（ADR 0010：键未定的类不参与疑似重复）。 */
+export async function pairProposals(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<PairAdvice[]> {
+  const d = (await getDraft(env, workspace)).draft;
+  const classes = classShots(d);
+  const names = classes.map((c) => c.name);
+  const hash = shotHash(classes);
+  const snap = await env.meta.readCandidateSnapshot(workspace);
+  const byName = new Map(Object.entries(d.object_types));
+  const none = new Set<string>();
+  let proposals: PairAdvice[];
+  if (snap && snap.shot_hash === hash) {
+    proposals = snap.proposals;
+  } else if (snap && nameChangeIsVerdict(snap.class_names, names)) {
+    proposals = keepPairs(snap.proposals, byName, none);
+    try {
+      await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
+    } catch {
+      // 钉失败不拦答案：本次用还活着的对；下次若仍失配且不是并类，才会再猜
+    }
+  } else {
+    proposals = keepPairs((await env.llm(workspace).proposePairs(classes)).map(cleanAdvice), byName, none); // 出槽清一遍：stage 空壳不留快照
+    try {
+      await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
+    } catch {
+      // 快照写失败不拦答案：本次照常返回，下次读重算——快照只是省模型调用，不是事实源
+    }
+  }
+  return proposals;
+}
+
+/** 疑似重复清单：建议原语 + 读时过滤（已定案、键未定的类都不进——交集率建在唯一键上，键没定就裁会出「合法但错误」的关系）。
+ *  唯一键不进投喂形状哈希：定键/改键只是读时过滤，不重算快照（唯一键本就不在模型的输入里）。 */
 export async function listCandidates(env: EngineEnv, workspace: string = DEFAULT_WORKSPACE): Promise<Result<PairAdvice[]>> {
   return toResult(async () => {
     const d = (await getDraft(env, workspace)).draft;
     const decided = new Set(
       (await env.meta.listDecisions(workspace)).filter((r) => r.version !== -1).map((r) => pairKey(r.class_a, r.class_b))
     );
-    const classes = classShots(d);
-    const names = classes.map((c) => c.name);
-    const hash = shotHash(classes);
-    const snap = await env.meta.readCandidateSnapshot(workspace);
-    const byName = new Map(Object.entries(d.object_types));
-    const none = new Set<string>();
-    let proposals: PairAdvice[];
-    if (snap && snap.shot_hash === hash) {
-      proposals = snap.proposals;
-    } else if (snap && nameChangeIsVerdict(snap.class_names, names)) {
-      proposals = keepPairs(snap.proposals, byName, none);
-      try {
-        await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
-      } catch {
-        // 钉失败不拦答案：本次用还活着的对；下次若仍失配且不是并类，才会再猜
-      }
-    } else {
-      proposals = keepPairs((await env.llm(workspace).proposePairs(classes)).map(cleanAdvice), byName, none); // 出槽清一遍：stage 空壳不留快照
-      try {
-        await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
-      } catch {
-        // 快照写失败不拦答案：本次照常返回，下次读重算——快照只是省模型调用，不是事实源
-      }
-    }
-    return proposals.filter((p) => !decided.has(pairKey(p.class_a, p.class_b)));
+    const proposals = await pairProposals(env, workspace);
+    return proposals.filter((p) => {
+      if (decided.has(pairKey(p.class_a, p.class_b))) return false;
+      const a = d.object_types[p.class_a];
+      const b = d.object_types[p.class_b];
+      if (!a?.identity || !b?.identity) return false; // 键未定的类不参与疑似重复（ADR 0010）
+      return true;
+    });
   }, (v) => MSG.resultCandidates(v.length));
 }
 

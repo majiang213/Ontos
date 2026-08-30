@@ -20,6 +20,22 @@ export interface ClassShot {
   enums: { name: string; values: Literal[] }[];
 }
 
+/** 唯一键识别的候选列快照（proposeKey 的输入）：候选列名 + 硬信号 + 试算证据（扫描行数/去重数/各候选对命中）。
+ *  intraUnique = 每个源表内都无重复（逐源判定，跨源重合不算重复）；false = 表内已有重复，不能当唯一键。 */
+export interface KeyCandidateShot {
+  name: string;
+  description?: string;
+  unique?: boolean; // 单列唯一约束（硬信号）
+  pk?: boolean; // 非整数主键（硬信号）
+  rows: number; // 试算扫描总行数（每源 ≤ KEY_TRIAL_SCAN）
+  distinct: number; // 归一化并集去重数
+  intraUnique: boolean;
+  hits: { class_b: string; column: string; hit: number; total_a: number; total_b: number }[];
+}
+
+/** 唯一键建议（proposeKey 的输出）：key 为 null = 选不出，留给人定。 */
+export type KeySuggestion = { key: string; reason: string } | { key: null; reason: string };
+
 export interface Llm {
   /** 实现名，留痕用（演示实现 / 真模型名） */
   readonly name: string;
@@ -38,6 +54,8 @@ export interface Llm {
     overlap: { rate: number; count_a: number; count_b: number; count_hit: number };
     base?: { tendency: Tendency; reason: string };
   }): Promise<PairAdvice>;
+  /** 看过数据试算之后，从候选列里选唯一键（整合调用口）。试算由调用方算好传入，实现不当计算器。 */
+  proposeKey(input: { name: string; current?: string; candidates: KeyCandidateShot[] }): Promise<KeySuggestion>;
 }
 
 /** 「表结构 → 对象建议」的组合原语：按连接内省定位 + 实现产草稿。REST 与 MCP 的 propose_objects 共用；

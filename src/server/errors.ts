@@ -322,6 +322,7 @@ export const MSG = {
   resultOverlap: (rate: number) => `交集率 ${Math.round(rate * 100)}%`,
   resultCandidates: (n: number) => `找到 ${n} 个疑似重复`,
   resultPairAdvice: (label: string) => `建议「${label}」`,
+  resultKeyIdentified: (key: string | null) => (key ? `建议唯一键：${key}` : "没有唯一键建议"),
   resultRunDone: (n: number) => `跑批完成：${n} 条`,
   resultProposed: (n: number) => `生成 ${n} 个对象建议`,
   resultConnectionSaved: "连接已保存",

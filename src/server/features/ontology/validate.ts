@@ -6,7 +6,13 @@ import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
 import { checkActionValue, walkEffectItems, walkEffectValues, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
 import { MSG } from "../../errors";
 
-export function validateSemantics(config: OntologyConfig): void {
+/** 草稿模式：允许有源类暂时没有认行依据（identity/key 未定，待确认面板①定）——只放过 cfgNoRowKey 这一条，
+ *  键已声明但 fields 缺映射等其余指称校验照查；发布路径不传（默认严格）。 */
+export interface ValidateOptions {
+  allowKeyless?: boolean;
+}
+
+export function validateSemantics(config: OntologyConfig, opts: ValidateOptions = {}): void {
   /** 过滤树走查（schema 层 walkFilter）：键必须是该类属性，$link 关系名必须可解析（嵌套跟着目标类走）。$request/$exists 的内容不查（参数袋/布尔）。 */
   const checkFilterKeys = (clsName: string, f: Record<string, unknown>, trail: string): void => {
     if (!config.object_types[clsName]) return; // 类不存在由效应目标检查报「不存在的类」，这里不抢话
@@ -30,9 +36,8 @@ export function validateSemantics(config: OntologyConfig): void {
     for (const [srcName, entry] of Object.entries(cls.sources ?? {})) {
       const keyProp = sourceKeyProp(cls, entry); // 对齐属性：条目 key 省略则用类 identity（schema/config 单源）
       if (!keyProp) {
-        throw new Error(MSG.cfgNoRowKey(clsName, srcName));
-      }
-      if (!entry.fields[keyProp]) {
+        if (!opts.allowKeyless) throw new Error(MSG.cfgNoRowKey(clsName, srcName));
+      } else if (!entry.fields[keyProp]) {
         throw new Error(MSG.cfgFieldsMissingKey(clsName, srcName, keyProp));
       }
       for (const prop of Object.keys(entry.fields)) {

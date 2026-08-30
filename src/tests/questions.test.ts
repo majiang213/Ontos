@@ -81,6 +81,7 @@ describe("跑批失败分阶段（假实现）", () => {
     proposeObjects: async () => ({}),
     proposePairs: async () => [],
     proposePair: async ({ class_a, class_b }) => ({ class_a: class_a.name, class_b: class_b.name, tendency: Verdict.NameSimilar, reason: "" }),
+    proposeKey: async () => ({ key: null, reason: "mock" }),
   });
 
   it("模型没产出记编译失败；查询过不了引擎记执行出错；原因都落库", async () => {
@@ -122,6 +123,7 @@ describe("跑批比对口径（假实现，真引擎）", () => {
     proposeObjects: async () => ({}),
     proposePairs: async () => [],
     proposePair: async ({ class_a, class_b }) => ({ class_a: class_a.name, class_b: class_b.name, tendency: Verdict.NameSimilar, reason: "" }),
+    proposeKey: async () => ({ key: null, reason: "mock" }),
   });
 
   it("聚合题比合计：count:* 按部门分组的行合计对期望；实得不符给「期望合计」白话", async () => {

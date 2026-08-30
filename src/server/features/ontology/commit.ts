@@ -9,7 +9,7 @@ import { gcDeadKeys } from "./canvasState";
 import { persistWorkingCopy, type DraftState } from "./canvasPack";
 import { getPublished } from "./current";
 import { sameConfig } from "./sameConfig";
-import { validateActionShapes, validateSemantics } from "./validate";
+import { validateActionShapes, validateSemantics, type ValidateOptions } from "./validate";
 
 /** 草稿写路径的统一收尾：清界面状态死键 → 按结构重算 dirty（改出去又改回来要能收回来）→ CAS 落工作行。
  *  expectedRev = 写入者声明基于的修订号（base_rev ?? 读到的）；bump 恒为 true——界面状态 op 也 bump（rev+1），
@@ -22,19 +22,20 @@ export async function commitDraft(env: EngineEnv, workspace: string, state: Draf
 }
 
 /** 三道校验单源（结构 + 语义 + 动作形状四查）：草稿写入与发布同调这一份。
+ *  opts.allowKeyless 只给草稿写路径（待确认面板①定键前允许有源无键）；发布不传，拦在发布闸。
  *  rollbackTo/getPublished 只用前两道（configSchema.parse + validateSemantics，不走本函数）——
  *  历史已发布的坏配置加载放行，运行期由 action.ts 兜底；「哪里查几道」的边界就是有没有调本函数。 */
-export function validateFull(raw: OntologyConfig): OntologyConfig {
+export function validateFull(raw: OntologyConfig, opts: ValidateOptions = {}): OntologyConfig {
   const parsed = configSchema.parse(structuredClone(raw));
-  validateSemantics(parsed);
+  validateSemantics(parsed, opts);
   validateActionShapes(parsed);
   return parsed;
 }
 
 /** 每步改完立即校验（三查见 validateFull），不合法整体回退——坏草稿不能攒到发布一刻才炸。 */
-export function validateDraftOrThrow(state: DraftState, backup: OntologyConfig): void {
+export function validateDraftOrThrow(state: DraftState, backup: OntologyConfig, opts: ValidateOptions = {}): void {
   try {
-    validateFull(state.draft);
+    validateFull(state.draft, opts);
   } catch (e) {
     state.draft = backup;
     throw new DraftReject(e instanceof Error ? e.message : String(e));

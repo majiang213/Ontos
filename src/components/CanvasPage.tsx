@@ -6,7 +6,7 @@ import OntologyCanvas from "./canvas/OntologyCanvas";
 import type { CanvasLink, CanvasObject } from "./canvas/layout";
 import type { BorderPin } from "./canvas/geometry";
 import Bezel from "./cards/Bezel";
-import DecisionPanel, { identityRows } from "./cards/DecisionPanel";
+import DecisionPanel, { identityRows, type IdentifySuggestion } from "./cards/DecisionPanel";
 import { ApiError, apiGet, apiPost, apiDel } from "./workspaceClient";
 import QuestionsCard from "./cards/QuestionsCard";
 import { ConnectForm, CreateForm, LinkForm } from "./forms/forms";
@@ -165,6 +165,19 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         if (!isUiStateOp(String(body.op))) await reloadPairs();
       }),
     [withLocalWrite, refresh, reloadPairs]
+  );
+
+  /** 逐类「识别唯一键」：数据试算 + 模型综合判断（只建议不落地，面板预选、确认才 set_identity）。失败 toast 后返回 null。 */
+  const identifyKey = useCallback(
+    async (name: string): Promise<IdentifySuggestion | null> => {
+      try {
+        return await apiPost<IdentifySuggestion>("/api/propose_key", { object: name });
+      } catch (e) {
+        failToast(e);
+        return null;
+      }
+    },
+    [failToast]
   );
 
   /** 待确认面板「确认唯一键」：有改动的对象逐个 set_identity，落草稿后重拉疑似重复；失败返回 false（面板不解锁）。 */
@@ -465,6 +478,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
           pairs={pairs}
           onConfirmIdentity={confirmIdentity}
           onPairDone={onPairDone}
+          onIdentify={identifyKey}
           onClose={() => setPanelOpen(false)}
         />
       )}

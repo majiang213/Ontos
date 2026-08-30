@@ -52,21 +52,43 @@ export function mergeSelections(sel: Record<string, string>, rows: IdentityRow[]
   return next;
 }
 
+/** 识别唯一键的结果（propose_key 返回的投影）：key 为 null = 没选出来；hard = 建议列带唯一约束/非整数主键。 */
+export interface IdentifySuggestion {
+  key: string | null;
+  reason: string;
+  hard: boolean;
+}
+
+/** 识别结果的证据行：一句依据 + 硬/软保证标签（key 为 null 时不挂标签）。独立组件便于渲染测试。 */
+export function KeyEvidenceLine({ ev }: { ev: IdentifySuggestion }) {
+  return (
+    <div className="decide-key-evidence">
+      <span>{ev.reason}</span>
+      {ev.key !== null && <span className={`tag${ev.hard ? " is-hard" : " is-soft"}`}>{ev.hard ? "硬保证" : "软保证"}</span>}
+    </div>
+  );
+}
+
 export default function DecisionPanel({
   rows,
   pairs,
   onConfirmIdentity,
   onPairDone,
+  onIdentify,
   onClose,
 }: {
   rows: IdentityRow[];
   pairs: PairAdvice[];
   onConfirmIdentity: (selections: Record<string, string>) => Promise<boolean>; // false = 没落成，卡住不解锁
   onPairDone: (msg: string) => void;
+  /** 逐类「识别唯一键」：数据试算 + 模型综合判断，只建议不落地。null = 服务端失败（调用方已提示），不动选择。 */
+  onIdentify: (name: string) => Promise<IdentifySuggestion | null>;
   onClose: () => void;
 }) {
   const [sel, setSel] = useState<Record<string, string>>(() => Object.fromEntries(rows.map((r) => [r.name, r.current])));
   const [busy, setBusy] = useState(false);
+  const [identifying, setIdentifying] = useState<string | null>(null); // 正在识别的对象名（一次一个）
+  const [identified, setIdentified] = useState<Record<string, IdentifySuggestion>>({});
   const [identityDone, setIdentityDone] = useState(false);
   useEffect(() => setSel((prev) => mergeSelections(prev, rows)), [rows]); // 面板开着时对象增删（部分重叠立公共对象、又生成对象）：新行补草稿当前键，不打回①
   const ready = rows.length > 0 && rows.every((r) => Boolean(sel[r.name])); // 空画布或还有「未设置」都不放行——键没定就裁会得出错的关系
@@ -93,26 +115,54 @@ export default function DecisionPanel({
                 {rows.map((r) => {
                   const v = sel[r.name] ?? "";
                   const suggested = Boolean(r.current) && v === r.current;
+                  const ev = identified[r.name];
                   return (
-                    <label key={r.name} className="decide-row">
-                      <span className="decide-obj">{r.name}</span>
-                      <span className="decide-select">
-                        <select
-                          className="ctl"
-                          value={v}
-                          onChange={(e) => {
-                            setSel((prev) => ({ ...prev, [r.name]: e.target.value }));
-                            if (identityDone) setIdentityDone(false); // 改了键，②里按旧键算的候选对作废
-                          }}
-                        >
-                          <option value="">未设置</option>
-                          {r.fields.map((f) => (
-                            <option key={f.name} value={f.name}>{fieldLabel(f)}</option>
-                          ))}
-                        </select>
-                      </span>
-                      <span className="decide-hint">{suggested ? "模型建议" : ""}</span>
-                    </label>
+                    <div key={r.name} className="decide-row-wrap">
+                      <label className="decide-row">
+                        <span className="decide-obj">{r.name}</span>
+                        <span className="decide-select">
+                          <select
+                            className="ctl"
+                            value={v}
+                            onChange={(e) => {
+                              setSel((prev) => ({ ...prev, [r.name]: e.target.value }));
+                              if (identityDone) setIdentityDone(false); // 改了键，②里按旧键算的候选对作废
+                            }}
+                          >
+                            <option value="">未设置</option>
+                            {r.fields.map((f) => (
+                              <option key={f.name} value={f.name}>{fieldLabel(f)}</option>
+                            ))}
+                          </select>
+                        </span>
+                        <span className="decide-hint">{suggested ? "模型建议" : ""}</span>
+                      </label>
+                      <div className="decide-row-tools">
+                        {ev ? (
+                          <KeyEvidenceLine ev={ev} />
+                        ) : (
+                          <button
+                            className="chip"
+                            disabled={identifying !== null}
+                            onClick={async () => {
+                              setIdentifying(r.name);
+                              try {
+                                const s = await onIdentify(r.name);
+                                if (s) {
+                                  setIdentified((prev) => ({ ...prev, [r.name]: s }));
+                                  const k = s.key;
+                                  if (k) setSel((prev) => ({ ...prev, [r.name]: k })); // 建议预选，确认才落库
+                                }
+                              } finally {
+                                setIdentifying(null);
+                              }
+                            }}
+                          >
+                            {identifying === r.name ? "识别中…" : "识别唯一键"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

@@ -251,15 +251,49 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(false);
   });
 
-  it("识别字段可取消（空串）；改出去又改回来 dirty 能收回", async () => {
+  it("识别字段可取消（空串）：草稿放开有源无键，发布闸拦；改出去又改回来 dirty 能收回", async () => {
     const s = await freshStore(tmp);
-    // 有源类取消识别字段就没有认行依据——校验闸拒绝（无源对象才可无 identity）
-    await expectRejected(s.editDraft({ op: "set_identity", object: "equipment", name: "" }, WORKSPACE), "认行依据");
-    expect((await s.getDraft(WORKSPACE)).dirty).toBe(false); // 被拒的操作不留痕
+    // 草稿允许有源类暂时没有认行依据（键在待确认面板①定，发布闸拦）——取消识别字段可落草稿
+    await s.editDraft({ op: "set_identity", object: "equipment", name: "" }, WORKSPACE);
+    expect((await s.getDraft(WORKSPACE)).draft.object_types.equipment.identity).toBeUndefined();
+    expect((await s.getDraft(WORKSPACE)).dirty).toBe(true);
     await s.editDraft({ op: "set_identity", object: "equipment", name: "name" }, WORKSPACE);
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(true);
     await s.editDraft({ op: "set_identity", object: "equipment", name: "serial_no" }, WORKSPACE); // 改回去
     expect((await s.getDraft(WORKSPACE)).dirty).toBe(false);
+    // 发布闸：有源无键的草稿发布被拦（cfgNoRowKey）
+    await s.editDraft({ op: "set_identity", object: "equipment", name: "" }, WORKSPACE);
+    await expectRejected(s.publish(WORKSPACE), "认行依据");
+  });
+
+  it("导入有源无键的类：草稿收下（模型没猜到唯一键不卡导入），发布闸拦", async () => {
+    const s = await freshStore(tmp);
+    await s.editDraft(
+      {
+        op: "import_objects",
+        objects: {
+          po_item: {
+            kind: "thing",
+            properties: { sn: { type: "string" } },
+            sources: { purchase_sys: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn" } } },
+          },
+        },
+      },
+      WORKSPACE
+    );
+    const t = (await s.getDraft(WORKSPACE)).draft.object_types.po_item;
+    expect(t.identity).toBeUndefined(); // 键没定：上画布，待确认面板①定
+    expect(t.sources?.purchase_sys.table).toBe("po_item"); // 来源照挂不丢映射
+    // 面板①定键后可以发布
+    await s.editDraft({ op: "set_identity", object: "po_item", name: "sn" }, WORKSPACE);
+    expect(unwrap(await s.publish(WORKSPACE)).version).toBe(2);
+    // 键没定就发布：被拦
+    const s2 = await freshStore(tmp);
+    await s2.editDraft(
+      { op: "import_objects", objects: { po2: { kind: "thing", properties: { sn: { type: "string" } }, sources: { purchase_sys: { connection: "purchase_sys", table: "po_item", fields: { sn: "sn" } } } } } },
+      WORKSPACE
+    );
+    await expectRejected(s2.publish(WORKSPACE), "认行依据");
   });
 
   it("删被引用的属性被拒，并报出引用处；拒完 fields 仍是旧键", async () => {

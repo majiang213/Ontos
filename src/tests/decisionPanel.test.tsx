@@ -1,7 +1,7 @@
 // 待确认面板：唯一键行派生（排除派生字段、标记模型建议、无候选不进行）+ 渲染冒烟（两段解锁）。
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
-import DecisionPanel, { identityRows, mergeSelections } from "../components/cards/DecisionPanel";
+import DecisionPanel, { identityRows, mergeSelections, KeyEvidenceLine } from "../components/cards/DecisionPanel";
 import PairCard from "../components/cards/PairCard";
 import { VERDICT_LABELS, Verdict } from "../server/schema/verdict";
 
@@ -14,6 +14,7 @@ const idle = {
   pairs: [] as [],
   onConfirmIdentity: async () => true,
   onPairDone: () => {},
+  onIdentify: async () => null,
   onClose: () => {},
 };
 
@@ -157,5 +158,33 @@ describe("DecisionPanel 渲染冒烟（react-dom/server，无 DOM 环境）", ()
       )
     );
     expect(html).toMatch(/disabled[^>]*>确认唯一键/);
+  });
+
+  it("每行有「识别唯一键」按钮（点击行为依赖 DOM，react-dom/server 只钉静态结构）", () => {
+    const html = strip(
+      renderToString(
+        <DecisionPanel
+          rows={identityRows({ po: t(undefined, { sn: { description: "设备序列号" } }) }, ["po"])}
+          {...idle}
+          onIdentify={async () => ({ key: "sn", reason: "与 device.serial_no 对上 40 条", hard: true })}
+        />
+      )
+    );
+    expect(html).toContain("识别唯一键");
+  });
+
+  it("识别证据行：有键时展示依据 + 硬/软保证标签", () => {
+    const html = strip(renderToString(<KeyEvidenceLine ev={{ key: "sn", reason: "与 device.serial_no 对上 40 条", hard: true }} />));
+    expect(html).toContain("与 device.serial_no 对上 40 条");
+    expect(html).toContain("硬保证");
+    const soft = strip(renderToString(<KeyEvidenceLine ev={{ key: "sn", reason: "仅数据验证", hard: false }} />));
+    expect(soft).toContain("软保证");
+  });
+
+  it("识别证据行：key 为 null 只展示依据，不挂保证标签", () => {
+    const html = strip(renderToString(<KeyEvidenceLine ev={{ key: null, reason: "没有可比对象，无法数据验证", hard: false }} />));
+    expect(html).toContain("没有可比对象，无法数据验证");
+    expect(html).not.toContain("硬保证");
+    expect(html).not.toContain("软保证");
   });
 });

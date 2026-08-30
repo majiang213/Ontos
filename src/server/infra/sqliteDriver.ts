@@ -102,19 +102,28 @@ export class SqliteDriver implements SourceDriver {
     return [...this.dbs.keys()];
   }
 
-  /** 内省叠加列注释（注释不住库里的表：sidecar / setComments 手写，sqlite_master 里永远没有注释表）。 */
+  /** 内省叠加列注释与唯一约束（注释不住库里的表：sidecar / setComments 手写，sqlite_master 里永远没有注释表；
+   *  唯一性走 PRAGMA index_list/index_info：单列唯一索引才证明该列唯一，复合唯一索引的单列不唯一，部分索引不保证全局唯一）。 */
   async introspect(connection: string): Promise<TableInfo[]> {
     const db = this.db(connection);
     const tables = db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
       .all() as { name: string }[];
-    return tables.map((t) => ({
-      name: t.name,
-      columns: (db.prepare(`PRAGMA table_info("${t.name}")`).all() as { name: string; type: string; pk: number }[]).map((c) => {
-        const col = { name: c.name, type: c.type, pk: c.pk === 1 };
-        const comment = this.comments.get(connection)?.get(t.name)?.[c.name];
-        return comment ? { ...col, comment } : col;
-      }),
-    }));
+    return tables.map((t) => {
+      const uniqueCols = new Set<string>();
+      for (const idx of db.prepare(`PRAGMA index_list("${t.name}")`).all() as { name: string; unique: number; partial: number }[]) {
+        if (!idx.unique || idx.partial) continue;
+        const cols = db.prepare(`PRAGMA index_info("${idx.name}")`).all() as { name: string | null }[];
+        if (cols.length === 1 && cols[0].name) uniqueCols.add(cols[0].name);
+      }
+      return {
+        name: t.name,
+        columns: (db.prepare(`PRAGMA table_info("${t.name}")`).all() as { name: string; type: string; pk: number }[]).map((c) => {
+          const col: TableInfo["columns"][number] = { name: c.name, type: c.type, pk: c.pk === 1, ...(uniqueCols.has(c.name) ? { unique: true } : {}) };
+          const comment = this.comments.get(connection)?.get(t.name)?.[c.name];
+          return comment ? { ...col, comment } : col;
+        }),
+      };
+    });
   }
 }

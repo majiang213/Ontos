@@ -30,14 +30,41 @@ pg.types.setTypeParser(1184, (v: string) => {
   return Number.isNaN(ms) ? v : new Date(ms).toISOString();
 });
 
-const INTROSPECT_MYSQL = `SELECT TABLE_NAME AS name, COLUMN_NAME AS \`column\`, COLUMN_TYPE AS type, COLUMN_KEY AS keyflag, COLUMN_COMMENT AS comment
-  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`;
+const INTROSPECT_MYSQL = `SELECT c.TABLE_NAME AS name, c.COLUMN_NAME AS \`column\`, c.COLUMN_TYPE AS type,
+    CASE WHEN c.COLUMN_KEY = 'PRI' THEN 'PRI' ELSE '' END AS keyflag,
+    CASE WHEN u.TABLE_NAME IS NULL THEN '' ELSE 'UNI' END AS uniqueflag,
+    c.COLUMN_COMMENT AS comment
+  FROM information_schema.COLUMNS c
+  LEFT JOIN (
+    -- 单列唯一索引（NON_UNIQUE=0 且索引只有一列）；主键索引不算——主键走 keyflag=PRI
+    SELECT s.TABLE_SCHEMA, s.TABLE_NAME, s.COLUMN_NAME
+    FROM information_schema.STATISTICS s
+    JOIN (
+      SELECT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME
+      FROM information_schema.STATISTICS
+      WHERE NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY'
+      GROUP BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME
+      HAVING COUNT(*) = 1
+    ) one ON one.TABLE_SCHEMA = s.TABLE_SCHEMA AND one.TABLE_NAME = s.TABLE_NAME AND one.INDEX_NAME = s.INDEX_NAME
+    WHERE s.NON_UNIQUE = 0
+  ) u ON u.TABLE_SCHEMA = c.TABLE_SCHEMA AND u.TABLE_NAME = c.TABLE_NAME AND u.COLUMN_NAME = c.COLUMN_NAME
+  WHERE c.TABLE_SCHEMA = ? ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION`;
 const INTROSPECT_PG = `SELECT c.table_name AS name, c.column_name AS column, c.data_type AS type,
     CASE WHEN kcu.column_name IS NULL THEN '' ELSE 'PRI' END AS keyflag,
+    CASE WHEN ucu.column_name IS NULL THEN '' ELSE 'UNI' END AS uniqueflag,
     pg_catalog.col_description((quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass::oid, c.ordinal_position) AS comment
   FROM information_schema.columns c
   LEFT JOIN information_schema.table_constraints tc ON tc.table_name = c.table_name AND tc.table_schema = c.table_schema AND tc.constraint_type = 'PRIMARY KEY'
   LEFT JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema AND kcu.table_name = c.table_name AND kcu.column_name = c.column_name
+  LEFT JOIN (
+    SELECT u.table_schema, u.table_name, u.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage u
+      ON u.constraint_name = tc.constraint_name AND u.table_schema = tc.table_schema AND u.table_name = tc.table_name
+    WHERE tc.constraint_type = 'UNIQUE' AND tc.table_schema = $1
+    GROUP BY tc.constraint_name, u.table_schema, u.table_name, u.column_name
+    HAVING COUNT(*) = 1
+  ) ucu ON ucu.table_schema = c.table_schema AND ucu.table_name = c.table_name AND ucu.column_name = c.column_name
   WHERE c.table_schema = $1 ORDER BY c.table_name, c.ordinal_position`;
 
 function groupColumns(rows: Record<string, unknown>[]): TableInfo[] {
@@ -45,7 +72,7 @@ function groupColumns(rows: Record<string, unknown>[]): TableInfo[] {
   for (const r of rows) {
     const name = String(r.name);
     const t = map.get(name) ?? { name, columns: [] };
-    t.columns.push({ name: String(r.column), type: String(r.type), pk: r.keyflag === "PRI", ...(r.comment ? { comment: String(r.comment) } : {}) });
+    t.columns.push({ name: String(r.column), type: String(r.type), pk: r.keyflag === "PRI", ...(r.uniqueflag === "UNI" ? { unique: true } : {}), ...(r.comment ? { comment: String(r.comment) } : {}) });
     map.set(name, t);
   }
   return [...map.values()];

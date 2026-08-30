@@ -42,3 +42,8 @@ export function pickRule(sample: string[]): NormRule {
 export function normalizeWith(rule: NormRule, v: unknown): string {
   return rule.normalize(String(v ?? ""));
 }
+
+/** 取列值（比对前原语）：空串不算标识，防幻影交集/命中。交集率与唯一键试算共用这一处。 */
+export function columnValues(rows: Record<string, unknown>[], column: string): string[] {
+  return rows.map((r) => r[column]).filter((v) => v != null && String(v).trim() !== "").map(String);
+}

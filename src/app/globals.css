@@ -703,16 +703,20 @@ select.ctl { background: var(--panel); }
   margin-bottom: 8px;
 }
 .decide-list { display: flex; flex-direction: column; }
+.decide-row-wrap {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 6px;
+  border-bottom: 1px solid var(--hairline);
+}
+.decide-row-wrap:last-child { border-bottom: none; }
 .decide-row {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--hairline);
   cursor: pointer;
 }
-.decide-row:last-child { border-bottom: none; }
 .decide-row:focus-within { background: var(--panel-2); }
 .decide-obj {
   width: 140px;
@@ -729,6 +733,25 @@ select.ctl { background: var(--panel); }
   color: var(--ink-3);
   text-align: right;
 }
+.decide-row-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding-left: 150px;
+}
+.decide-row-tools .chip { flex-shrink: 0; }
+.decide-key-evidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+.decide-key-evidence .tag.is-hard { color: var(--ok); }
+.decide-key-evidence .tag.is-soft { color: #b8860b; }
 .decide-select { position: relative; display: block; flex: 1; min-width: 0; }
 .decide-select::after {
   content: "";

@@ -9,7 +9,7 @@ import { pickRule, normalizeWith, RULES } from "../server/features/integrate/nor
 import { overlapRate } from "../server/features/integrate/overlap";
 import { applyVerdict } from "../server/features/integrate/applyVerdict";
 import { Verdict, type PairAdvice } from "../server/schema/verdict";
-import { listCandidates } from "../server/features/integrate/candidates";
+import { listCandidates, pairProposals } from "../server/features/integrate/candidates";
 import { proposePair } from "../server/features/integrate/advise";
 import { computeOverlap } from "../server/features/integrate/overlap";
 import { decide } from "../server/features/integrate/decide";
@@ -322,6 +322,7 @@ describe("裁决流水线", () => {
           proposeObjects: async () => ({}),
           proposePairs: async () => [one, one, { ...one, class_a: "po_b", class_b: "po_a" }],
           proposePair: async () => one,
+          proposeKey: async () => ({ key: null, reason: "mock" }),
         }),
       })
     );
@@ -357,6 +358,7 @@ describe("裁决流水线", () => {
           return [one];
         },
         proposePair: async () => one,
+        proposeKey: async () => ({ key: null, reason: "mock" }),
       }),
     };
     const isPair = (p: { class_a: string; class_b: string }) =>
@@ -379,6 +381,45 @@ describe("裁决流水线", () => {
     await env.meta.abandonPendingDecisions("default"); // 放弃草稿：未绑版本的裁决作废
     expect(unwrap(await listCandidates(env)).some(isPair)).toBe(true); // 对回来了
     expect(calls).toBe(2); // 草稿内容没变，仍不重算
+  });
+
+  it("键未定的类不进疑似重复清单（读时过滤）；建议原语里仍在；定键后出现", async () => {
+    const s = await draftEngine();
+    const keyless = (name: string, src: string, tbl: string, col: string) => ({
+      kind: "thing" as const,
+      properties: { sn: { type: "string" as const } },
+      sources: { [src]: { connection: src, table: tbl, fields: { sn: col } } },
+    });
+    await s.editDraft({
+      op: "import_objects",
+      objects: {
+        po_a: keyless("po_a", "purchase_sys", "po_item", "sn"),
+        po_b: keyless("po_b", "device_sys", "device", "serial_no"),
+      },
+    });
+    const one: { class_a: string; class_b: string; tendency: Verdict.Same; reason: string } = {
+      class_a: "po_a",
+      class_b: "po_b",
+      tendency: Verdict.Same,
+      reason: "字段重合",
+    };
+    const env = {
+      ...s.env,
+      llm: () => ({
+        name: "keyless",
+        nlToQuery: async () => ({ object: "po_a" }),
+        proposeObjects: async () => ({}),
+        proposePairs: async () => [one],
+        proposePair: async () => one,
+        proposeKey: async () => ({ key: null, reason: "mock" }),
+      }),
+    };
+    expect(unwrap(await listCandidates(env))).toEqual([]); // 键未定：不参与疑似重复（ADR 0010）
+    expect((await pairProposals(env)).length).toBe(1); // 建议原语里仍在——识别唯一键的可比对象
+    await s.editDraft({ op: "set_identity", object: "po_a", name: "sn" });
+    await s.editDraft({ op: "set_identity", object: "po_b", name: "sn" });
+    const listed = unwrap(await listCandidates(env));
+    expect(listed.some((p) => p.class_a === "po_a" && p.class_b === "po_b")).toBe(true); // 定键后进清单
   });
 
   it("decide「跳过」：不动草稿但留痕；listCandidates 不再列出", async () => {
@@ -455,6 +496,7 @@ describe("裁决流水线", () => {
           seenBase = input.base;
           return { class_a: "po_a", class_b: "po_b", tendency: Verdict.Overlap as const, reason: "维持" };
         },
+        proposeKey: async () => ({ key: null, reason: "mock" }),
       }),
     };
     unwrap(await proposePair(env, "default", "po_a", "po_b", { rate: 0, count_a: 100, count_b: 0, count_hit: 0 }));
@@ -508,6 +550,7 @@ describe("裁决流水线", () => {
     proposeObjects: async () => ({}),
     proposePairs: async () => proposePairs(),
     proposePair: async () => proposePairs()[0] ?? { class_a: "a", class_b: "b", tendency: Verdict.Same as const, reason: "" },
+    proposeKey: async () => ({ key: null, reason: "mock" }),
   });
 
   const threeSourced = {

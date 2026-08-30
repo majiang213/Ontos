@@ -7,7 +7,7 @@ import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { mustCls, keyColumn, sourcesOf, type Cls } from "../query/individual";
 import { getDraft } from "../ontology/current";
 import { hasSources } from "./eligibility";
-import { pickRule, normalizeWith } from "./normalize";
+import { columnValues, normalizeWith, pickRule } from "./normalize";
 import type { EngineEnv } from "../env";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 import type { MetaStore } from "../../meta/store";
@@ -49,7 +49,7 @@ export async function overlapRate(driver: SourceDriver, clsA: Cls, clsB: Cls, me
       const col = keyColumn(cls, entry);
       const rows = await driver.select(entry.connection, entry.table, [col], [], MAX_SCAN + 1); // 多取一行探测超限
       if (rows.length > MAX_SCAN) throw new EngineReject(MSG.identityColumnTooBig(cls.name, MAX_SCAN));
-      out.push(rows.map((r) => r[col]).filter((v) => v != null && String(v).trim() !== "").map(String)); // 空串不算标识，防幻影交集
+      out.push(columnValues(rows, col)); // 空串不算标识，防幻影交集
     }
     return out;
   };
