@@ -90,7 +90,7 @@ describe("元库 DDL（三方言）", () => {
     }
   });
 
-  it("开发期不做老库迁移：打开即建表，CAS 与工作行唯一锚直接生效", async () => {
+  it("开发期不做存量迁移：打开即建表，CAS 与工作行唯一锚直接生效", async () => {
     const s = new SqliteDatasource(":memory:");
     try {
       await s.run(`INSERT INTO onto_workspace (id, name) VALUES (1, 'ws')`);

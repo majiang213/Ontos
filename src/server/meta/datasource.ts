@@ -1,7 +1,7 @@
 // 元库数据库 —— 共享库 + workspace_id（B 方案）。库可换：
 //   离线开发：单文件 SQLite（ONTOS_META_DSN 不设，即开即用；隔离在列上不在文件上）
 //   生产：ONTOS_META_DSN=mysql://… 走 MySQL；postgres://… / postgresql://… 走 PostgreSQL
-// DDL 一种数据库一个文件（./ddl/sqlite.sql、mysql.sql、pg.sql 同构手写）；开发期不做老库迁移——结构变了删库重建，
+// DDL 一种数据库一个文件（./ddl/sqlite.sql、mysql.sql、pg.sql 同构手写）；开发期不做存量迁移——结构变了删库重建，
 // 启动只跑各文件的 CREATE TABLE IF NOT EXISTS。
 // workspace_id 的过滤纪律收在各关切 store：方法第一个参数就是空间名，调用方不碰 SQL。
 // 方言选择的唯一出处是 metaDialectOf（DSN scheme → sqlite | mysql | pg）。
