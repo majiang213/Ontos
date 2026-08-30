@@ -46,16 +46,29 @@ function inflateOf(obstacles: RouteRect[]): RouteRect[] {
   return obstacles.map((r) => ({ x: r.x - INFLATE, y: r.y - INFLATE, w: r.w + INFLATE * 2, h: r.h + INFLATE * 2 }));
 }
 
-/** 直接贝塞尔：切向沿两端法线，手柄长随间距取——零弯的单波 S 线，首选形态。 */
+/** 直接贝塞尔：切向沿两端法线，手柄长随间距取——零弯的单波 S 线，首选形态。
+ *  采样密度随曲线长度自适应（目标间距 12px，上限 160 点）——定值 24 点对长边会漏检节点角。 */
 function directBezier(from: RouteEnd, to: RouteEnd, k: number, inflated: RouteRect[]): { d: string; mid: Pt; dir: Pt } | null {
   const dist = Math.hypot(to.point.x - from.point.x, to.point.y - from.point.y);
   const h = Math.min(Math.max(dist * k, 30), 220);
   const c1 = { x: from.point.x + NORMAL[from.side].x * h, y: from.point.y + NORMAL[from.side].y * h };
   const c2 = { x: to.point.x + NORMAL[to.side].x * h, y: to.point.y + NORMAL[to.side].y * h };
   const samples: Pt[] = [from.point];
-  for (let i = 1; i <= 24; i++) samples.push(cubic(from.point, c1, c2, to.point, i / 24));
+  const n = Math.min(Math.max(Math.ceil(dist / 12), 24), 160);
+  for (let i = 1; i <= n; i++) samples.push(cubic(from.point, c1, c2, to.point, i / n));
   if (!clearOf(samples, inflated, from.point, to.point)) return null;
   return { d: `M ${from.point.x},${from.point.y} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${to.point.x},${to.point.y}`, ...polylineMidDir(samples) };
+}
+
+/** 直接贝塞尔档：能走返回曲线、不能走返回 null。edgePath 与布局验收（layout.ts 的走廊迭代）共用这一判定——
+ *  布局排完要让 edgePath 少退到绕障，验的就是这一档。 */
+export function directCurve(from: RouteEnd, to: RouteEnd, obstacles: RouteRect[]): { d: string; mid: Pt; dir: Pt } | null {
+  const inflated = inflateOf(obstacles);
+  for (const k of [0.5, 0.8, 1.1]) {
+    const c = directBezier(from, to, k, inflated);
+    if (c) return c;
+  }
+  return null;
 }
 
 /** 过途经点的曲线：两段 Hermite（途经点处切向取总跨向），出发顺法线出、抵达逆法线进——曲线始终从节点外侧贴上边框。
@@ -390,11 +403,8 @@ export function edgePath(from: RouteEnd, to: RouteEnd, obstacles: RouteRect[], w
     const c = throughCurve(from, waypoint, to, obstacles);
     if (c) return c;
   } else {
-    const inflated = inflateOf(obstacles);
-    for (const k of [0.5, 0.8, 1.1]) {
-      const c = directBezier(from, to, k, inflated);
-      if (c) return c;
-    }
+    const c = directCurve(from, to, obstacles);
+    if (c) return c;
   }
   const points = routeOrthogonal(from, to, obstacles, waypoint);
   if (waypoint) {

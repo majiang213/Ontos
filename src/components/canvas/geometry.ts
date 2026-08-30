@@ -40,6 +40,19 @@ export function borderPoint(from: Rect, to: Pt): Pt {
   return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
+/** 边两端浮动附着端点（无钉点）：各自对着对方中心取边框交点，side 由最近边框候选反推。
+ *  一处定义三处用：FloatingEdge 的无钉点分支、布局验收（layout.edgeBlocked）、测试——「同口径」靠共享函数不靠注释。 */
+export function floatingEndsOf(sRect: Rect, tRect: Rect): [{ point: Pt; side: Side }, { point: Pt; side: Side }] {
+  const sC = { x: sRect.x + sRect.w / 2, y: sRect.y + sRect.h / 2 };
+  const tC = { x: tRect.x + tRect.w / 2, y: tRect.y + tRect.h / 2 };
+  const s = borderPoint(sRect, tC);
+  const t = borderPoint(tRect, sC);
+  return [
+    { point: s, side: closestBorderPin(sRect, s).pin.side },
+    { point: t, side: closestBorderPin(tRect, t).pin.side },
+  ];
+}
+
 /** React Flow 节点 → 矩形。未测量回退与布局计算同一常量（layout.ts）。 */
 export function rectOf(node: { internals: { positionAbsolute: { x: number; y: number } }; measured: { width?: number; height?: number } }): Rect {
   return {
@@ -85,4 +98,32 @@ export function closestBorderPin(r: Rect, p: Pt): { pin: BorderPin; point: Pt } 
     }
   }
   return best;
+}
+
+/** 线标签让位（FloatingEdge 用）：标签放在曲线中点沿法线推 base 处，压到节点就先沿法线推档、
+ *  还撞（标签侧边被节点挡住，法线推不动）就沿切向让位；返回第一档不撞任何节点（外扩 4px）的
+ *  { push（法线推距）, shift（切向让位）}；全撞退回 base（布局已保证走廊，罕见）。 */
+export function labelPushOf(
+  mid: Pt,
+  dir: Pt,
+  labelSize: { w: number; h: number },
+  obstacles: Rect[],
+  base: number
+): { push: number; shift: number } {
+  const inflate = 4;
+  const rects = obstacles.map((r) => ({ x: r.x - inflate, y: r.y - inflate, w: r.w + inflate * 2, h: r.h + inflate * 2 }));
+  const clearAt = (p: number, q: number) => {
+    const cx = mid.x - dir.y * p + dir.x * q; // 法线推 p、切向让 q
+    const cy = mid.y + dir.x * p + dir.y * q;
+    const lx = cx - labelSize.w / 2;
+    const ly = cy - labelSize.h / 2;
+    return !rects.some((r) => lx < r.x + r.w && lx + labelSize.w > r.x && ly < r.y + r.h && ly + labelSize.h > r.y);
+  };
+  const fallback = { push: base, shift: 0 };
+  for (const p of [base, base + 24, base + 48, base + 80, base + 120, base + 170]) {
+    for (const q of [0, -40, 40, -80, 80]) {
+      if (clearAt(p, q)) return { push: p, shift: q };
+    }
+  }
+  return fallback;
 }

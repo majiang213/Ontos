@@ -7,8 +7,8 @@ import type { DraftState } from "./canvasPack";
 /** 两端钉点（建线/改接的可选随车键）。 */
 export type PinEnds = { source?: BorderPin; target?: BorderPin };
 
-/** pins 键里实际给了的端（undefined 端不进记录）：至少一端返回记录，都没给返回 null。 */
-export function definedPinEnds(pins: PinEnds | undefined): PinEnds | null {
+/** pins 键里实际给了的端（undefined 端不进记录）：至少一端返回记录，都没给（含 null）返回 null。 */
+export function definedPinEnds(pins: PinEnds | null | undefined): PinEnds | null {
   const out = Object.fromEntries(Object.entries(pins ?? {}).filter(([, v]) => v !== undefined));
   return Object.keys(out).length ? out : null;
 }
@@ -24,7 +24,17 @@ export function setEdgeBend(state: DraftState, name: string, bend: { dx: number;
   else delete state.edgeBends[name];
 }
 
-/** 钉点整记（create_link 随车）：建线一把落库，不再有 save_edge_pin 接力。 */
+/** 清空全部弯折（save_layout 的 clear_bends）：整理布局回到干净状态。 */
+export function clearAllEdgeBends(state: DraftState): void {
+  state.edgeBends = {};
+}
+
+/** 清空全部钉点（save_layout 的 clear_pins）：整理布局恢复浮动附着。 */
+export function clearAllEdgePins(state: DraftState): void {
+  state.edgePins = {};
+}
+
+/** 钉点整记（create_link 随车）：建线一把落库。 */
 export function setEdgePins(state: DraftState, name: string, pins: PinEnds): void {
   state.edgePins[name] = pins;
 }

@@ -52,15 +52,22 @@ const updatePropertyOp = z.object({
   description: z.string().optional(),
 });
 const setIdentityOp = z.object({ op: z.literal("set_identity"), object: z.string(), name: z.string() }); // name 为空串 = 取消识别字段
-const saveLayoutOp = z.object({ op: z.literal("save_layout"), positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })) });
+// clear_bends / clear_pins 旗标只有「整理布局」带（拖动存摆位不带）：重排 = 回到干净状态，一把清空手工弯折与钉点
+const saveLayoutOp = z.object({
+  op: z.literal("save_layout"),
+  positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
+  clear_bends: z.boolean().optional(),
+  clear_pins: z.boolean().optional(),
+});
 // 线的弯折点：相对两端节点中心连线中点的偏移；bend=null 拉直。与摆位一样是界面状态
 const saveEdgeBendOp = z.object({ op: z.literal("save_edge_bend"), name: z.string(), bend: z.object({ dx: z.number(), dy: z.number() }).nullable() });
 /** 端点钉点形状：钉在某条边的 t 比例处（0..1）。建线/改接 op 的 pins 键与画布包读回校验（draft/canvasPack unpackCanvas）共用。 */
 export const borderPinSchema = z.object({ side: z.enum(["top", "bottom", "left", "right"]), t: z.number() });
 /** 钉点类型单源（校验与类型同一出处）：画布几何、元库记录、轮询帧全引这一型。 */
 export type BorderPin = z.infer<typeof borderPinSchema>;
-/** 两端钉点（建线/改接的可选随车键）：界面状态，随所在 op 一把落库——不再有独立的 save_edge_pin 接力。 */
-const edgePinsField = z.looseObject({ source: borderPinSchema.optional(), target: borderPinSchema.optional() }).optional();
+/** 两端钉点形状（建线/改接的可选随车键）：界面状态，随所在 op 一把落库。 */
+const edgePinsShape = z.looseObject({ source: borderPinSchema.optional(), target: borderPinSchema.optional() });
+const edgePinsField = edgePinsShape.optional();
 // 手动连线：from 类 → to 类，必须给配对字段（match）——关系总得说清靠哪两个字段对上
 const createLinkOp = z.object({
   op: z.literal("create_link"),
@@ -95,7 +102,8 @@ const setActionOp = z.object({ op: z.literal("set_action"), object: z.string(), 
 const removeActionOp = z.object({ op: z.literal("remove_action"), object: z.string(), name: z.string() });
 
 /** 界面状态 op（摆位/弯折）：唯一名单。不写本体——mcpDraftOpSchema 不含（Agent 不写界面状态）、
- *  affectedNames 返回空、editDraft 只落库不校验（不算内容改动；落库仍 bump rev，内容写与界面写互相 CAS 检测）。钉点不是独立 op：随建线/改接的 pins 键同车。 */
+ *  affectedNames 返回空、editDraft 只落库不校验（不算内容改动；落库仍 bump rev，内容写与界面写互相 CAS 检测）。
+ *  钉点随建线/改接的 pins 键同车；整理布局清弯折/钉点走 save_layout 的 clear_bends / clear_pins 旗标。 */
 export const UI_STATE_OPS = ["save_layout", "save_edge_bend"] as const;
 export const isUiStateOp = (op: string): op is (typeof UI_STATE_OPS)[number] => (UI_STATE_OPS as readonly string[]).includes(op);
 
@@ -121,7 +129,7 @@ const UI_STATE_OP_SCHEMAS = [saveLayoutOp, saveEdgeBendOp] as const;
 export const draftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS, ...UI_STATE_OP_SCHEMAS]);
 export type DraftOpInput = z.infer<typeof draftOpSchema>;
 
-/** MCP edit_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉界面状态 op（名单见 UI_STATE_OPS 两条：摆位/弯折；钉点随建线/改接的 pins 键同车，不是独立 op）。 */
+/** MCP edit_draft 的 op 联合：与 REST 共用同一组 variant，但抽掉界面状态 op（名单见 UI_STATE_OPS：摆位/弯折——Agent 不写界面状态）。 */
 export const mcpDraftOpSchema = z.discriminatedUnion("op", [...CONTENT_OP_SCHEMAS]);
 
 /** edit_draft 返回的 names：类名、关系名或「类名.动作名」（不收字段名）。画布 toast/发布条不读它，读 GET 的 action_changes。 */

@@ -213,8 +213,9 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   );
 
   const saveLayout = useCallback(
-    (positions: Record<string, { x: number; y: number }>) => {
-      void op({ op: "save_layout", positions });
+    (positions: Record<string, { x: number; y: number }>, opts?: { clearBends?: boolean; clearPins?: boolean }) => {
+      // 整理布局带清弯折/钉点旗标（一把回到干净状态）；拖动存摆位不带
+      void op({ op: "save_layout", positions, ...(opts?.clearBends ? { clear_bends: true } : {}), ...(opts?.clearPins ? { clear_pins: true } : {}) });
     },
     [op]
   );

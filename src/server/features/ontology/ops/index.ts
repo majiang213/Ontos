@@ -6,7 +6,7 @@
 import type { OntologyConfig } from "../../../schema/config";
 import { NAME_RE, type DraftOpInput as DraftOp } from "../../../schema/ops";
 import { DraftReject, MSG } from "../../../errors";
-import { setEdgeBend, setLayout } from "../canvasState";
+import { clearAllEdgeBends, clearAllEdgePins, setEdgeBend, setLayout } from "../canvasState";
 import type { DraftState } from "../canvasPack";
 import { deleteObject } from "./editObject";
 import { renameObject } from "./renameObject";
@@ -69,6 +69,8 @@ export function applyOp(state: DraftState, input: DraftOp, published: OntologyCo
     }
     case "save_layout":
       setLayout(state, input.positions); // 摆位只进内存；落库在 editDraft 的界面状态分流
+      if (input.clear_bends) clearAllEdgeBends(state); // 整理布局旗标：旧几何上的手工痕迹重排后必然怪，一把清空
+      if (input.clear_pins) clearAllEdgePins(state);
       break;
     case "save_edge_bend": {
       if (!state.draft.link_types[input.name]) throw new DraftReject(MSG.linkNotFound(input.name));

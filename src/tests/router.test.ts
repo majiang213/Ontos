@@ -3,7 +3,8 @@
 // 点/方位词表在 components/canvas/geometry.ts（单源）。
 
 import { describe, expect, it } from "vitest";
-import { edgePath, routeOrthogonal, type RouteEnd, type RouteRect } from "../components/canvas/router";
+import { directCurve, edgePath, routeOrthogonal, type RouteEnd, type RouteRect } from "../components/canvas/router";
+import { samplePath } from "./canvasPath";
 import type { Pt } from "../components/canvas/geometry";
 
 const CELL_CLEAR_STUB = 26; // 与 router 内 STUB+8 的端点免检区同口径
@@ -48,12 +49,31 @@ describe("routeOrthogonal（绕障正交路由）", () => {
   });
 });
 
+describe("directCurve（直接贝塞尔档：edgePath 与布局验收共用同一判定）", () => {
+  it("无障碍时三档手柄至少一档可走，返回曲线", () => {
+    const c = directCurve(from, to, []);
+    expect(c).not.toBeNull();
+    expect(c!.d).toContain(" C ");
+  });
+
+  it("中间有节点挡路时返回 null：edgePath 正是以此为界退绕障（同输入同结论）", () => {
+    const obstacles = [A, BLOCK, C];
+    expect(directCurve(from, to, obstacles)).toBeNull();
+    expect(edgePath(from, to, obstacles).d).toMatch(/ Q | L /); // 退路一致：直接档走不了，绕障登场
+  });
+
+  it("能直连时 edgePath 必走直接贝塞尔：布局验收说「能走」渲染就真的是曲线", () => {
+    const { d } = edgePath(from, to, []);
+    expect(directCurve(from, to, [])).not.toBeNull();
+    expect(d).toContain(" C ");
+  });
+});
+
 describe("edgePath（边的最终路径）", () => {
   it("无障碍时首选直接贝塞尔（单波 S 线）", () => {
     const { d } = edgePath(from, to, []);
     expect(d).toContain(" C "); // 零弯的三次贝塞尔，不走正交
   });
-
   it("有障碍时退回绕障，平滑后仍不穿节点", () => {
     const obstacles = [A, BLOCK, C];
     const pts = routeOrthogonal(from, to, obstacles);
@@ -67,43 +87,6 @@ describe("edgePath（边的最终路径）", () => {
     expect(crosses(pts, inflated(obstacles), from.point, to.point)).toBe(false);
   });
 });
-
-/** 极简 SVG 路径采样：路由只产 M/L/Q/C 四种指令，展成密集折线供验障/验弯。 */
-function samplePath(d: string): Pt[] {
-  const quadAt = (p0: Pt, c: Pt, p1: Pt, t: number): Pt => {
-    const u = 1 - t;
-    return { x: u * u * p0.x + 2 * u * t * c.x + t * t * p1.x, y: u * u * p0.y + 2 * u * t * c.y + t * t * p1.y };
-  };
-  const cubicAt = (p0: Pt, c1: Pt, c2: Pt, p1: Pt, t: number): Pt => {
-    const u = 1 - t;
-    return {
-      x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x,
-      y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y,
-    };
-  };
-  const out: Pt[] = [];
-  let cur: Pt = { x: 0, y: 0 };
-  for (const m of d.matchAll(/([MLQC])([^MLQC]+)/g)) {
-    const coords = [...m[2].matchAll(/(-?\d+(?:\.\d+)?(?:e-?\d+)?),(-?\d+(?:\.\d+)?(?:e-?\d+)?)/g)].map((mm) => ({ x: Number(mm[1]), y: Number(mm[2]) }));
-    if (m[1] === "Q") {
-      for (let i = 0; i < coords.length; i += 2) {
-        for (let k = 1; k <= 16; k++) out.push(quadAt(cur, coords[i], coords[i + 1], k / 16));
-        cur = coords[i + 1];
-      }
-    } else if (m[1] === "C") {
-      for (let i = 0; i < coords.length; i += 3) {
-        for (let k = 1; k <= 16; k++) out.push(cubicAt(cur, coords[i], coords[i + 1], coords[i + 2], k / 16));
-        cur = coords[i + 2];
-      }
-    } else {
-      for (const p of coords) {
-        out.push(p);
-        cur = p;
-      }
-    }
-  }
-  return out;
-}
 
 function nearestOf(pts: Pt[], p: Pt): number {
   return Math.min(...pts.map((q) => Math.hypot(q.x - p.x, q.y - p.y)));

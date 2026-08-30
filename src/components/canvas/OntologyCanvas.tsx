@@ -157,7 +157,7 @@ export interface CanvasProps {
   onConnectRequest?: (from: string, to: string, pins?: { source?: BorderPin; target?: BorderPin }) => void;
   onReconnectLink?: (name: string, from: string, to: string, moved?: { end: "source" | "target"; pin?: BorderPin }) => void; // 拖着已有边的一头改接到别的对象
   onBendChange?: (name: string, bend: Bend | null) => void; // 拖线身捏点拉弯/拉直
-  onLayoutChange?: (positions: Record<string, { x: number; y: number }>) => void;
+  onLayoutChange?: (positions: Record<string, { x: number; y: number }>, opts?: { clearBends?: boolean; clearPins?: boolean }) => void; // 摆位（拖动存 / 整理布局带清弯折钉点旗标）
   classConclusions?: ClassConclusion[]; // 类与类结论（画布只投影，不猜）
 }
 
@@ -195,8 +195,11 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
   const homonymPeers = useMemo(() => homonymPeerMap(classConclusions), [classConclusions]);
   const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
+  // 自动布局计算（整理布局与未存摆位的新节点共用同一份）：独立 memo——同形异义芯片悬停只重算节点列表，不重跑布局
+  const computedPos = useMemo(() => layoutObjects(objects, viewLinks), [objects, viewLinks]);
+
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
-    const pos = layoutObjects(objects, viewLinks);
+    const pos = computedPos;
     return objects.map((o) => {
       const peers = homonymPeers.get(o.name) ?? [];
       return {
@@ -213,7 +216,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
         },
       };
     });
-  }, [objects, viewLinks, layout, homonymPeers, homonymHot]);
+  }, [objects, viewLinks, layout, homonymPeers, homonymHot, computedPos]);
 
   // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
   const [nodes, setNodes] = useNodesState(initialNodes);
@@ -269,14 +272,15 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
     const s = currentSession();
     onConnectRequest?.(from, to, { source: pinAt(from, s?.start), target: pinAt(to, s?.last) });
   };
-  /** 一键理顺：重跑分层布局并取景、记住新摆位。导入一批新表、或拖乱了之后用。 */
+  /** 一键理顺：重跑分层布局并取景、记住新摆位；清掉手工弯折与钉点（旧几何上的痕迹重排后必然怪）。
+   *  导入一批新表、或拖乱了之后用。 */
   const tidy = useCallback(() => {
-    const pos = layoutObjects(objects, viewLinks);
+    const pos = computedPos;
     setNodes((ns) => ns.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })));
-    onLayoutChange?.(Object.fromEntries(pos));
+    onLayoutChange?.(Object.fromEntries(pos), { clearBends: true, clearPins: true });
     // 双帧后取景：等节点重新测量完
     requestAnimationFrame(() => requestAnimationFrame(() => rf.fitView({ padding: 0.2 })));
-  }, [objects, viewLinks, setNodes, rf, onLayoutChange]);
+  }, [computedPos, setNodes, rf, onLayoutChange]);
 
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null); // 悬停的边：露出弯折捏点与改接锚点
   // 全部节点矩形：边的绕障路由吃这份（节点拖动时每帧重算，边跟着重绕）

@@ -2,7 +2,7 @@
 // 纯函数零夹具，interface 就是测试面（components/canvas/geometry.ts）。
 
 import { describe, expect, it } from "vitest";
-import { borderPoint, closestBorderPin, pinPoint, rectOf } from "../components/canvas/geometry";
+import { borderPoint, closestBorderPin, labelPushOf, pinPoint, rectOf } from "../components/canvas/geometry";
 import { NODE_H, NODE_W } from "../components/canvas/layout";
 
 const R = { x: 100, y: 50, w: 200, h: 100 }; // 中心 (200, 100)
@@ -59,5 +59,27 @@ describe("rectOf（React Flow 节点 → 矩形）", () => {
     const node = (width?: number, height?: number) => ({ internals: { positionAbsolute: { x: 1, y: 2 } }, measured: { width, height } });
     expect(rectOf(node(220, 90))).toEqual({ x: 1, y: 2, w: 220, h: 90 });
     expect(rectOf(node())).toEqual({ x: 1, y: 2, w: NODE_W, h: NODE_H });
+  });
+});
+
+describe("labelPushOf（线标签让位：压到节点就推档，法线推不动就切向让位）", () => {
+  const label = { w: 80, h: 20 };
+  it("无障碍：返回 base 原值、不切向让位", () => {
+    expect(labelPushOf({ x: 0, y: 0 }, { x: 1, y: 0 }, label, [], 30)).toEqual({ push: 30, shift: 0 });
+  });
+  it("标签落点压到节点：沿法线推到第一档不撞为止", () => {
+    // 法向 (0,1)：标签从 (0,0) 沿 +y 推；节点横在 y=25 处（base 30 时标签 y 20..40 撞它）
+    const obstacle = { x: -100, y: 25, w: 200, h: 5 };
+    expect(labelPushOf({ x: 0, y: 0 }, { x: 1, y: 0 }, label, [obstacle], 30)).toEqual({ push: 54, shift: 0 });
+  });
+  it("竖着放（法向在 x）：同理沿 x 让开", () => {
+    // 法向 (-1,0)：标签中心沿 -x 推；障碍横在 x -25..-20（base 30 时标签 x -70..-10 压它）
+    const obstacle = { x: -25, y: -100, w: 5, h: 200 };
+    expect(labelPushOf({ x: 0, y: 0 }, { x: 0, y: 1 }, label, [obstacle], 30)).toEqual({ push: 78, shift: 0 }); // p=54 时标签 x -94..-14 仍压着它，p=78 才净
+  });
+  it("法线推不动（标签侧边被高瘦障碍挡住）：切向让位一档即净", () => {
+    // 法向 (0,1)：标签 x 范围只随切向 shift 变；高瘦障碍贴在标签右缘（x 25..40，纵贯全部推档的 y 带）
+    const obstacle = { x: 25, y: -100, w: 15, h: 200 };
+    expect(labelPushOf({ x: 0, y: 0 }, { x: 1, y: 0 }, label, [obstacle], 30)).toEqual({ push: 30, shift: -40 }); // 法线推多少 x 都不动，切向 -40 净
   });
 });

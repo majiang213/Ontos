@@ -200,7 +200,7 @@ _UI 说法_：取数路径。
 | 看过交集率再建议 | 算完交集率后自动再问（面板上「看过交集率」） | `/api/propose_pair` | `proposePair` | 无（关卡在人） |
 | 裁决 | 「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」 | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | 无（关卡在人） |
 | 发布 / 放弃 | 「发布 vN+1」「放弃」 | `/api/publish` | `publish` / `discard` | 无（关卡在人） |
-| 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，17 个 op（15 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins`，没有独立 op） | `edit_draft`（吃同一批内容 op，不含界面状态） |
+| 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，17 个 op（15 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins` 同车；整理布局清弯折/钉点走 `save_layout` 的 `clear_bends` / `clear_pins` 旗标） | `edit_draft`（吃同一批内容 op，不含界面状态） |
 | 问数 | 问题集「全量跑一遍」/「对草稿跑一遍」 | `/api/questions`（`?run=1`，可选 `&target=draft`）、`/api/query` | `nlToQuery` + `query` | `query`（入参已是结构化查询，Ontos 不编） |
 | 动作执行 | 无（站外 Agent 驱动） | — | `runAction` | `run_action` |
 

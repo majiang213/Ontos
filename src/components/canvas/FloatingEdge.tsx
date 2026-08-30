@@ -9,7 +9,7 @@ import { BaseEdge, EdgeLabelRenderer, useInternalNode, useReactFlow, useStoreApi
 import { XYHandle } from "@xyflow/system";
 import { beginSession, fireSession, xyDragArgs } from "./connectSession";
 import { edgePath, type RouteRect } from "./router";
-import { borderPoint, closestBorderPin, pinPoint, rectOf, type Bend, type BorderPin, type Pt } from "./geometry";
+import { borderPoint, closestBorderPin, floatingEndsOf, labelPushOf, pinPoint, rectOf, type Bend, type BorderPin, type Pt } from "./geometry";
 
 interface BendData {
   bend?: Bend;
@@ -64,13 +64,15 @@ function NormalEdge({ id, source, target, label, style, markerEnd, interactionWi
 
   const sRect = rectOf(sourceNode);
   const tRect = rectOf(targetNode);
-  const sCenter = { x: sRect.x + sRect.w / 2, y: sRect.y + sRect.h / 2 };
-  const tCenter = { x: tRect.x + tRect.w / 2, y: tRect.y + tRect.h / 2 };
-  // 端点：有钉点用钉点（用户手选的位置），没钉点浮动（对着对方端点/中心取边框交点）
+  // 端点：有钉点用钉点（用户手选的位置），没钉点浮动（对着对方端点/中心取边框交点——floatingEndsOf 一处定义，
+  // 与布局验收、测试同口径；一端有钉点时另一端对着钉点取边框交点，保持原语义）
   const tPinPoint = d.pins?.target ? pinPoint(tRect, d.pins.target) : null;
   const sPinPoint = d.pins?.source ? pinPoint(sRect, d.pins.source) : null;
-  const s = sPinPoint ?? borderPoint(sRect, tPinPoint ?? tCenter);
-  const t = tPinPoint ?? borderPoint(tRect, sPinPoint ?? sCenter);
+  const [sEnd, tEnd] = floatingEndsOf(sRect, tRect);
+  const s = sPinPoint ?? (tPinPoint ? borderPoint(sRect, tPinPoint) : sEnd.point);
+  const t = tPinPoint ?? (sPinPoint ? borderPoint(tRect, sPinPoint) : tEnd.point);
+  const sCenter = { x: sRect.x + sRect.w / 2, y: sRect.y + sRect.h / 2 };
+  const tCenter = { x: tRect.x + tRect.w / 2, y: tRect.y + tRect.h / 2 };
   // 绕障 + 曲线：edgePath 一处组（router.ts）——正交骨架不穿任何节点，再过点平滑；弯折捏点 = 路由必经的途经点
   const mid = { x: (sCenter.x + tCenter.x) / 2, y: (sCenter.y + tCenter.y) / 2 };
   const waypoint = bent ? { x: mid.x + bend.dx, y: mid.y + bend.dy } : null;
@@ -83,10 +85,11 @@ function NormalEdge({ id, source, target, label, style, markerEnd, interactionWi
   );
   const path = routed.d;
   // 捏点压在线上（弯着在途经点，直着在曲线中点）；标签沿中点切向的法线整个让出线身——
-  // 推开距离按标签实测量（法向支撑半径 + 10），竖线配宽标签也碰不到
+  // 推开距离按标签实测量（法向支撑半径 + 10），压到节点就沿法线再推几档（labelPushOf，几何纯函数）
   const curveMid = waypoint ?? routed.mid;
   const labelRef = useRef<HTMLDivElement>(null);
   const [push, setPush] = useState(20);
+  const [shift, setShift] = useState(0); // 切向让位（labelPushOf 的 shift：法线推不动时沿切线挪）
   const dirX = routed.dir.x;
   const dirY = routed.dir.y;
   useLayoutEffect(() => {
@@ -95,9 +98,11 @@ function NormalEdge({ id, source, target, label, style, markerEnd, interactionWi
     const nx = -dirY; // 法向
     const ny = dirX;
     const half = (Math.abs(nx) * el.offsetWidth + Math.abs(ny) * el.offsetHeight) / 2; // 矩形在法向上的支撑半径
-    setPush(half + 10);
-  }, [dirX, dirY, label]);
-  const labelPos = { x: curveMid.x - dirY * push, y: curveMid.y + dirX * push };
+    const { push: p, shift } = labelPushOf(curveMid, { x: dirX, y: dirY }, { w: el.offsetWidth, h: el.offsetHeight }, d.obstacles ?? [], half + 10);
+    setPush(p);
+    setShift(shift);
+  }, [dirX, dirY, label, curveMid.x, curveMid.y, d.obstacles]);
+  const labelPos = { x: curveMid.x - dirY * push + dirX * shift, y: curveMid.y + dirX * push + dirY * shift };
 
   // 改接：抓住端点捏点拖到别的对象。复用 XYHandle 的拖拽机（与新建连线同一条预览线、同一套吸附）；
   // 捏点钉在真实的边框附着点上（内置锚点钉在节点上/下中点，跟浮动边对不上，故不用）

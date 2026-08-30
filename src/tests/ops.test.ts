@@ -58,6 +58,18 @@ describe("applyOp（脱离队列与元库直测）", () => {
     expect(state.edgeBends.l1).toBeUndefined();
   });
 
+  it("save_layout 带 clear_bends/clear_pins：整理布局一把清空弯折与钉点（拖动存摆位不带旗标，不清）", () => {
+    const state = freshState();
+    applyOp(state, { op: "save_edge_bend", name: "belongs_to", bend: { dx: 1, dy: 2 } }, published);
+    applyOp(state, { op: "update_link", name: "belongs_to", pins: { source: { side: "top", t: 0.5 } } }, published); // 钉点随改接同车写入
+    applyOp(state, { op: "save_layout", positions: { a: { x: 1, y: 1 } } }, published);
+    expect(state.edgeBends.belongs_to).toEqual({ dx: 1, dy: 2 }); // 不带旗标不动
+    expect(state.edgePins.belongs_to).toEqual({ source: { side: "top", t: 0.5 } });
+    applyOp(state, { op: "save_layout", positions: { a: { x: 2, y: 2 } }, clear_bends: true, clear_pins: true }, published);
+    expect(state.edgeBends).toEqual({});
+    expect(state.edgePins).toEqual({});
+  });
+
   it("内容 op 同样只改内存：create_object 落草稿，重复名 DraftReject", () => {
     const state = freshState();
     applyOp(state, { op: "create_object", name: "vendor", kind: "thing" }, published);
