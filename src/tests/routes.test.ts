@@ -1,6 +1,6 @@
 // 路由层测试：错误分层（400/422/500）与裁决走真路由的集成。
 // 每用例一个临时目录 + 全新运行态（helpers.ts），与仓库运行态隔离。
-// 演示模板与 fixture 连接只在 test 空间，凡依赖 equipment/repair/person 等测试数据的请求都走 /api/test/…。
+// 演示模板与 fixture 连接只在 test 空间，凡依赖 equipment/repair/it_device 等测试数据的请求都走 /api/test/…。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { join } from "node:path";
@@ -83,7 +83,7 @@ describe("错误分层：400 / 422 / 500", () => {
 
   it("propose_pair：自配对 400；看过交集率后给出倾向", async () => {
     expect((await post("propose_pair", JSON.stringify({ class_a: "equipment", class_b: "equipment", rate: 0, count_a: 1, count_b: 1, count_hit: 0 }), undefined, TEST)).status).toBe(400);
-    const r = await post("propose_pair", JSON.stringify({ class_a: "equipment", class_b: "person", rate: 0, count_a: 100, count_b: 0, count_hit: 0 }), undefined, TEST);
+    const r = await post("propose_pair", JSON.stringify({ class_a: "equipment", class_b: "it_device", rate: 0, count_a: 100, count_b: 0, count_hit: 0 }), undefined, TEST);
     expect(r.status).toBe(200);
     expect(r.data.tendency).toBeTruthy();
     expect(r.data.reason).toBeTruthy();
@@ -294,7 +294,7 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   it("「跳过」不动草稿但留痕", async () => {
     const s = await draftEngine();
     const before = JSON.stringify((await s.getDraft(TEST)).draft);
-    const r = await post("decide", JSON.stringify({ class_a: "equipment", class_b: "person", verdict: Verdict.Skip }), undefined, TEST);
+    const r = await post("decide", JSON.stringify({ class_a: "equipment", class_b: "it_device", verdict: Verdict.Skip }), undefined, TEST);
     expect(r.status).toBe(200);
     expect(JSON.stringify((await s.getDraft(TEST)).draft)).toBe(before);
     expect((await s.getDraft(TEST)).dirty).toBe(false);

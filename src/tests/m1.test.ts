@@ -79,7 +79,7 @@ describe("驱动注册表", () => {
     const tables = await registry.introspect("device_sys");
     expect(tables.map((t) => t.name)).toContain("device");
     // 列注释随内省下發（fixture 种子手写；真库走 information_schema / col_description）
-    expect(tables.find((t) => t.name === "department")?.columns.find((c) => c.name === "dept_name")?.comment).toBe("部门名称");
+    expect(tables.find((t) => t.name === "department")?.columns.find((c) => c.name === "dept_name")?.comment).toBe("车间名称");
     const sample = await registry.sample("device_sys", "department", 3);
     expect(sample.length).toBe(3);
   });

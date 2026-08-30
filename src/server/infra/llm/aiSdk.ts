@@ -129,7 +129,8 @@ export class AiSdkLlm implements Llm {
           prompt: `你是本体平台的问数编译器。把自然语言问题编译成结构化查询 JSON。${shapeOf(queryRequestSchema)}
 本体：${JSON.stringify(classes)}
 规则：object 必须是上面的类名；filter 的键是属性名（派生属性可过滤），枚举属性给了 values——过滤值只能取 values 里的字面量（原样照抄，不要翻成中文）；
-$link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开用 expand: [{ relation: 关系名, properties: [...] }]；聚合用 aggregate: { group_by: [...], metrics: [{ count: "*" }] }。
+$link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开用 expand: [{ relation: 关系名, properties: [...] }]；聚合用 aggregate: { group_by: [...], metrics: [{ count: "*" }] }——group_by 至少一项（对错板对聚合按合计比对）。
+只问总数/多少条时不要用聚合：给普通列表查询（object + 可选 filter），对错板会数行数。
 答不出就返回最保守的空查询。问题：${question}`,
         }),
       (output) => queryRequestSchema.parse(output) // 出槽再验一次

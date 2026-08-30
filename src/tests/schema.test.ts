@@ -142,9 +142,11 @@ describe("queryRequestSchema / actionRequestSchema", () => {
     expect(() => queryRequestSchema.parse({ object: "equipment", limit: 1001 })).toThrow();
     expect(queryRequestSchema.parse({ object: "equipment", limit: 1000 }).limit).toBe(1000);
   });
-  it("order 只支持单键；聚合每条只写一个键", () => {
+  it("order 只支持单键；聚合每条只写一个键；空 group_by = 全体合计", () => {
     expect(() => queryRequestSchema.parse({ object: "equipment", order: { a: "asc", b: "desc" } })).toThrow(/单键/);
     expect(() => queryRequestSchema.parse({ object: "equipment", aggregate: { group_by: ["dept"], metrics: [{ count: "*", avg: "x" }] } })).toThrow(/只写一个键/);
+    expect(queryRequestSchema.parse({ object: "equipment", aggregate: { group_by: [], metrics: [{ count: "*" }] } }).aggregate?.group_by).toEqual([]); // 总数聚合
+    expect(queryRequestSchema.parse({ object: "equipment", aggregate: { metrics: [{ count: "*" }] } }).aggregate?.group_by).toEqual([]); // 缺省同空
   });
   it("动作：identity 缺了被拒", () => {
     expect(() => actionRequestSchema.parse({ action: "convert", object: "equipment" })).toThrow();

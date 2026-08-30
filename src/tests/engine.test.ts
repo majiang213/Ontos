@@ -71,7 +71,7 @@ describe("M7 查询", () => {
     expect(rows.some((r) => Array.isArray(r.belongs_to) && r.belongs_to.length > 0)).toBe(true); // 不赌无 order 的行序
 
     const back = await q({ object: "department", identity: "D01", expand: [{ relation: "has_equipment", properties: ["serial_no"] }] });
-    expect(back.rows[0].name).toBe("研发部"); // 没点 properties 也要返回全部属性
+    expect(back.rows[0].name).toBe("一车间"); // 没点 properties 也要返回全部属性
     expect((back.rows[0].has_equipment as unknown[]).length).toBeGreaterThan(0);
   });
 
@@ -106,7 +106,7 @@ describe("M7 查询", () => {
     });
     const asg = rows[0].assignments as Record<string, unknown>[];
     expect(asg.length).toBe(1);
-    expect(asg[0].of_department).toEqual([{ name: "生产一部" }]);
+    expect(asg[0].of_department).toEqual([{ name: "二车间" }]);
   });
 
   it("读个体走 individual，不经过问数", async () => {
@@ -218,22 +218,26 @@ describe("M8 动作", () => {
     expect(repairs.rows[0].is_open).toBe(false);
   });
 
-  it("调岗：关旧任职、开新任职，任职编号按 generate 发出", async () => {
+  it("预订会议室：预订人必须认到账号、时段二选一；成功后插预订表、编号按 generate 发出", async () => {
     const driver = freshDriver();
+    const bad = await runAction(env, config, driver, {
+      action: "book_room", object: "room", identity: "R-01", request: { booker: "ghost", slot: "上午" },
+    });
+    expect(bad.ok).toBe(false); // 认不到账号
+
+    const badSlot = await runAction(env, config, driver, {
+      action: "book_room", object: "room", identity: "R-01", request: { booker: "u001", slot: "晚上" },
+    });
+    expect(badSlot.ok).toBe(false); // 时段不在值域
+
     const res = await runAction(env, config, driver, {
-      action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" },
+      action: "book_room", object: "room", identity: "R-01", request: { booker: "u001", slot: "上午" },
     });
     expect(res.ok).toBe(true);
-    const after = await query(env, config, driver, {
-      object: "person", identity: "P001",
-      expand: [{ relation: "appointments", properties: ["title", "dept", "is_current", "appt_no"] }],
-    });
-    const appts = after.rows[0].appointments as Record<string, unknown>[];
-    expect(appts.length).toBe(2);
-    const current = appts.filter((a) => a.is_current === true);
-    expect(current.length).toBe(1);
-    expect(current[0].title).toBe("经理");
-    expect(String(current[0].appt_no)).toMatch(/^P001-\d{8}-\d{15,19}$/); // 日期段与旧记录天然不撞；雪花段跨实例不撞
+    const after = await query(env, config, driver, { object: "booking", filter: { booker: "u001" }, properties: ["booking_no", "booked_date", "slot"] });
+    const mine = (after.rows as Record<string, unknown>[]).find((r) => String(r.booking_no).startsWith("R-01-"));
+    expect(mine).toBeDefined();
+    expect(String(mine!.booking_no)).toMatch(/^R-01-\d{8}-\d{15,19}$/); // generate：identity + 日期 + 雪花号
   });
 
   it("配置里没有的动作，引擎拒绝", async () => {
@@ -245,9 +249,9 @@ describe("M8 动作", () => {
 describe("过滤与展开的边界", () => {
   it("$link 挂 match 关系：true 留有关联的，false 留没有的", async () => {
     const linked = await q({ object: "equipment", properties: ["serial_no"], filter: { $link: { belongs_to: true } } });
-    expect(linked.rows.length).toBe(100); // 设备源 100 行都有部门
+    expect(linked.rows.length).toBe(100); // 设备源 100 行都有车间
     const unlinked = await q({ object: "equipment", properties: ["serial_no"], filter: { $link: { belongs_to: false } } });
-    expect(unlinked.rows.length).toBe(81); // 采购独有的 81 台没有部门
+    expect(unlinked.rows.length).toBe(93); // 无车间：在途 81 + 办公资产 12
   });
 
   it("expand 的配对属性为空：关系不成立，返回空数组而不是全表", async () => {
@@ -277,11 +281,11 @@ describe("过滤与展开的边界", () => {
   });
 
   it("布尔派生取 false：没立保修卡的都是过保设备", async () => {
-    expect((await q({ object: "equipment", filter: { in_warranty: false } })).rows.length).toBe(181);
+    expect((await q({ object: "equipment", filter: { in_warranty: false } })).rows.length).toBe(173); // 个体 193 − 在保卡 20（10 张过期不算）
     const driver = freshDriver();
     await runAction(env, config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
     const after = await query(env, config, driver, { object: "equipment", properties: ["serial_no"], filter: { in_warranty: false } });
-    expect(after.rows.length).toBe(180);
+    expect(after.rows.length).toBe(172);
     expect(after.rows.every((r) => r.serial_no !== "SN-40217")).toBe(true);
   });
 
@@ -453,7 +457,7 @@ describe("M8 动作的边界与补偿", () => {
     const driver = freshDriver();
     const res = await runAction(env, c2, driver, { action: "unregister", object: "equipment", identity: "SN-40085" });
     expect(res.ok).toBe(true);
-    expect(res.projections.length).toBe(2); // purchase + device 都有行
+    expect(res.projections.length).toBe(3); // purchase + device + asset 都有行
     expect((await query(env, config, driver, { object: "equipment", identity: "SN-40085" })).rows.length).toBe(0);
 
     c2.object_types.equipment.actions!.bad_delete = { effect: [{ delete: { object: "equipment" } }] };
@@ -477,17 +481,23 @@ describe("M8 动作的边界与补偿", () => {
   });
 
   it("inform 预留：生成变更事件但不外发", async () => {
-    const res = await runAction(env, config, freshDriver(), {
-      action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" },
+    const c2 = structuredClone(config);
+    c2.object_types.room.actions!.book2 = {
+      pre: { $request: { booker: { object: "account" }, slot: { in: ["上午", "下午"] } } },
+      effect: [{ create: { object: "booking", properties: { booking_no: { from: "generated" }, booker: { from: "request" }, booked_date: "now/d", slot: { from: "request" } } } }],
+      inform: [{ object: "booking", to: ["payroll"], properties: { booker: { from: "request" }, booked_date: "now/d" } }],
+    };
+    const res = await runAction(env, c2, freshDriver(), {
+      action: "book2", object: "room", identity: "R-01", request: { booker: "u001", slot: "上午" },
     });
     expect(res.ok).toBe(true);
     expect(res.notifications?.length).toBe(1);
     expect(res.notifications?.[0].delivered).toBe(false);
     expect(res.notifications?.[0].to).toEqual(["payroll"]);
-    expect(res.notifications?.[0].lines.map((l) => l.op)).toEqual(["update", "create"]);
-    expect(res.notifications?.[0].lines[1].target).toBeNull(); // create 行的识别值是 from: generated，不重复发号
-    expect(String(res.notifications?.[0].properties.change_id)).toMatch(/^transfer_post\|\d+\|P001\|person$/); // identity 未填：按 inform.properties 声明序拼接
-    expect(res.notifications?.[0].lines[0].line_id).toBe(`${res.notifications?.[0].properties.change_id}#1`); // 条目带 change_id 与 line_id
+    expect(res.notifications?.[0].lines.map((l) => l.op)).toEqual(["create"]);
+    expect(res.notifications?.[0].lines[0].target).toBeNull(); // create 行的识别值是 from: generated，不重复发号
+    expect(String(res.notifications?.[0].properties.booking_no)).toMatch(/^u001\|\d+$/); // identity 未填：按 inform.properties 声明序拼接
+    expect(res.notifications?.[0].lines[0].line_id).toBe(`${res.notifications?.[0].properties.booking_no}#1`); // 条目带 identity 与 line_id
   });
 });
 
@@ -528,7 +538,7 @@ describe("表达式与发号", () => {
 
   it("generate 的 snowflake 段走真实发号路径（跨实例不撞号）", async () => {
     const c2 = structuredClone(config);
-    c2.object_types.appointment.properties.appt_no.generate = [
+    c2.object_types.booking.properties.booking_no.generate = [
       { from: "identity" },
       "-",
       { date: "now/d", format: "yyyyMMdd" },
@@ -537,15 +547,14 @@ describe("表达式与发号", () => {
     ];
     const driver = freshDriver();
     const res = await runAction(env, c2, driver, {
-      action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" },
+      action: "book_room", object: "room", identity: "R-01", request: { booker: "u001", slot: "上午" },
     });
     expect(res.ok).toBe(true);
     const after = await query(env, c2, driver, {
-      object: "person", identity: "P001",
-      expand: [{ relation: "appointments", properties: ["appt_no", "is_current"] }],
+      object: "booking", filter: { booker: "u001" }, properties: ["booking_no", "slot"],
     });
-    const cur = (after.rows[0].appointments as Record<string, unknown>[]).find((a) => a.is_current === true);
-    expect(String(cur!.appt_no)).toMatch(/^P001-\d{8}-\d{15,19}$/);
+    const cur = (after.rows as Record<string, unknown>[]).find((a) => String(a.booking_no).startsWith("R-01-"));
+    expect(String(cur!.booking_no)).toMatch(/^R-01-\d{8}-\d{15,19}$/);
   });
 });
 
@@ -624,9 +633,9 @@ describe("第三轮修复的回归", () => {
 
   it("inform 生成失败给占位记录，不影响动作结果", async () => {
     const c2 = structuredClone(config);
-    c2.object_types.person.actions!.transfer_post.inform![0].properties.occurred_at = { from: "generated" } as never;
+    c2.object_types.room.actions!.book_room.inform = [{ object: "booking", to: [], properties: { booker: { from: "generated" } } }];
     const res = await runAction(env, c2, freshDriver(), {
-      action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" },
+      action: "book_room", object: "room", identity: "R-01", request: { booker: "u001", slot: "上午" },
     });
     expect(res.ok).toBe(true);
     expect(res.notifications?.[0].note).toContain("变更事件生成失败");
@@ -656,18 +665,18 @@ describe("第五轮修复的回归", () => {
     }
     const mysqlDriver = new Mysqlish();
     seedDemo(mysqlDriver);
-    const res = await runAction(env, config, mysqlDriver, { action: "transfer_post", object: "person", identity: "P001", request: { title: "经理", dept: "D07" } });
+    const res = await runAction(env, config, mysqlDriver, { action: "book_room", object: "room", identity: "R-01", request: { booker: "u001", slot: "上午" } });
     expect(res.ok).toBe(true);
     // mysql 方言：date 属性写进库里的是 UTC 串
-    const rows = await mysqlDriver.select("hr_sys", "appointment", ["valid_from", "valid_to"], [{ column: "person_no", op: "eq", value: "P001" }]);
-    const newRow = rows.find((r) => typeof r.valid_from === "string");
+    const rows = await mysqlDriver.select("oa_sys", "booking", ["booked_date"], [{ column: "booker", op: "eq", value: "u001" }]);
+    const newRow = rows.find((r) => typeof r.booked_date === "string");
     expect(newRow).toBeDefined();
-    expect(String(newRow!.valid_from)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(String(newRow!.booked_date)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     // sqlite 方言：照旧写 Unix 秒数字
     const liteDriver = freshDriver();
-    await runAction(env, config, liteDriver, { action: "transfer_post", object: "person", identity: "P001", request: { title: "主管", dept: "D02" } });
-    const rows2 = await liteDriver.select("hr_sys", "appointment", ["valid_from"], [{ column: "person_no", op: "eq", value: "P001" }]);
-    expect(rows2.every((r) => typeof r.valid_from === "number")).toBe(true);
+    await runAction(env, config, liteDriver, { action: "book_room", object: "room", identity: "R-01", request: { booker: "u001", slot: "下午" } });
+    const rows2 = await liteDriver.select("oa_sys", "booking", ["booked_date"], [{ column: "booker", op: "eq", value: "u001" }]);
+    expect(rows2.every((r) => typeof r.booked_date === "number")).toBe(true);
   });
 
   it("操作数 { property } 点错名/取不到值是 EngineReject（422），不是裸 500", async () => {

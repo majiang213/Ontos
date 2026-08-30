@@ -1,23 +1,32 @@
 // SQLite fixture 驱动 —— 演示层：继承裸驱动 SqliteDriver（sqliteDriver.ts），只加演示关注点（seedDemo 种子 / seeded 工厂）。
 // 两种用途：引擎 golden 测试；test 空间的离线演示种子。用户接入的 sqlite 文件库不走本类（裸 SqliteDriver + sidecar 注释）。
-// 种子数据按演示剧本：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）。
-// 设备核心配方（CREATE/INSERT）与十二套文件库共用 demoSystems.ts 的同一份——内存四连的表清单在这里分叉：
-// 内存 device_sys 带 repair 2 行、hr_sys 是窄表 person 张三；文件库不带 repair、人事是宽表 50 行（见 demoSystems）。
+// 种子数据按演示剧本（ADR 0012）：采购 121 台（含验收主角 SN-40217）、设备 100 台、序列号重合 40 台（交集率约三分之一）、
+// 资产 52（40 生产转固 + 12 办公转固）、保修卡 30（前 10 张过期，主角的卡由验收动作现建）、处置档案 8、点检 60、IT 40+12、门禁 45、OA 六表。
+// 设备核心配方（CREATE/INSERT）与十二套文件库共用 demoSystems.ts 的同一份——内存的连接清单在这里分叉：
+// 内存 device_sys 带 repair 2 行（走查文件库里维修独立成 repair_sys 15 行）；人事/招聘已撤（ADR 0012）。
 // 演示问数剧本不住这里：它是演示实现的编译脚本，在 llm/demo.ts（demoQueries）。
 
 import type { SourceDriver } from "./driver";
 import { SqliteDriver } from "./sqliteDriver";
 import {
   DEMO_COMMENTS,
+  createAccessTables,
   createAssetTables,
   createAssignment,
   createDepartment,
   createDevice,
+  createInstrument,
+  createItTables,
+  createOaTables,
   createPoItem,
+  insertAssets,
   insertAssignment,
   insertDepartments,
   insertDevices,
+  insertDisposals,
+  insertInstruments,
   insertPoItems,
+  insertWarrantyCards,
   realNow,
 } from "./demoSystems";
 
@@ -34,10 +43,10 @@ export class SqliteFixtureDriver extends SqliteDriver {
   }
 }
 
-/* 演示剧本数据（内存四连，引擎 golden 的世界；CREATE/INSERT 核心与文件库共用 demoSystems，内存专属部分留本函数）：
+/* 演示剧本数据（内存七连，引擎 golden 的世界；CREATE/INSERT 核心与文件库共用 demoSystems，内存专属部分留本函数）：
    - 采购源 po_item 121 行（SN-40000 ~ SN-40119，外加验收主角 SN-40217）
    - 设备源 device 100 行：40 台序列号与采购重合（SN-40080 ~ SN-40119，其中 3 台已报废），60 台设备独有（SN-60000 ~ SN-60059）
-   - 部门 D01~D08；D07 生产部（调拨演示目标）
+   - 车间 D01~D08；资产 52、保修卡 31、处置档案 8；点检 60；IT 40+12；门禁 45；OA 六表
    - 日期一律 UTC Unix 秒（INTEGER） */
 export function seedDemo(d: SqliteFixtureDriver, clock: () => number = realNow) {
   const now = clock();
@@ -61,17 +70,25 @@ export function seedDemo(d: SqliteFixtureDriver, clock: () => number = realNow) 
 
   const asset = d.register("asset_sys");
   createAssetTables(asset);
+  insertAssets(asset);
+  insertWarrantyCards(asset, now);
+  insertDisposals(asset, now);
 
-  // 内存专属：人事窄表（person 只有编号与姓名，张三一人）——走查文件 hr.db 是宽表 50 行，配方不共用
-  const hr = d.register("hr_sys");
-  hr.exec(`CREATE TABLE person (person_no TEXT PRIMARY KEY, name TEXT)`);
-  hr.exec(`CREATE TABLE appointment (id INTEGER PRIMARY KEY AUTOINCREMENT, appt_no TEXT UNIQUE, person_no TEXT, title TEXT, dept_id TEXT, valid_from INTEGER, valid_to INTEGER)`);
-  hr.prepare(`INSERT INTO person (person_no, name) VALUES (?, ?)`).run("P001", "张三");
-  hr.prepare(`INSERT INTO appointment (appt_no, person_no, title, dept_id, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run("P001-20250101-0001", "P001", "专员", "D01", now - 500 * 86400, null); // 一条在任
+  const inspect = d.register("inspect_sys");
+  createInstrument(inspect);
+  insertInstruments(inspect, now);
+
+  const it = d.register("it_sys");
+  createItTables(it, now);
+
+  const access = d.register("access_sys");
+  createAccessTables(access, now);
+
+  const oa = d.register("oa_sys");
+  createOaTables(oa, now);
 
   // 演示列注释（SQLite 无列注释，种子手写）：内省时随列下发，生成对象时进字段说明。
-  // 注释数据单源在 demoSystems.DEMO_COMMENTS；对照不上的表/列（内存窄表 person 没有 id_no）内省时自然落空，无害。
+  // 注释数据单源在 demoSystems.DEMO_COMMENTS；对照不上的表/列内省时自然落空，无害。
   for (const [connection, tables] of Object.entries(DEMO_COMMENTS)) {
     for (const [table, map] of Object.entries(tables)) {
       d.setComments(connection, table, map);

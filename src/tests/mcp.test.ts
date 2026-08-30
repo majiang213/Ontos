@@ -202,14 +202,14 @@ describe("MCP 工具端点", () => {
     // 未锁定的草稿新类：replaceable=true
     const rv = await call("read_class", { name: "vendor", space: "draft" });
     expect(rv.result.structuredContent.replaceable).toBe(true);
-    // list_classes 草稿视图带 outlets（test 空间种子有 payroll）
-    expect((await call("list_classes", { space: "draft" })).result.structuredContent.outlets).toContain("payroll");
+    // list_classes 草稿视图带 outlets（ADR 0012 世界无外发出口：空表）
+    expect((await call("list_classes", { space: "draft" })).result.structuredContent.outlets).toEqual([]);
   });
 
   it("list_tables：列定义无采样行；按连接过滤；未知连接名收在槽内 error", async () => {
     const all = await call("list_tables", {});
     const sources = all.result.structuredContent.sources as { connection: string; tables: { name: string; columns: Record<string, unknown>[] }[] }[];
-    expect(sources.length).toBe(4); // test 空间四个 fixture 连接
+    expect(sources.length).toBe(7); // test 空间七个 fixture 连接（ADR 0012）
     const device = sources.find((s) => s.connection === "device_sys");
     expect(device?.tables.length).toBeGreaterThan(0);
     const deviceTable = device?.tables.find((t) => t.name === "device");

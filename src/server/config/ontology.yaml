@@ -1,4 +1,5 @@
 # 已发布配置 —— 《ontos-article.md》附录 C 全文。引擎加载的就是这份文本。
+# test 空间世界（ADR 0012）：设备一生 + 办公线；人事/招聘已撤。
 object_types:
   equipment:
     description: 设备
@@ -13,7 +14,7 @@ object_types:
         description: 出厂序列号
       dept:
         type: string
-        description: 所属部门编号
+        description: 所属车间编号
       mark:
         type: enum
         values: [scrapped]
@@ -91,17 +92,17 @@ object_types:
         description: 调拨
         pre:
           status: in_service
-          dept: { ne: { property: dept, from: request } }  # 新部门不得等于当前
+          dept: { ne: { property: dept, from: request } }  # 新车间不得等于当前
           $link:
             belongs_to: true
           $request:
-            dept: { object: department }       # request.dept 必须能认到部门
+            dept: { object: department }       # request.dept 必须能认到车间
         effect:
           - update:
               object: equipment
               identity: { from: identity }
               properties:
-                dept: { from: request }        # 部门=请求里的部门
+                dept: { from: request }        # 车间=请求里的车间
       scrap:
         description: 报废
         pre:
@@ -131,7 +132,7 @@ object_types:
           $exists: false                       # 各源都还没有这个序列号
           $request:
             valid_from: { lte: { property: valid_to, from: request } }  # 生效日不晚于失效日；不读源
-            dept_id: { object: department }    # request.dept_id 必须能认到已有部门
+            dept_id: { object: department }    # request.dept_id 必须能认到已有车间
         effect:
           - create:
               object: assignment
@@ -155,17 +156,18 @@ object_types:
                 serial_no: { eq: { from: identity } }   # 过滤落在维修上，用维修自己的字段
               properties:
                 ended_at: now                  # 结束时刻=此刻
+
   department:
-    description: 部门
+    description: 车间                          # 设备归属的车间/产线口径（与 OA 行政组织同形异义）
     kind: thing
     identity: dept_id
     properties:
       name:
         type: string
-        description: 部门名称
+        description: 车间名称
       dept_id:
         type: string
-        description: 部门编号
+        description: 车间编号
     sources:
       org:
         connection: device_sys
@@ -176,7 +178,7 @@ object_types:
           dept_id: dept_id
 
   assignment:
-    description: 履历                          # 设备某段时间属于某部门。不是设备
+    description: 履历                          # 设备某段时间属于某车间。不是设备
     kind: event
     identity: asgn_no
     properties:
@@ -194,7 +196,7 @@ object_types:
         description: 设备序列号
       dept_id:
         type: string
-        description: 部门编号
+        description: 车间编号
       valid_from:
         type: date
         description: 生效日
@@ -272,149 +274,351 @@ object_types:
           started_at: started_at
           ended_at: ended_at
 
-  person:
-    description: 人员
+  instrument:
+    description: 点检对象                      # 被纳入点检范围的设备清单
     kind: thing
-    identity: person_no                        # 工号
+    identity: serial_no
     properties:
-      person_no:
+      serial_no:
         type: string
-        description: 人员编号
+        description: 设备序列号
       name:
         type: string
-        description: 姓名
+        description: 点检对象名称
+      inspect_cycle_days:
+        type: number
+        description: 点检周期（天）
+      last_inspect_at:
+        type: date
+        description: 上次点检时间
     sources:
-      hr:
-        connection: hr_sys
-        table: person
-        pk: person_no
+      inspect:
+        connection: inspect_sys
+        table: instrument
+        pk: id
         fields:
-          person_no: person_no
+          serial_no: serial_no
           name: name
-    actions:
-      transfer_post:
-        description: 调岗                         # 挂在人员上：对某个人调岗，不改人本身
-        pre:
-          $link:
-            appointments:                        # 前置在人上，用人出发的关系名
-              is_current: true
-          $request:
-            dept: { object: department }
-        effect:
-          - update:
-              object: appointment           # 改任职，不改人
-              filter:
-                is_current: true
-                person_no: { eq: { from: identity } }  # 过滤落在任职上：这个人工号 + 在任
-              properties:
-                valid_to: now-1d/d          # 只改失效日。职务、部门、生效日保持原值
-          - create:
-              object: appointment           # 再新建一条任职
-              properties:                   # 只写这次要赋的源列属性。held_by 靠 person_no 的 match 成立
-                appt_no: { from: generated }   # 任职编号。按该类该属性的 generate 列表发号（雪花号）
-                person_no: { from: identity }  # 人员编号=请求顶上的工号
-                title: { from: request }       # 职务=request.title
-                dept: { from: request }        # 部门=request.dept
-                valid_from: now/d              # 生效日=今天 0 点。valid_to 不写，空着表示至今
-        inform:
-          - object: change
-            to: [payroll]
-            properties:
-              action_name: { from: action }
-              occurred_at: now
-              subject: { from: identity }
-              subject_class: { from: object }
+          inspect_cycle_days: inspect_cycle_days
+          last_inspect_at: last_inspect_at
 
-  appointment:
-    description: 任职                            # 谁在哪个部门任什么职、从哪天到哪天。不是人
-    kind: event                                 # 一条记录发生过即确定；在任与否用日期算，不另改类
-    identity: appt_no
+  it_device:
+    description: 办公设备                      # 电脑/显示器等，与生产设备不是同一种东西
+    kind: thing
+    identity: sn                               # 与资产系统对得上号靠序列号
     properties:
-      appt_no:
+      sn:
         type: string
-        description: 任职编号
+        description: 设备序列号
+      asset_tag:
+        type: string
+        description: 资产编号
+      model:
+        type: string
+        description: 型号
+      holder:
+        type: string
+        description: 领用人
+      status:
+        type: enum
+        values: [在用, 闲置, 报废]
+        description: 状态
+    sources:
+      it:
+        connection: it_sys
+        table: device
+        pk: asset_tag
+        fields:
+          sn: sn
+          asset_tag: asset_tag
+          model: model
+          holder: holder
+          status: status
+
+  it_ticket:
+    description: IT 报修单                     # 办公设备报修，与生产维修不是同一种东西
+    kind: event
+    identity: ticket_no
+    properties:
+      ticket_no:
+        type: string
+        description: 报修单号
         generate:
           - { from: identity }
           - "-"
           - { date: now/d, format: yyyyMMdd }
           - "-"
           - { snowflake: true }
-      person_no:
+      asset_tag:
         type: string
-        description: 人员编号                    # 用来和人对上；held_by 比的就是它
-      title:
+        description: 资产编号
+      reporter:
         type: string
-        description: 职务
-      dept:
+        description: 报修人
+      status:
+        type: enum
+        values: [open, closed]
+        description: 状态
+      opened_at:
+        type: date
+        description: 报修时间
+      is_open:
+        type: boolean
+        description: 是否未关闭
+        derived:
+          status: open
+    sources:
+      it:
+        connection: it_sys
+        table: ticket
+        pk: ticket_no
+        fields:
+          ticket_no: ticket_no
+          asset_tag: asset_tag
+          reporter: reporter
+          status: status
+          opened_at: opened_at
+
+  account:
+    description: 办公账号                      # 人员以账号持有者出现（无人事系统）
+    kind: thing
+    identity: login
+    properties:
+      login:
+        type: string
+        description: 登录名
+      name:
+        type: string
+        description: 姓名
+      email:
+        type: string
+        description: 邮箱
+      dept_id:
+        type: string
+        description: 所属部门编号
+      contractor:
+        type: number
+        description: 是否外包（0 正式 / 1 外包）
+      is_contractor:
+        type: boolean
+        description: 是否外包
+        derived:
+          contractor: 1
+    sources:
+      oa:
+        connection: oa_sys
+        table: account
+        pk: login
+        fields:
+          login: login
+          name: name
+          email: email
+          dept_id: dept_id
+          contractor: is_contractor
+    actions:
+      request_supply:
+        description: 领用办公用品
+        pre:
+          $request:
+            item: { object: supply }           # request.item 必须认到用品
+            qty: { gte: 1 }                    # 数量至少 1
+        effect:
+          - create:
+              object: requisition
+              properties:
+                req_no: { from: generated }    # 领用单号按 generate 发出
+                item_no: { from: request }
+                requester: { from: identity }  # 领用人=请求点名的账号登录名
+                qty: { from: request }
+                req_date: now/d
+
+  card_holder:
+    description: 门禁卡                        # 正式员工都有卡，外包没有（部分重叠）
+    kind: thing
+    identity: card_no
+    properties:
+      card_no:
+        type: string
+        description: 门禁卡号
+      holder:
+        type: string
+        description: 持卡人
+      name:
+        type: string
+        description: 姓名
+      issued_at:
+        type: date
+        description: 发卡时间
+    sources:
+      access:
+        connection: access_sys
+        table: card_holder
+        pk: card_no
+        fields:
+          card_no: card_no
+          holder: holder
+          name: name
+          issued_at: issued_at
+
+  oa_dept:
+    description: 部门（行政组织）              # 与台账车间的部门表同形异义
+    kind: thing
+    identity: dept_id
+    properties:
+      dept_id:
         type: string
         description: 部门编号
-      valid_from:
-        type: date
-        description: 生效日
-      valid_to:
-        type: date
-        description: 失效日                      # 空=至今
-      is_current:
-        type: boolean
-        description: 是否在任                    # 派生，表上没有这一列
-        derived:
-          valid_from: { lte: now/d }            # 生效日不晚于今天
-          valid_to: { gte: now/d }              # 失效日不早于今天；空按至今
+      name:
+        type: string
+        description: 部门名称
     sources:
-      posts:
-        connection: hr_sys
-        table: appointment
-        pk: id
+      org:
+        connection: oa_sys
+        table: dept
+        pk: dept_id
         fields:
-          appt_no: appt_no
-          person_no: person_no
-          title: title
-          dept: dept_id
-          valid_from: valid_from
-          valid_to: valid_to
+          dept_id: dept_id
+          name: dept_name
 
-  change:
-    description: 变更                            # 一次动作做完后的那包变更
-    kind: event
-    identity: change_id                         # inform 没给时，按 inform.properties 的值声明序拼接
+  room:
+    description: 会议室
+    kind: thing
+    identity: room_no
     properties:
-      change_id:
+      room_no:
         type: string
-        description: 变更编号
-      action_name:
+        description: 会议室编号
+      name:
         type: string
-        description: 动作名                      # inform：{ from: action }
-      occurred_at:
+        description: 会议室名称
+      capacity:
+        type: number
+        description: 容量
+    sources:
+      oa:
+        connection: oa_sys
+        table: room
+        pk: room_no
+        fields:
+          room_no: room_no
+          name: name
+          capacity: capacity
+    actions:
+      book_room:
+        description: 预订会议室
+        pre:
+          $request:
+            booker: { object: account }        # 预订人必须认到账号
+            slot: { in: [上午, 下午] }          # 时段二选一
+        effect:
+          - create:
+              object: booking
+              properties:
+                booking_no: { from: generated } # 预订编号按 generate 发出
+                booker: { from: request }
+                booked_date: now/d
+                slot: { from: request }
+
+  booking:
+    description: 会议室预订                    # 一条预订。不是会议室
+    kind: event
+    identity: booking_no
+    properties:
+      booking_no:
+        type: string
+        description: 预订编号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { snowflake: true }
+      room_no:
+        type: string
+        description: 会议室编号
+      booker:
+        type: string
+        description: 预订人
+      booked_date:
         type: date
-        description: 发生时间                    # inform：now
-      subject:
-        type: string
-        description: 请求点名个体的识别值        # inform：{ from: identity }
-      subject_class:
-        type: string
-        description: 请求点名个体的类名          # inform：{ from: object }
-
-  change_line:
-    description: 变更条目
-    kind: event
-    identity: line_id
-    properties:
-      line_id:
-        type: string
-        description: 条目编号
-      change_id:
-        type: string
-        description: 所属变更
-      op:
+        description: 预订日期
+      slot:
         type: enum
-        values: [update, create, delete, link]
-        description: 操作种类，与效应相同
-      object_class:
+        values: [上午, 下午]
+        description: 时段
+    sources:
+      oa:
+        connection: oa_sys
+        table: booking
+        pk: booking_no
+        fields:
+          booking_no: booking_no
+          room_no: room_no
+          booker: booker
+          booked_date: booked_date
+          slot: slot
+
+  supply:
+    description: 办公用品
+    kind: thing
+    identity: item_no
+    properties:
+      item_no:
         type: string
-        description: 被操作个体的类名
-      target:
+        description: 用品编号
+      name:
         type: string
-        description: 被操作个体的识别值
+        description: 用品名称
+      stock:
+        type: number
+        description: 库存
+    sources:
+      oa:
+        connection: oa_sys
+        table: supply
+        pk: item_no
+        fields:
+          item_no: item_no
+          name: name
+          stock: stock
+
+  requisition:
+    description: 领用单                        # 一条领用记录。不是用品
+    kind: event
+    identity: req_no
+    properties:
+      req_no:
+        type: string
+        description: 领用单号
+        generate:
+          - { from: identity }
+          - "-"
+          - { date: now/d, format: yyyyMMdd }
+          - "-"
+          - { snowflake: true }
+      item_no:
+        type: string
+        description: 用品编号
+      requester:
+        type: string
+        description: 领用人
+      qty:
+        type: number
+        description: 数量
+      req_date:
+        type: date
+        description: 领用日期
+    sources:
+      oa:
+        connection: oa_sys
+        table: requisition
+        pk: req_no
+        fields:
+          req_no: req_no
+          item_no: item_no
+          requester: requester
+          qty: qty
+          req_date: req_date
 
 link_types:
   converted:
@@ -431,7 +635,7 @@ link_types:
     description: 属于
     from: equipment
     to: department
-    inverse: has_equipment                     # 从部门查设备时写这个名字
+    inverse: has_equipment                     # 从车间查设备时写这个名字
     card: N:1
     match:
       - { from: dept, to: dept_id }
@@ -444,7 +648,7 @@ link_types:
     match:
       - { from: serial_no, to: serial_no }
   of_department:
-    description: 哪个部门
+    description: 哪个车间
     from: assignment
     to: department
     inverse: has_assignments
@@ -467,32 +671,67 @@ link_types:
     card: N:1
     match:
       - { from: serial_no, to: serial_no }
-  held_by:
-    description: 任职于谁                         # 任职 → 人。不是保留字
-    from: appointment
-    to: person
-    inverse: appointments                        # 人 → 任职。前置里写这个名字
-    card: N:1                                    # 一人可有多条任职，一条任职只属于一人
-    match:
-      - { from: person_no, to: person_no }       # 任职.person_no = 人.person_no 则关系成立
-  posted_in:
-    description: 任职于哪
-    from: appointment
-    to: department
-    inverse: has_posts
+  inspect_of:
+    description: 点检哪台
+    from: instrument
+    to: equipment
+    inverse: inspected_by
     card: N:1
     match:
-      - { from: dept, to: dept_id }
-  has_line:
-    description: 变更包含条目
-    from: change
-    to: change_line
-    inverse: of_change
-    card: 1:N
+      - { from: serial_no, to: serial_no }
+  held_by:
+    description: 报修哪台                        # IT 报修单 → 办公设备。不是保留字
+    from: it_ticket
+    to: it_device
+    inverse: tickets
+    card: N:1
     match:
-      - { from: change_id, to: change_id }
-
-outlets:
-  payroll:
-    description: 薪酬侧收件
-    connection: payroll_hook
+      - { from: asset_tag, to: asset_tag }
+  card_of:
+    description: 谁的卡
+    from: card_holder
+    to: account
+    inverse: cards
+    card: N:1
+    match:
+      - { from: holder, to: login }
+  of_dept:
+    description: 属于哪个部门
+    from: account
+    to: oa_dept
+    inverse: accounts
+    card: N:1
+    match:
+      - { from: dept_id, to: dept_id }
+  booked_at:
+    description: 订了哪间
+    from: booking
+    to: room
+    inverse: bookings
+    card: N:1
+    match:
+      - { from: room_no, to: room_no }
+  booked_by:
+    description: 谁订的
+    from: booking
+    to: account
+    inverse: my_bookings
+    card: N:1
+    match:
+      - { from: booker, to: login }
+  requisition_of:
+    description: 领了什么
+    from: requisition
+    to: supply
+    inverse: requisitions
+    card: N:1
+    match:
+      - { from: item_no, to: item_no }
+  raised_by:
+    description: 谁领的
+    from: requisition
+    to: account
+    inverse: my_requisitions
+    card: N:1
+    match:
+      - { from: requester, to: login }

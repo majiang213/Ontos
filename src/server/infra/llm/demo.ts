@@ -231,14 +231,7 @@ function reviseWithOverlap(
    正则 → 查询，顺序即优先级，最后一条兜底。这是演示数据，不是引擎逻辑。 */
 
 export const demoQueries: { pattern: RegExp; query: QueryRequest }[] = [
-  {
-    pattern: /每个部门|各部门|多少台|多少设备/,
-    query: { object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } },
-  },
-  {
-    pattern: /过保/,
-    query: { object: "equipment", properties: ["name", "serial_no"], filter: { in_warranty: false } },
-  },
+  // 设备线（具体词在前：在途/报废/点检先于泛化的「多少台」，否则都被计数题截走）
   {
     pattern: /在途/,
     query: { object: "equipment", properties: ["name", "serial_no"], filter: { status: "in_transit" } },
@@ -248,8 +241,46 @@ export const demoQueries: { pattern: RegExp; query: QueryRequest }[] = [
     query: { object: "equipment", properties: ["name", "serial_no"], filter: { status: "scrapped" } },
   },
   {
-    pattern: /在役|部门/,
+    pattern: /点检/,
+    query: { object: "equipment", properties: ["serial_no"], filter: { $link: { inspected_by: true } } },
+  },
+  {
+    pattern: /过保/,
+    query: { object: "equipment", properties: ["name", "serial_no"], filter: { in_warranty: false } },
+  },
+  // 泛化计数题（在「在役」之前：带部门/多少台的题先落这里，别被在役展开截走）
+  {
+    pattern: /每个部门|各车间|多少台|多少设备/,
+    query: { object: "equipment", filter: { status: "in_service" }, aggregate: { group_by: ["dept"], metrics: [{ count: "*" }] } },
+  },
+  {
+    pattern: /在役|车间/,
     query: { object: "equipment", properties: ["name"], filter: { status: "in_service" }, expand: [{ relation: "belongs_to", properties: ["name"] }] },
+  },
+  // 办公线
+  {
+    pattern: /外包/,
+    query: { object: "account", properties: ["login", "name"], filter: { is_contractor: true } },
+  },
+  {
+    pattern: /门禁/,
+    query: { object: "card_holder", properties: ["card_no", "holder", "name"] },
+  },
+  {
+    pattern: /报修/,
+    query: { object: "it_ticket", properties: ["ticket_no", "asset_tag", "status"], filter: { is_open: true } },
+  },
+  {
+    pattern: /会议室|预订/,
+    query: { object: "booking", properties: ["booking_no", "room_no", "booker", "slot"] },
+  },
+  {
+    pattern: /领用/,
+    query: { object: "requisition", properties: ["req_no", "item_no", "requester", "qty"] },
+  },
+  {
+    pattern: /办公设备/,
+    query: { object: "it_device", properties: ["asset_tag", "model", "holder", "status"] },
   },
   {
     pattern: /.*/,

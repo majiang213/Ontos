@@ -7,7 +7,7 @@ import { filterSchema, type Filter } from "./config";
 
 /* ---------- 查询：一棵以类为根的树 ---------- */
 export const aggregateSchema = z.object({
-  group_by: z.array(z.string()).nonempty(),
+  group_by: z.array(z.string()).default([]), // 空 = 全体合计（总数聚合，如「在役设备多少台」）；对错板对聚合按合计比对
   metrics: z
     .array(z.record(z.string(), z.string()).refine((m) => Object.keys(m).length === 1, { message: MSG.metricSingleKey }))
     .nonempty()

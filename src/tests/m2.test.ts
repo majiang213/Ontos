@@ -69,7 +69,7 @@ describe("moveStageItem（阶段重排）", () => {
 describe("配置三视图", () => {
   it("列出类：只有名字和说明", () => {
     const list = listClasses(config);
-    expect(list.length).toBe(9);
+    expect(list.length).toBe(15); // ADR 0012：设备 + 办公双线
     expect(list[0]).toHaveProperty("name");
     expect(list[0]).not.toHaveProperty("properties");
   });
@@ -95,14 +95,14 @@ describe("配置三视图", () => {
   it("读取一个类：带上它参与的类与类结论；死类的行滤掉", () => {
     const cfg = structuredClone(config);
     cfg.class_conclusions = [
-      { kind: "homonym", classes: ["equipment", "person"] },
-      { kind: "homonym", classes: ["ghost", "person"] },
-      { kind: "overlap", classes: ["equipment", "person"], shared: "missing_shared" },
+      { kind: "homonym", classes: ["department", "oa_dept"] },
+      { kind: "homonym", classes: ["ghost", "oa_dept"] },
+      { kind: "overlap", classes: ["department", "oa_dept"], shared: "missing_shared" },
     ];
-    expect(liveConclusions(cfg)).toEqual([{ kind: "homonym", classes: ["equipment", "person"] }]);
-    expect(conclusionsAbout(cfg, "equipment")).toEqual([{ kind: "homonym", classes: ["equipment", "person"] }]);
-    expect(readClass(cfg, "equipment").class_conclusions).toEqual([{ kind: "homonym", classes: ["equipment", "person"] }]);
-    expect(readClass(cfg, "department").class_conclusions).toEqual([]);
+    expect(liveConclusions(cfg)).toEqual([{ kind: "homonym", classes: ["department", "oa_dept"] }]);
+    expect(conclusionsAbout(cfg, "department")).toEqual([{ kind: "homonym", classes: ["department", "oa_dept"] }]);
+    expect(readClass(cfg, "department").class_conclusions).toEqual([{ kind: "homonym", classes: ["department", "oa_dept"] }]);
+    expect(readClass(cfg, "equipment").class_conclusions).toEqual([]);
   });
 
   it("检索按名字与说明命中", () => {

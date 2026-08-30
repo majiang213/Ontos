@@ -37,7 +37,7 @@ describe("writeDemoFiles：十二套文件库", () => {
   it("写出 12 个 .db + 12 个 sidecar，打印字段齐全；幂等覆盖", () => {
     const files = writeDemoFiles(tmp);
     expect(files.length).toBe(12);
-    expect(files.map((f) => f.title)).toEqual(["采购系统", "设备台账", "资产系统", "维修工单", "点检系统", "招聘系统", "人事系统", "办公账号", "客户档案", "销售系统", "仓库系统", "应收发票"]);
+    expect(files.map((f) => f.title)).toEqual(["采购系统", "设备台账", "资产系统", "维修工单", "点检系统", "IT 系统", "门禁系统", "办公系统", "客户档案", "销售系统", "仓库系统", "应收发票"]);
     expect(files.map((f) => f.connection)).toEqual(DEMO_SYSTEMS.map((s) => s.connection));
     for (const f of files) {
       expect(f.path).toBe(join(tmp, DEMO_SYSTEMS.find((s) => s.connection === f.connection)!.file)); // 绝对路径
@@ -47,22 +47,31 @@ describe("writeDemoFiles：十二套文件库", () => {
     expect(tablesOf(again.find((f) => f.connection === "purchase_sys")!.path).find((t) => t.name === "po_item")?.n).toBe(121);
   });
 
-  it("行数与表清单按走查设计：device 无 repair、hr 宽表 50、repair 15、inspect 60、po_item 121 含 SN-40217、order 25、asset 0", () => {
+  it("行数与表清单按走查设计（ADR 0012）：device 无 repair、asset 52/保修卡 30/处置 8、IT 40+12、门禁 45、OA 六表、无人事与招聘", () => {
     const files = writeDemoFiles(tmp);
     const at = (conn: string) => files.find((f) => f.connection === conn)!.path;
     expect(tablesOf(at("device_sys")).map((t) => `${t.name}:${t.n}`)).toEqual(["assignment:1", "department:8", "device:100"]); // 没有 repair
-    const hr = tablesOf(at("hr_sys"));
-    expect(hr.find((t) => t.name === "person")?.n).toBe(50);
-    expect(hr.find((t) => t.name === "appointment")?.n).toBe(50);
     expect(tablesOf(at("repair_sys"))).toEqual([{ name: "repair", n: 15 }]);
     expect(tablesOf(at("inspect_sys"))).toEqual([{ name: "instrument", n: 60 }]);
     expect(tablesOf(at("purchase_sys"))).toEqual([{ name: "order", n: 25 }, { name: "po_item", n: 121 }]);
     expect(tablesOf(at("asset_sys"))).toEqual([
-      { name: "asset", n: 0 },
-      { name: "warranty_card", n: 0 },
+      { name: "asset", n: 52 }, // 40 生产转固 + 12 办公转固
+      { name: "disposal", n: 8 },
+      { name: "warranty_card", n: 30 },
     ]);
-    expect(tablesOf(at("recruit_sys"))).toEqual([{ name: "candidate", n: 80 }]);
-    expect(tablesOf(at("oa_sys"))).toEqual([{ name: "account", n: 40 }]);
+    expect(tablesOf(at("it_sys"))).toEqual([
+      { name: "device", n: 40 },
+      { name: "ticket", n: 12 },
+    ]);
+    expect(tablesOf(at("access_sys"))).toEqual([{ name: "card_holder", n: 45 }]);
+    expect(tablesOf(at("oa_sys"))).toEqual([
+      { name: "account", n: 40 },
+      { name: "booking", n: 20 },
+      { name: "dept", n: 6 },
+      { name: "requisition", n: 18 },
+      { name: "room", n: 8 },
+      { name: "supply", n: 25 },
+    ]);
     expect(tablesOf(at("crm_sys"))).toEqual([{ name: "customer", n: 40 }]);
     expect(tablesOf(at("sales_sys"))).toEqual([
       { name: "customer", n: 40 },
@@ -70,12 +79,15 @@ describe("writeDemoFiles：十二套文件库", () => {
     ]);
     expect(tablesOf(at("wms_sys"))).toEqual([{ name: "stock", n: 30 }]);
     expect(tablesOf(at("ar_sys"))).toEqual([{ name: "invoice", n: 40 }]);
+    expect(files.some((f) => f.connection === "hr_sys" || f.connection === "recruit_sys")).toBe(false); // 人事/招聘已撤
 
-    // 关键内容：人事宽表带 id_no/mobile、张三在 30 人交集里、采购主角在库
-    expect(queryFile<{ name: string }[]>(at("hr_sys"), `PRAGMA table_info(person)`, true).map((c) => c.name)).toEqual(["person_no", "name", "id_no", "mobile"]);
-    expect(queryFile(at("hr_sys"), `SELECT * FROM person WHERE person_no = 'P001'`)).toMatchObject({ name: "张三", id_no: "11010119900101000X" });
-    expect(queryFile(at("recruit_sys"), `SELECT id_no FROM candidate WHERE candidate_no = 'C001'`)).toEqual({ id_no: "11010119900101000X" }); // 与人事张三同一身份证
+    // 关键内容：采购主角在库、设备与资产的交集（类等价证据）、处置档案含台账 scrapped 的 3 台、
+    // 主角的保修卡由验收动作现建（种子里没有）
     expect(queryFile<{ n: number }>(at("purchase_sys"), `SELECT COUNT(*) n FROM po_item WHERE sn = 'SN-40217'`).n).toBe(1);
+    expect(queryFile<{ n: number }>(at("asset_sys"), `SELECT COUNT(*) n FROM warranty_card WHERE sn = 'SN-40217'`).n).toBe(0);
+    expect(queryFile<{ n: number }>(at("asset_sys"), `SELECT COUNT(*) n FROM asset WHERE sn = 'SN-40080'`).n).toBe(1);
+    expect(queryFile<{ n: number }>(at("asset_sys"), `SELECT COUNT(*) n FROM disposal WHERE sn IN ('SN-40080','SN-40081','SN-40082')`).n).toBe(3);
+    expect(queryFile<{ n: number }>(at("asset_sys"), `SELECT COUNT(*) n FROM warranty_card WHERE expiry > ${Math.floor(Date.now() / 1000)}`).n).toBe(20);
   });
 
   it("内省文件库：列注释从 sidecar 活下来；sqlite_master 里没有注释表", async () => {
@@ -141,22 +153,32 @@ describe("writeDemoFiles：十二套文件库", () => {
   });
 });
 
-describe("内存 seedDemo 不动（golden 世界）", () => {
-  it("四连行数不变：po_item 121 / device 100 / asset 0 / 内存 repair 仍 2 行挂 device_sys / person 窄表张三", async () => {
+describe("内存 seedDemo（golden 世界，ADR 0012）", () => {
+  it("七连行数：po_item 121 / device 100 / asset 52 / 保修卡 30 / 处置 8 / 点检 60 / IT 40+12 / 门禁 45 / OA 六表 / 内存 repair 仍 2 行挂 device_sys", async () => {
     const d = SqliteFixtureDriver.seeded();
     const count = async (conn: string, table: string, pk: string) => (await d.select(conn, table, [pk], [])).length;
     expect(await count("purchase_sys", "po_item", "po_id")).toBe(121);
     expect(await count("device_sys", "device", "dev_id")).toBe(100);
     expect(await count("device_sys", "repair", "id")).toBe(2); // 内存不拆维修
-    expect(await count("asset_sys", "asset", "asset_id")).toBe(0);
-    expect(await count("hr_sys", "person", "person_no")).toBe(1);
-    // 内存 person 仍是窄表（没有 id_no / mobile）
-    const tables = await d.introspect("hr_sys");
-    expect(tables.find((t) => t.name === "person")?.columns.map((c) => c.name)).toEqual(["person_no", "name"]);
-    // 内存注释仍在（经 DEMO_COMMENTS 单源下发）
+    expect(await count("asset_sys", "asset", "asset_id")).toBe(52);
+    expect(await count("asset_sys", "warranty_card", "card_id")).toBe(30);
+    expect(await count("asset_sys", "disposal", "record_no")).toBe(8);
+    expect(await count("inspect_sys", "instrument", "id")).toBe(60);
+    expect(await count("it_sys", "device", "asset_tag")).toBe(40);
+    expect(await count("it_sys", "ticket", "ticket_no")).toBe(12);
+    expect(await count("access_sys", "card_holder", "card_no")).toBe(45);
+    expect(await count("oa_sys", "account", "login")).toBe(40);
+    expect(await count("oa_sys", "dept", "dept_id")).toBe(6);
+    expect(await count("oa_sys", "room", "room_no")).toBe(8);
+    expect(await count("oa_sys", "booking", "booking_no")).toBe(20);
+    expect(await count("oa_sys", "supply", "item_no")).toBe(25);
+    expect(await count("oa_sys", "requisition", "req_no")).toBe(18);
+    // 内存注释仍在（经 DEMO_COMMENTS 单源下发）；新增表也带注释
     const dev = await d.introspect("device_sys");
     expect(dev.find((t) => t.name === "device")?.columns.find((c) => c.name === "serial_no")?.comment).toBe("设备序列号");
     expect(dev.find((t) => t.name === "repair")?.columns.find((c) => c.name === "repair_no")?.comment).toBe("维修单号");
+    const it = await d.introspect("it_sys");
+    expect(it.find((t) => t.name === "device")?.columns.find((c) => c.name === "asset_tag")?.comment).toBe("资产编号");
     await d.close();
   });
 });
