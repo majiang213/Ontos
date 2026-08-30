@@ -55,7 +55,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [publishing, setPublishing] = useState(false); // 发布/放弃/回滚同一把闸（mutate 原语）
   const [generating, setGenerating] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; sticky: boolean } | null>(null);
   // 对象编辑卡与表结构抽屉已各自成 module（cards/ObjectCard、cards/SchemaDrawer）。
   // 页面只留：开哪张卡、卡内表单状态（ObjectCard 经 onFormState 报上来，写进 formStateRef 供守卫读）。
   const ontRef = useRef<OntologyResp | null>(null);
@@ -68,14 +68,19 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []); // 卸载清定时器
 
   const showToast = useCallback((text: string) => {
-    setToast(text);
+    setToast({ text, sticky: false });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
+  /** 错误类提示：常驻不自动消失，用户点关闭才消失（配置不合法这类提示闪一下等于没说）。 */
+  const showError = useCallback((text: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ text, sticky: true });
+  }, []);
   /** 网络层失败（fetch reject）的统一提示。服务端拒绝（ApiError）带上游文案，不走这里。 */
-  const netErr = useCallback((e: unknown) => showToast(`网络错误：${e instanceof Error ? e.message : String(e)}`), [showToast]);
+  const netErr = useCallback((e: unknown) => showError(`网络错误：${e instanceof Error ? e.message : String(e)}`), [showError]);
   /** 失败的统一分流：服务端拒绝直接显示上游文案，网络层失败加前缀。 */
-  const failToast = useCallback((e: unknown) => (e instanceof ApiError ? showToast(e.message) : netErr(e)), [showToast, netErr]);
+  const failToast = useCallback((e: unknown) => (e instanceof ApiError ? showError(e.message) : netErr(e)), [showError, netErr]);
 
   // 画布当监视器：每 2 秒轮询工作副本（隐页暂停）——轮询纪律收在 revWatcher module，
   // 这里只留「变化来了干什么」：本页写豁免在 busy()，表单开着走 onFormBlocked，失败一次走 onFailOnce。
@@ -96,7 +101,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
       if (prev) showToast(externalToast(prev, data)); // 首轮由 refresh 负责，不弹
     },
     onFormBlocked: () => showToast("草稿有更新：保存会合并最新内容，同一字段以你后保存的为准"),
-    onFailOnce: () => showToast("没法自动刷新画布，请重新打开本页"),
+    onFailOnce: () => showError("没法自动刷新画布，请重新打开本页"),
   });
 
   /** 每次拿到本体 JSON 都过这里：state、rev、ETag 一起记——本页写入的 refresh 与轮询共用这一句。 */
@@ -412,7 +417,15 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
                   className={`btn${confirmDiscard ? " is-danger" : ""}`}
                   onClick={discardWithConfirm}
                   disabled={publishing}
-                  title={confirmDiscard ? "再点一次执行放弃" : "回到已发布快照（未发布的改动全部丢弃）"}
+                  title={
+                    confirmDiscard
+                      ? ont.version
+                        ? "再点一次执行放弃"
+                        : "再点一次执行放弃（草稿会清空回到空白——这个空间还没有发布过）"
+                      : ont.version
+                        ? "回到已发布快照（未发布的改动全部丢弃）"
+                        : "清空草稿回到空白（这个空间还没有发布过）"
+                  }
                 >
                   {confirmDiscard ? "确认放弃？" : "放弃"}
                 </button>
@@ -463,8 +476,15 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
 
       {/* toast：瞬时反馈 */}
       {toast && (
-        <div className="float-card" style={{ top: 76, left: "50%", translate: "-50% 0", zIndex: 40 }}>
-          <Bezel pad="8px 16px" coreStyle={{ fontSize: 13 }}>{toast}</Bezel>
+        <div className="float-card" style={{ top: 76, left: "50%", translate: "-50% 0", zIndex: 40, maxWidth: "min(760px, calc(100vw - 24px))" }}>
+          <Bezel pad="8px 16px" coreStyle={{ fontSize: 13, display: "flex", alignItems: "center", gap: 12 }}>
+            <span>{toast.text}</span>
+            {toast.sticky && (
+              <button className="chip" aria-label="关闭提示" style={{ flexShrink: 0 }} onClick={() => setToast(null)}>
+                ✕
+              </button>
+            )}
+          </Bezel>
         </div>
       )}
 

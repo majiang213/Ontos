@@ -309,6 +309,40 @@ describe("LLM 演示实现（离线）", () => {
     expect(draft.po_item.sources?.purchase_sys.pk).toBe("po_id"); // pk 照记：仅供台账与展示
   });
 
+  it("逆向建模：唯一约束是硬信号——sn 带 unique 标记直接当唯一键，破格进属性", async () => {
+    const draft = await slot.proposeObjects([
+      {
+        connection: "purchase_sys",
+        table: {
+          name: "po_item",
+          columns: [
+            { name: "po_id", type: "INTEGER", pk: true },
+            { name: "item_name", type: "TEXT", pk: false },
+            { name: "sn", type: "TEXT", pk: false, unique: true, comment: "设备序列号" },
+          ],
+        },
+      },
+    ]);
+    expect(draft.po_item.identity).toBe("sn"); // 唯一非整数列 = 业务编号的硬证据
+    expect(draft.po_item.properties.sn.type).toBe("string");
+    expect(draft.po_item.sources?.purchase_sys.fields.sn).toBe("sn");
+    // 唯一列是整数（如唯一自增代理键）仍不当唯一键：行号跨源对不上号
+    const intDraft = await slot.proposeObjects([
+      {
+        connection: "purchase_sys",
+        table: {
+          name: "po_item",
+          columns: [
+            { name: "po_id", type: "INTEGER", pk: true },
+            { name: "seq", type: "INTEGER", pk: false, unique: true },
+            { name: "sn", type: "TEXT", pk: false },
+          ],
+        },
+      },
+    ]);
+    expect(intDraft.po_item.identity).toBeUndefined();
+  });
+
   it("逆向建模：列注释存成字段说明，没注释的字段说明为空", async () => {
     const draft = await slot.proposeObjects([
       {

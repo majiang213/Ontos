@@ -50,12 +50,16 @@ export class DemoLlm implements Llm {
         fields[col.name] = col.name;
       }
       // 演示实现没有语义可读，不按列名形状猜唯一键（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
-      // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）才当唯一键，破格进属性；
+      // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）、或带唯一约束的非整数列（如 sn UNIQUE）才当唯一键，破格进属性；
       // 整数自增主键是表内行号，跨源对不上号，宁缺勿错——identity 留空，人到待确认面板①定。
       let identity: string | undefined;
-      if (pkCol && columnPropType(pkCol.type, false) !== "number") {
-        identity = pkCol.name;
-        properties[identity] = { type: columnPropType(pkCol.type, false), ...(pkCol.comment ? { description: pkCol.comment } : {}) };
+      const idCol =
+        pkCol && columnPropType(pkCol.type, false) !== "number"
+          ? pkCol
+          : table.columns.find((c) => c.unique && columnPropType(c.type, false) !== "number");
+      if (idCol) {
+        identity = idCol.name;
+        properties[identity] = { type: columnPropType(idCol.type, false), ...(idCol.comment ? { description: idCol.comment } : {}) };
         fields[identity] = identity;
       }
       // 撞名带连接前缀（本次已产出或草稿已占用都算撞）：跨连接同名表是裁决主场景，不静默覆盖

@@ -146,7 +146,7 @@ $link 是关系过滤；date 属性可用 now/d 这类日期表达式；展开�
           ...DECODING,
           prompt: `你是本体平台的逆向建模器。把数据库表结构翻成本体对象类型（object_types）。${shapeOf(draftSchema)}
 规则：类名=表名的小写下划线形；kind 默 "thing"（记录事件的表用 "event"）；${IDENTITY_COL_RULE}；
-properties 的类型只用 string/number/boolean/date/enum；状态/阶段类列选 enum 并给 values（从列注释或取值里找现成词，原样照抄）；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写。
+properties 的类型只用 string/number/boolean/date/enum；状态/阶段类列选 enum 并给 values（从列注释或取值里找现成词，原样照抄）；sources 里 fields 是「属性名→列名」；pk 写真主键，没有就不写；列带 unique 标记是数据库唯一约束（「唯一」的硬证据，判据见上）。
 列带 comment 时把它的意思写进属性的 description（中文白话，别抄英文列名）。
 不要把两张表合成一个类。
 ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}。表名撞上已占用类名时，类名写成 {连接名}_{表名}（小写下划线，如 crm_sys_customer）。` : ""}
