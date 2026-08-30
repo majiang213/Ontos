@@ -13,7 +13,7 @@ import { VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../s
 import { EngineReject, MSG } from "../../errors";
 import { prefixedTableName, type ClassShot, type Llm } from "./llm";
 /** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
- *  allowDate=false 给破格进属性的主键用（主键当识别字段时只分 number/string）。 */
+ *  allowDate=false 给破格进属性的主键用（主键当唯一键时只分 number/string）。 */
 function columnPropType(rawType: string, allowDate: boolean): "string" | "number" | "date" {
   const t = rawType.toUpperCase();
   if (t.includes("INT")) return "number";
@@ -49,8 +49,8 @@ export class DemoLlm implements Llm {
         properties[col.name] = { type: columnPropType(col.type, true), ...(col.comment ? { description: col.comment } : {}) }; // 列注释存成字段说明
         fields[col.name] = col.name;
       }
-      // 演示实现没有语义可读，不按列名形状猜识别字段（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
-      // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）才当识别字段，破格进属性；
+      // 演示实现没有语义可读，不按列名形状猜唯一键（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
+      // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）才当唯一键，破格进属性；
       // 整数自增主键是表内行号，跨源对不上号，宁缺勿错——identity 留空，人到待确认面板①定。
       let identity: string | undefined;
       if (pkCol && columnPropType(pkCol.type, false) !== "number") {
