@@ -283,7 +283,7 @@ export function createOaTables(db: DatabaseSync, now: number): void {
   }
 
   const insS = db.prepare(`INSERT INTO supply (item_no, name, stock) VALUES (?, ?, ?)`);
-  const supplyNames = ["打印纸", "签字笔", "笔记本", "胶带", "订书机", "文件夹", "便利贴", "硒鼓", "鼠标", "键盘", "U盘", "电池", "垃圾袋", "洗手液", "抽纸", "纸杯", "茶叶", "咖啡", "文件夹", "回形针", "长尾夹", "燕尾夹", "橡皮筋", "白板笔", "记号笔"];
+  const supplyNames = ["打印纸", "签字笔", "笔记本", "胶带", "订书机", "文件夹", "便利贴", "硒鼓", "鼠标", "键盘", "U盘", "电池", "垃圾袋", "洗手液", "抽纸", "纸杯", "茶叶", "咖啡", "文件篮", "回形针", "长尾夹", "燕尾夹", "橡皮筋", "白板笔", "记号笔"];
   for (let i = 1; i <= 25; i++) insS.run(`SP-${pad(i, 4)}`, supplyNames[i - 1], 10 + ((i * 37) % 90));
 
   const insQ = db.prepare(`INSERT INTO requisition (req_no, item_no, requester, qty, req_date) VALUES (?, ?, ?, ?, ?)`);

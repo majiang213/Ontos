@@ -240,6 +240,28 @@ describe("M8 动作", () => {
     expect(String(mine!.booking_no)).toMatch(/^R-01-\d{8}-\d{15,19}$/); // generate：identity + 日期 + 雪花号
   });
 
+  it("领用办公用品：用品必须认到、数量至少 1；成功后插领用单、编号按 generate 发出", async () => {
+    const driver = freshDriver();
+    const bad = await runAction(env, config, driver, {
+      action: "request_supply", object: "account", identity: "u001", request: { item_no: "ghost", qty: 1 },
+    });
+    expect(bad.ok).toBe(false); // 认不到用品
+
+    const zero = await runAction(env, config, driver, {
+      action: "request_supply", object: "account", identity: "u001", request: { item_no: "SP-0001", qty: 0 },
+    });
+    expect(zero.ok).toBe(false); // 数量至少 1
+
+    const res = await runAction(env, config, driver, {
+      action: "request_supply", object: "account", identity: "u001", request: { item_no: "SP-0001", qty: 3 },
+    });
+    expect(res.ok).toBe(true);
+    const after = await query(env, config, driver, { object: "requisition", filter: { requester: "u001" }, properties: ["req_no", "item_no", "qty"] });
+    const mine = (after.rows as Record<string, unknown>[]).find((r) => r.item_no === "SP-0001" && r.qty === 3);
+    expect(mine).toBeDefined();
+    expect(String(mine!.req_no)).toMatch(/^u001-\d{8}-\d{15,19}$/); // generate：identity + 日期 + 雪花号
+  });
+
   it("配置里没有的动作，引擎拒绝", async () => {
     const res = await runAction(env, config, freshDriver(), { action: "fly", object: "equipment", identity: "SN-40085" });
     expect(res.ok).toBe(false);

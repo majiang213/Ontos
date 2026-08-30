@@ -39,7 +39,8 @@ export const QUESTION_PACKS: QuestionPack[] = [
   {
     key: "wave3",
     name: "第三波",
-    // 设备后半生：设备 × 处置档案生命周期、保修卡 × 设备跳过、资产 × 保修卡跳过、采购订单 × 采购条目跳过之后
+    // 设备后半生：设备 × 处置档案生命周期、保修卡 × 设备跳过、采购订单 × 采购条目跳过之后
+    // （初稿的「资产 × 保修卡」随类等价合并消失——asset 已并入设备类，同库两张表由 order × po_item 承担）
     questions: [
       { question: "处置档案记录了多少台设备", expected: "8" }, // 处置档案表 8 行（3 台台账 scrapped + 5 台台账已移除）
       { question: "保修期内的设备有多少台", expected: "20" }, // 30 张保修卡，10 张已过期

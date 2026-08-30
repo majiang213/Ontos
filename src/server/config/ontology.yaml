@@ -420,8 +420,8 @@ object_types:
         description: 领用办公用品
         pre:
           $request:
-            item: { object: supply }           # request.item 必须认到用品
-            qty: { gte: 1 }                    # 数量至少 1
+            item_no: { object: supply }         # request.item_no 必须认到用品
+            qty: { gte: 1 }                     # 数量至少 1
         effect:
           - create:
               object: requisition

@@ -510,6 +510,22 @@ describe("LLM 演示实现（离线）", () => {
     expect(same.tendency).toBe(Verdict.Same); // 第三问不是「是」——全交只答同一批，维持同一
   });
 
+  it("看过交集率再建议：有交集又不是全交时维持第一版（锚不被状态字段翻掉）", async () => {
+    const a = { name: "equipment", sources: ["device_sys"], fields: ["name", "serial_no", "status"], enums: [] };
+    const b = { name: "instrument", sources: ["inspect_sys"], fields: ["name", "serial_no"], enums: [] };
+    const mid = { rate: 0.667, count_a: 100, count_b: 60, count_hit: 40 };
+    // 剧本第一版是部分重叠：数据（有交集非全交）支持它，状态字段不翻案
+    const anchored = await slot.proposePair({
+      class_a: a, class_b: b, overlap: mid,
+      base: { tendency: Verdict.Overlap, reason: "点检对象覆盖部分设备（40/60 对得上序列号）" },
+    });
+    expect(anchored.tendency).toBe(Verdict.Overlap);
+    expect(anchored.reason).toContain("维持第一版");
+    // 无锚：第三问偏置才登场（有状态字段 → 生命周期）
+    const unanchored = await slot.proposePair({ class_a: a, class_b: b, overlap: mid });
+    expect(unanchored.tendency).toBe(Verdict.Stage);
+  });
+
   it("看过交集率再建议：两边都有行、命中为零，阶段立不住——改口同一（空表才沉默）", async () => {
     const advice = await slot.proposePair({
       class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },

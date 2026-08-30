@@ -225,15 +225,19 @@ function reviseWithOverlap(
         : `交集率 ${pct(overlap.rate)}（${counts}），现在多半是同一批个体，倾向${VERDICT_LABELS[Verdict.Same]}。`,
     }, a, b);
   }
-  const tendency = hasStageField(a, b) ? Verdict.Stage : Verdict.Overlap;
+  // 有交集又不是全交：第二问支持「部分重叠」与「生命周期」两可——第三问（状态字段）只在无锚时做偏置；
+  // 有第一版锚（清单快照，同一裁判）时维持第一版：数据（有交集非全交）不推翻它
+  const tendency = base ? base.tendency : hasStageField(a, b) ? Verdict.Stage : Verdict.Overlap;
   return withKeep({
     class_a: a.name,
     class_b: b.name,
     tendency,
     reason:
-      tendency === Verdict.Stage
-        ? `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是全交，又有状态字段，倾向${VERDICT_LABELS[Verdict.Stage]}。`
-        : `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是同一批，倾向部分重叠。`,
+      base && tendency === base.tendency
+        ? `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是全交，维持第一版的${VERDICT_LABELS[tendency]}。${base.reason}`
+        : tendency === Verdict.Stage
+          ? `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是全交，又有状态字段，倾向${VERDICT_LABELS[Verdict.Stage]}。`
+          : `交集率 ${pct(overlap.rate)}（${counts}），有交集又不是同一批，倾向部分重叠。`,
   }, a, b);
 }
 
