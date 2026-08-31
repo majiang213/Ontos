@@ -1,35 +1,9 @@
-// 画布页的小表单组件：新建对象、连线、连接数据源（同一消费者 CanvasPage）。
+// 画布页的小表单组件：连线（消费者 CanvasPage）、连接数据源（消费者数据源抽屉 SchemaDrawer）。
 // 字段表单与小节壳已随消费者搬走（cards/FieldForm.tsx，ObjectCard 配套）；全是自包含展示组件，只靠窄回调 props 通信。
 "use client";
 
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../workspaceClient";
-
-export function CreateForm({ onSubmit, onCancel }: { onSubmit: (name: string, description: string, kind: "thing" | "event") => void; onCancel: () => void }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [kind, setKind] = useState<"thing" | "event">("thing");
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (name.trim()) onSubmit(name.trim(), description.trim(), kind);
-      }}
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
-    >
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="对象名（小写，如 vendor）" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="text-in" style={{ fontSize: 13, padding: "8px 12px" }} placeholder="一句话说明（可选）" value={description} onChange={(e) => setDescription(e.target.value)} />
-      <select className="ctl" value={kind} onChange={(e) => setKind(e.target.value as "thing" | "event")} style={{ fontSize: 13 }}>
-        <option value="thing">事物（可持续存在）</option>
-        <option value="event">事件（发生过即确定）</option>
-      </select>
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button type="submit" className="btn-cta" style={{ fontSize: 13, padding: "6px 16px" }}>加入画布</button>
-        <button type="button" className="btn" onClick={onCancel}>取消</button>
-      </div>
-    </form>
-  );
-}
 
 /** 连线表单：关系名/反向名/基数 + 配对字段（默认两边识别字段）。 */
 export function LinkForm({ from, to, objects, onSubmit, onCancel }: { from: string; to: string; objects: Record<string, any>; onSubmit: (body: Record<string, unknown>) => void; onCancel: () => void }) {

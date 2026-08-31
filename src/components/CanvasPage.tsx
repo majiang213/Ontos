@@ -9,7 +9,7 @@ import Bezel from "./cards/Bezel";
 import DecisionPanel, { identityRows, type IdentifySuggestion } from "./cards/DecisionPanel";
 import { ApiError, apiGet, apiPost, apiDel } from "./workspaceClient";
 import QuestionsCard from "./cards/QuestionsCard";
-import { CreateForm, LinkForm } from "./forms/forms";
+import { LinkForm } from "./forms/forms";
 import ObjectCard, { type ObjectFormState } from "./cards/ObjectCard";
 import LinkDetailCard from "./cards/LinkDetailCard";
 import VersionsCard from "./cards/VersionsCard";
@@ -34,11 +34,10 @@ interface IntrospectResp {
 }
 
 /** 浮卡（「同一时间只浮一张卡」的类型表达）：开一张 = 收其余，互斥由联合类型保证，不再手工维护。
- *  左上组（版本/新建/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
+ *  左上组（版本/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
  *  例外：底中待确认面板与底部数据源抽屉是独立区域，不进联合。 */
 type Card =
   | { kind: "versions" }
-  | { kind: "create" }
   | { kind: "questions" }
   | { kind: "link"; from: string; to: string; pins?: { source?: BorderPin; target?: BorderPin } } // 拖线落地后等待取名的半成品（pins = 两端钉点）
   | { kind: "linkDetail"; name: string } // 点中的边
@@ -403,13 +402,11 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         classConclusions={ont?.class_conclusions ?? []}
       />
 
-      {/* 左上一条工具条：品牌和入口同一行，只放任务按钮（连接数据源在左下数据源抽屉里）。顺序是新建对象 → 待确认 → 发布。 */}
+      {/* 左上一条工具条：品牌和入口同一行，只放任务按钮（连接数据源在左下数据源抽屉里）。顺序是待确认 → 发布。 */}
       <div className="float-card float-tl dock">
         <Bezel pad="6px 8px">
           <div className="dock-bar">
             <div className="dock-brand">{brand}</div>
-            <i className="dock-split" aria-hidden />
-            <button className={`btn${card?.kind === "create" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "create" ? null : { kind: "create" })}>新建对象</button>
             <i className="dock-split" aria-hidden />
             <button
               className={`btn${panelOpen ? " is-on" : ""}`}
@@ -457,9 +454,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
       {ont && objects.length === 0 && (
         <div className="float-card" style={{ top: "40%", left: "50%", translate: "-50% -50%", width: 380 }}>
           <Bezel pad={18} coreStyle={{ fontSize: 13, lineHeight: 2, color: "var(--ink-2)" }}>
-            画布还是空的。两条起步路径：
-            <br />· 点左下角「数据源」接入源库，勾选表生成对象
-            <br />· 或点「新建对象」手动建模
+            画布还是空的。点左下角「数据源」接入源库，勾选表生成对象；发布后问数与动作就能看见。
           </Bezel>
         </div>
       )}
@@ -499,25 +494,6 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
                 ✕
               </button>
             )}
-          </Bezel>
-        </div>
-      )}
-
-      {/* 新建对象卡（左上） */}
-      {card?.kind === "create" && (
-        <div className="float-card float-tl dock-follow" style={{ width: 300 }}>
-          <Bezel>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>新建对象</div>
-            <CreateForm
-              onCancel={() => setCard(null)}
-              onSubmit={async (name, description, kind) => {
-                const ok = await op({ op: "create_object", name, description, kind });
-                if (ok) {
-                  setCard({ kind: "object", name }); // 建成即打开新对象的编辑卡
-                  showToast(`已加入草稿：${name}（发布后生效）`);
-                }
-              }}
-            />
           </Bezel>
         </div>
       )}
