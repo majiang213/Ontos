@@ -54,14 +54,14 @@ export default function SchemaDrawer({
 
   const connectOne = async (f: SourceFile) => {
     try {
-      const data = await apiPost<{ saved: boolean; warning?: string }>("/api/connections", {
+      const data = await apiPost<{ saved: boolean; warning?: string; tables?: unknown[] }>("/api/connections", {
         name: f.connection,
         type: "sqlite",
         db_name: f.path,
-        test: true, // 先测连通再保存（与连接表单同一原语）；空库测通但不落库
+        test: true, // 先测连通再保存（与手动接入同一原语）；空库测通但不落库
       });
       if (data.saved) {
-        onConnected(`已连接 ${f.title ?? f.file}`);
+        onConnected(`已连接 ${f.title ?? f.file}，读到 ${data.tables?.length ?? 0} 张表`);
         setFilesTick((t) => t + 1);
       } else {
         showToast(data.warning ?? `${f.title ?? f.file} 没接上：没有可连接的表`);

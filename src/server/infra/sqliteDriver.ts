@@ -32,7 +32,7 @@ export class SqliteDriver implements SourceDriver {
     return db;
   }
 
-  /** 注册一个 SQLite 文件库作为连接（连接表单里的 sqlite 类型走这里）。同名覆盖先关旧句柄。
+  /** 注册一个 SQLite 文件库作为连接（sqlite 文件类型连接走这里）。同名覆盖先关旧句柄。
    *  打开后尽力载入列注释，sidecar 永不抛错（与缺文件跳过同一条纪律：一份坏 JSON 不许拖垮整份注册表）：
    *  sidecar 合法 → 按表挂注释；损坏 → 只警告不加注释（不回退种子注释盖住坏文件）；不存在 → 按库文件名回退种子注释。 */
   registerFile(connection: string, path: string): void {

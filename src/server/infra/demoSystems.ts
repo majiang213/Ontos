@@ -15,7 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 /** 演示库目录（相对仓库根）：gitignored，播种命令打印绝对路径。 */
 export const DEMO_DIR_REL = ".ontos-demo";
 
-/** 十二套演示系统：给人看的名字（title）、连接表单该填的连接名（snake_case）、库文件名。
+/** 十二套演示系统：给人看的名字（title）、接入用的连接名（snake_case）、库文件名。
  *  撤人事/招聘（ADR 0012），客货四系统留作原料（不连不裁）。 */
 export const DEMO_SYSTEMS = [
   { title: "采购系统", connection: "purchase_sys", file: "purchase.db" },
@@ -384,7 +384,7 @@ const FILE_RECIPES: { connection: string; seed: (db: DatabaseSync, now: number) 
 ];
 
 /** 把十二套演示系统写成可连接的 sqlite 文件 + 列注释 sidecar。幂等：重复运行整份覆盖。
- *  只写文件——不动元库、不注册连接（连接由操作者在画布表单里接）。返回连接表单该填的字段（绝对路径）。 */
+ *  只写文件——不动元库、不注册连接（连接由操作者在数据源抽屉里接）。返回接入要用的字段（绝对路径）。 */
 export function writeDemoFiles(dir: string = join(process.cwd(), DEMO_DIR_REL), clock: () => number = realNow): DemoFileInfo[] {
   const absDir = resolve(dir);
   const now = clock();
@@ -410,7 +410,7 @@ export function writeDemoFiles(dir: string = join(process.cwd(), DEMO_DIR_REL), 
     writeFileSync(sidecarPathFor(path), `${JSON.stringify(comments, null, 2)}\n`);
     out.push({ title: sys.title, connection: sys.connection, path });
   }
-  // 清理已从 DEMO_SYSTEMS 撤除的旧文件（如 hr_sys/recruit_sys 时代的残留）：连接表单按目录扫 *.db，
+  // 清理已从 DEMO_SYSTEMS 撤除的旧文件（如 hr_sys/recruit_sys 时代的残留）：接入清单按目录扫 *.db，
   // 不清理会让已撤系统重新出现在下拉里（与「十二套」宣传不符）
   const managed = new Set(DEMO_SYSTEMS.flatMap((s) => [s.file, `${s.file}.comments.json`]));
   for (const f of readdirSync(absDir)) {

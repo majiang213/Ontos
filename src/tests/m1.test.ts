@@ -85,7 +85,7 @@ describe("驱动注册表", () => {
   });
 });
 
-describe("SQLite 文件连接（连接表单的 sqlite 类型）", () => {
+describe("SQLite 文件连接（sqlite 类型）", () => {
   let tmp: string;
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "ontos-sqlite-"));

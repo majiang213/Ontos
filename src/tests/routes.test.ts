@@ -303,7 +303,7 @@ describe("裁决走真路由：草稿变更 + 留痕一体", () => {
   });
 });
 
-describe("list_sqlite_files：连接表单的 sqlite 文件选择器", () => {
+describe("list_sqlite_files：数据源抽屉的演示文件清单", () => {
   it("列演示目录里的 .db 文件：建议连接名（DEMO_SYSTEMS 优先）、相对路径、已连接标记；推不出合法名的文件不列", async () => {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const { DatabaseSync } = await import("node:sqlite");

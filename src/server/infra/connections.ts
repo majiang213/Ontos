@@ -59,7 +59,7 @@ export function registerSaved(registry: DriverRegistry, rec: ConnectionRec): voi
   }
 }
 
-/** 连接表单的文件选择器数据源：列出演示库目录里可连接的 .db 文件与建议连接名。
+/** 数据源抽屉「可接入」的数据源：列出演示库目录里可连接的 .db 文件与建议连接名。
  *  DEMO_SYSTEMS 命中优先（title + 规范连接名）；未命中的按文件名推（小写、非法字符归一为下划线），
  *  推不出合法连接名（NAME_RE）或与前面撞名的文件不列——那个文件还能走表单的手动指定路径。 */
 export function listSqliteFiles(dir: string): { file: string; path: string; title?: string; connection: string }[] {
