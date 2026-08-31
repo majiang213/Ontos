@@ -8,7 +8,7 @@
 //   ③ sidecar 注释：${dbPath}.comments.json 的读 / 写 / 文件名回退（SQLite 没有列注释，文件连接靠它带注释）。
 // 人事（hr_sys）与招聘（recruit_sys）已撤（ADR 0012）：人员线由办公账号 + 门禁卡承担。
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -409,6 +409,13 @@ export function writeDemoFiles(dir: string = join(process.cwd(), DEMO_DIR_REL), 
     const comments = Object.fromEntries(Object.entries(all).filter(([t]) => tables.includes(t)));
     writeFileSync(sidecarPathFor(path), `${JSON.stringify(comments, null, 2)}\n`);
     out.push({ title: sys.title, connection: sys.connection, path });
+  }
+  // 清理已从 DEMO_SYSTEMS 撤除的旧文件（如 hr_sys/recruit_sys 时代的残留）：连接表单按目录扫 *.db，
+  // 不清理会让已撤系统重新出现在下拉里（与「十二套」宣传不符）
+  const managed = new Set(DEMO_SYSTEMS.flatMap((s) => [s.file, `${s.file}.comments.json`]));
+  for (const f of readdirSync(absDir)) {
+    if (managed.has(f)) continue;
+    if (f.endsWith(".db") || f.endsWith(".db.comments.json")) rmSync(join(absDir, f), { force: true });
   }
   return out;
 }

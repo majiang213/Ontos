@@ -23,7 +23,7 @@ function registries(): Map<string, DriverRegistry> {
   return (runtime().registries ??= new Map());
 }
 
-/** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 四个内置连接只注入 test——其余空间（含 default）空白起步，数据源自己接。按工作空间键控，与 LLM Key 无关。 */
+/** 驱动注册表（全部路由的唯一驱动入口）：该空间元数据库里保存的连接；演示 fixture 七个内置连接只注入 test——其余空间（含 default）空白起步，数据源自己接。按工作空间键控，与 LLM Key 无关。 */
 export async function getDriverRegistry(workspace: string = DEFAULT_WORKSPACE): Promise<DriverRegistry> {
   let r = registries().get(workspace);
   if (!r) {

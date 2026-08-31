@@ -9,7 +9,7 @@ import { WorkspaceReject, MSG, toResult, type Result } from "../errors";
 
 export const DEFAULT_WORKSPACE = "default";
 
-/** 测试工作空间：演示模板与四个 fixture 连接只属于它。填充按空间名判断，与是否配置 LLM Key 无关。 */
+/** 测试工作空间：演示模板与七个 fixture 连接只属于它。填充按空间名判断，与是否配置 LLM Key 无关。 */
 export const TEST_WORKSPACE = "test";
 /** 空间名形状：比 schema/ops 的 NAME_RE 多许中划线（两种纪律，名字区分开，别混用）。 */
 const WORKSPACE_NAME_RE = /^[a-z][a-z0-9_-]*$/;

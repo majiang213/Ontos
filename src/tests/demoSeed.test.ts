@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupRuntime, expectRejected, setupRuntime, unwrap } from "./helpers";
@@ -45,6 +45,21 @@ describe("writeDemoFiles：十二套文件库", () => {
     }
     const again = writeDemoFiles(tmp); // 幂等：重跑覆盖，行数不翻倍
     expect(tablesOf(again.find((f) => f.connection === "purchase_sys")!.path).find((t) => t.name === "po_item")?.n).toBe(121);
+  });
+
+  it("清理已撤系统的残留文件：hr.db / recruit.db 及 sidecar 被删，受管文件不动", () => {
+    writeFileSync(join(tmp, "hr.db"), "x");
+    writeFileSync(join(tmp, "hr.db.comments.json"), "{}");
+    writeFileSync(join(tmp, "recruit.db"), "x");
+    writeFileSync(join(tmp, "recruit.db.comments.json"), "{}");
+    const files = writeDemoFiles(tmp);
+    expect(files.length).toBe(12);
+    expect(existsSync(join(tmp, "hr.db"))).toBe(false);
+    expect(existsSync(join(tmp, "hr.db.comments.json"))).toBe(false);
+    expect(existsSync(join(tmp, "recruit.db"))).toBe(false);
+    expect(existsSync(join(tmp, "recruit.db.comments.json"))).toBe(false);
+    expect(existsSync(join(tmp, "purchase.db"))).toBe(true); // 受管文件与 sidecar 健在
+    expect(existsSync(join(tmp, "purchase.db.comments.json"))).toBe(true);
   });
 
   it("行数与表清单按走查设计（ADR 0012）：device 无 repair、asset 52/保修卡 30/处置 8、IT 40+12、门禁 45、OA 六表、无人事与招聘", () => {
