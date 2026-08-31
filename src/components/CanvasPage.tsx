@@ -9,7 +9,7 @@ import Bezel from "./cards/Bezel";
 import DecisionPanel, { identityRows, type IdentifySuggestion } from "./cards/DecisionPanel";
 import { ApiError, apiGet, apiPost, apiDel } from "./workspaceClient";
 import QuestionsCard from "./cards/QuestionsCard";
-import { ConnectForm, CreateForm, LinkForm } from "./forms/forms";
+import { CreateForm, LinkForm } from "./forms/forms";
 import ObjectCard, { type ObjectFormState } from "./cards/ObjectCard";
 import LinkDetailCard from "./cards/LinkDetailCard";
 import VersionsCard from "./cards/VersionsCard";
@@ -34,12 +34,11 @@ interface IntrospectResp {
 }
 
 /** 浮卡（「同一时间只浮一张卡」的类型表达）：开一张 = 收其余，互斥由联合类型保证，不再手工维护。
- *  左上组（版本/新建/连接/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
- *  例外：底中待确认面板与底部表结构抽屉是独立区域，不进联合。 */
+ *  左上组（版本/新建/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
+ *  例外：底中待确认面板与底部数据源抽屉是独立区域，不进联合。 */
 type Card =
   | { kind: "versions" }
   | { kind: "create" }
-  | { kind: "connect" }
   | { kind: "questions" }
   | { kind: "link"; from: string; to: string; pins?: { source?: BorderPin; target?: BorderPin } } // 拖线落地后等待取名的半成品（pins = 两端钉点）
   | { kind: "linkDetail"; name: string } // 点中的边
@@ -114,6 +113,8 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
     [watcher]
   );
   const refresh = useCallback(() => apiGet<OntologyResp>("/api/ontology").then(applyOnt), [applyOnt]);
+  // 表结构随连接变化：挂载拉一次，抽屉里接入成功后由 onConnected 再拉（抽屉原地更新）
+  const reloadSchema = useCallback(() => apiGet<IntrospectResp>("/api/list_tables").then(setSchema).catch(netErr), [netErr]);
   // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
   const loadPairs = useCallback(async () => {
     const data = await apiGet<{ candidates?: PairAdvice[] }>("/api/list_candidates");
@@ -124,9 +125,9 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   // 首轮加载：本体、表结构、待裁计数（依赖已列全，只跑挂载这一次）
   useEffect(() => {
     refresh().catch(netErr); // 首轮加载失败也要说
-    apiGet<IntrospectResp>("/api/list_tables").then(setSchema).catch(netErr);
+    reloadSchema();
     loadPairs().catch(netErr); // 工具条「待确认」计数的首轮
-  }, [refresh, netErr, loadPairs]);
+  }, [refresh, netErr, loadPairs, reloadSchema]);
 
   // 开面板必重拉：面板与计数都要当前草稿算出的候选对（快照命中不过模型，这一下基本免费）
   useEffect(() => {
@@ -402,13 +403,12 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         classConclusions={ont?.class_conclusions ?? []}
       />
 
-      {/* 左上一条工具条：品牌和入口同一行。顺序是连接 → 待确认 → 发布。入口一律 btn，发布有改动时用 btn-cta。 */}
+      {/* 左上一条工具条：品牌和入口同一行，只放任务按钮（连接数据源在左下数据源抽屉里）。顺序是新建对象 → 待确认 → 发布。 */}
       <div className="float-card float-tl dock">
         <Bezel pad="6px 8px">
           <div className="dock-bar">
             <div className="dock-brand">{brand}</div>
             <i className="dock-split" aria-hidden />
-            <button className={`btn${card?.kind === "connect" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "connect" ? null : { kind: "connect" })}>连接数据源</button>
             <button className={`btn${card?.kind === "create" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "create" ? null : { kind: "create" })}>新建对象</button>
             <i className="dock-split" aria-hidden />
             <button
@@ -458,7 +458,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         <div className="float-card" style={{ top: "40%", left: "50%", translate: "-50% -50%", width: 380 }}>
           <Bezel pad={18} coreStyle={{ fontSize: 13, lineHeight: 2, color: "var(--ink-2)" }}>
             画布还是空的。两条起步路径：
-            <br />· 点「连接数据源」接入库，再到「表结构」勾选表生成对象
+            <br />· 点左下角「数据源」接入源库，勾选表生成对象
             <br />· 或点「新建对象」手动建模
           </Bezel>
         </div>
@@ -484,9 +484,9 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         />
       )}
 
-      {/* 左下：表结构抽屉开关（常驻）。贴缩放钮右侧，见 .schema-toggle */}
-      <div className="float-card schema-toggle">
-        <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起表结构" : "表结构"}</button>
+      {/* 左下：数据源抽屉开关（常驻）。抽屉开着时抬到抽屉上沿之上：float-card(z20) 会压住 drawer(z15) 内容，抽屉左下角的可点内容不能被它拦住 */}
+      <div className="float-card schema-toggle" style={drawerOpen ? { bottom: "calc(56% + 12px)" } : undefined}>
+        <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起" : "数据源"}</button>
       </div>
 
       {/* toast：瞬时反馈 */}
@@ -499,28 +499,6 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
                 ✕
               </button>
             )}
-          </Bezel>
-        </div>
-      )}
-
-      {/* 连接数据源卡（左上） */}
-      {card?.kind === "connect" && (
-        <div className="float-card float-tl dock-follow" style={{ width: 420, maxWidth: "calc(100vw - 24px)" }}>
-          <Bezel>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>连接数据源</div>
-            <ConnectForm
-              onCancel={() => setCard(null)}
-              onDone={async (msg) => {
-                setCard(null);
-                showToast(msg);
-                try {
-                  setSchema(await apiGet<IntrospectResp>("/api/list_tables"));
-                  setDrawerOpen(true); // 保存后自动打开表结构抽屉
-                } catch (e) {
-                  netErr(e); // 连上了但刷表结构失败：连接已存，刷新失败要告诉人
-                }
-              }}
-            />
           </Bezel>
         </div>
       )}
@@ -605,8 +583,19 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         />
       )}
 
-      {/* 底部抽屉：表结构（只看列定义与采样，多选可生成对象） */}
-      {drawerOpen && <SchemaDrawer schema={schema} columnTarget={columnTarget} onGenerate={generateFromTables} />}
+      {/* 底部抽屉：数据源（左栏接源、右栏表结构勾选生成；只看列定义与采样，不取业务行） */}
+      {drawerOpen && (
+        <SchemaDrawer
+          schema={schema}
+          columnTarget={columnTarget}
+          onGenerate={generateFromTables}
+          onConnected={(msg) => {
+            showToast(msg);
+            reloadSchema();
+          }}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }

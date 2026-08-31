@@ -595,6 +595,29 @@ input { font-family: inherit; outline: none; }
   animation: rise-in 480ms var(--ease-out) both;
 }
 
+/* 数据源抽屉（两栏）：左栏管源（切换 / 一按接入 / 手动连接），右栏看选中源的表结构并勾选生成 */
+.drawer-two-pane { display: flex; gap: 14px; flex-wrap: wrap; height: 56%; padding: 12px 16px; }
+.drawer-source-pane { flex: 1 1 230px; min-width: 210px; border-right: 1px solid var(--hairline); padding-right: 14px; overflow-y: auto; }
+.drawer-tables-pane { flex: 3 1 340px; min-width: 280px; overflow-y: auto; }
+.src-row {
+  display: block; width: 100%; text-align: left; font-size: 12px;
+  padding: 6px 8px; border-radius: 8px; margin: 4px 0; cursor: pointer;
+  border: 1px solid var(--hairline); background: var(--panel);
+}
+.src-row.is-on { border-color: var(--accent); }
+.src-cand { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 2px; }
+.src-cand-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-cand-name b { font-weight: 600; }
+.src-cand-name code { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+.drawer-src-split { height: 1px; background: var(--hairline); margin: 10px 0; }
+.drawer-src-empty { font-size: 12px; color: var(--ink-3); line-height: 1.7; margin: 6px 0; }
+.drawer-generate-bar {
+  position: sticky; top: 0; z-index: 5; background: var(--bg-deep); padding-bottom: 8px;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+.drawer-generate-bar .btn, .drawer-generate-bar .btn-cta { font-size: 12px; }
+.drawer-table-cards { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+
 
 .fold-body {
   margin-top: 6px;

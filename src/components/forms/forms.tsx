@@ -93,7 +93,7 @@ export function LinkForm({ from, to, objects, onSubmit, onCancel }: { from: stri
   );
 }
 
-export function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => void; onCancel: () => void }) {
+export function ConnectForm({ onDone, onCancel, defaultManual = false }: { onDone: (msg: string) => void; onCancel: () => void; defaultManual?: boolean }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<"sqlite" | "mysql" | "pg">("sqlite");
   const [host, setHost] = useState("");
@@ -107,7 +107,7 @@ export function ConnectForm({ onDone, onCancel }: { onDone: (msg: string) => voi
   const [files, setFiles] = useState<{ file: string; path: string; title?: string; connection: string; connected: boolean }[] | null>(null);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState(defaultManual);
   const inputStyle: React.CSSProperties = { fontSize: 13, padding: "8px 12px" };
   useEffect(() => {
     if (type !== "sqlite" || manual) return;
