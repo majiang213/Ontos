@@ -267,3 +267,17 @@ _UI 说法_：取数路径。
 - **页内无对话列**：点击不发消息。外部 Agent 经 MCP 工作，循环不做进 Ontos。
 - **操作指引写在对应卡片上**；锁定/拦截反馈用瞬时 toast。
 - **AI 的活自动跑，不为 AI 设点击**；人的点击只留给关卡——选表、待确认（唯一键与裁决）、发布。
+
+## Agent skills
+
+### Issue tracker
+
+Issue 台账为本地 markdown：`.scratch/<feature>/` 一个特性一个目录。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+沿用五个默认标签：needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文布局：根目录 `CONTEXT.md` 与 `docs/adr/`。详见 `docs/agents/domain.md`。
