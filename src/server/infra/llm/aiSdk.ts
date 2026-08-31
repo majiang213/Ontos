@@ -8,9 +8,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { generateText, type LanguageModel } from "ai";
-import { MSG } from "../../errors";
+import { EngineReject, MSG } from "../../errors";
 import type { QueryRequest } from "../../schema/request";
 import { queryRequestSchema } from "../../schema/request";
 import { enumValueKey, objectTypeSchema, type ObjectType, type OntologyConfig } from "../../schema/config";
@@ -91,7 +91,8 @@ export class AiSdkLlm implements Llm {
     this.name = `ai-sdk:${typeof model === "string" ? model : model.modelId}`;
   }
 
-  /** 三个出口同一条失败闸：跑 run → 文本抠 JSON → parse；抛错或出槽校验失败都把原始文本落盘再原样抛出。 */
+  /** 三个出口同一条失败闸：跑 run → 文本抠 JSON → parse；抛错或出槽校验失败都把原始文本落盘再抛出。
+   *  出槽 Zod 失败是「模型乱说话」不是「请求形状不合法」——改抛 EngineReject，别让 respond 把它误标成请求错误。 */
   private async runWithFailureDump<T>(slot: string, input: unknown, run: () => Promise<{ text: string }>, parse: (output: unknown) => T): Promise<T> {
     let raw: unknown;
     try {
@@ -100,6 +101,7 @@ export class AiSdkLlm implements Llm {
       return parse(extractJson(text));
     } catch (e) {
       dumpFailure(slot, this.name, input, raw, e);
+      if (e instanceof ZodError) throw new EngineReject(MSG.llmOutputShapeBad);
       throw e;
     }
   }
@@ -154,7 +156,12 @@ properties 的类型只用 string/number/boolean/date/enum；状态/阶段类列
 ${occupied.length ? `已占用类名（不许再用）：${occupied.join("、")}。表名撞上已占用类名时，类名写成 {连接名}_{表名}（小写下划线，如 crm_sys_customer）。` : ""}
 表：${JSON.stringify(tables.map((t) => ({ connection: t.connection, name: t.table.name, columns: t.table.columns })))}`,
         }),
-      (output) => draftSchema.parse(output).object_types
+      (output) => {
+        // 提示词承诺「kind 默 thing」：模型照约省略时补默认再出槽——省略不该整批拒绝（9 表批次曾因此全被否）
+        const raw = (output as { object_types?: Record<string, Record<string, unknown>> }).object_types ?? {};
+        const filled = Object.fromEntries(Object.entries(raw).map(([name, t]) => [name, t.kind == null ? { ...t, kind: "thing" } : t]));
+        return draftSchema.parse({ object_types: filled }).object_types;
+      }
     );
   }
 

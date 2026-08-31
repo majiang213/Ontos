@@ -259,6 +259,7 @@ export const MSG = {
   cannedScriptOnly: "演示实现只覆盖演示剧本的问法：配 OPENAI_API_KEY，或到 test 演示空间问",
   openaiModelMissing: "OPENAI_MODEL 未设置：接真模型必须显式指定模型名",
   noJsonInModelOutput: "模型产出里没有 JSON 对象",
+  llmOutputShapeBad: "模型没按约定格式回答，重试一次或调整勾选的表再试",
   noSuchConnection: "没有这个连接",
   connectionReadFailed: "连接失败或读取表结构失败",
 

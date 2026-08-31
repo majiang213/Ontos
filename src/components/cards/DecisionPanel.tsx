@@ -72,6 +72,7 @@ export function KeyEvidenceLine({ ev }: { ev: IdentifySuggestion }) {
 export default function DecisionPanel({
   rows,
   pairs,
+  drawerOpen,
   onConfirmIdentity,
   onPairDone,
   onIdentify,
@@ -79,6 +80,8 @@ export default function DecisionPanel({
 }: {
   rows: IdentityRow[];
   pairs: PairAdvice[];
+  /** 数据源抽屉开着时面板抬到抽屉上沿之上（is-lifted，只让位置不互关）；不传 = 底中原位 */
+  drawerOpen?: boolean;
   onConfirmIdentity: (selections: Record<string, string>) => Promise<boolean>; // false = 没落成，卡住不解锁
   onPairDone: (msg: string) => void;
   /** 逐类「识别唯一键」：数据试算 + 模型综合判断，只建议不落地。null = 服务端失败（调用方已提示），不动选择。 */
@@ -94,7 +97,7 @@ export default function DecisionPanel({
   const ready = rows.length > 0 && rows.every((r) => Boolean(sel[r.name])); // 空画布或还有「未设置」都不放行——键没定就裁会得出错的关系
   const unlocked = identityDone && ready; // 面板开着时新对象进卡，ready 变 false，② 收回
   return (
-    <div className={`float-card float-bc decide${unlocked ? " is-pairs" : ""}`}>
+    <div className={`float-card float-bc decide${unlocked ? " is-pairs" : ""}${drawerOpen ? " is-lifted" : ""}`}>
       <Bezel pad={0}>
         <div className="decide-head">
           <span className="decide-title">{unlocked ? "疑似重复" : "待确认"}</span>

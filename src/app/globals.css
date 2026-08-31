@@ -41,6 +41,9 @@
   --r-core: 16px;
   --r-chip: 999px;
 
+  /* 间距走偶数栅格：2 是紧排半档，主拍 4 / 8，组间距 8 / 12 / 16 / 20 / 24，6 / 10 用于控件内衬与紧邻行距；1px 只留给发丝线与光学微调。
+     间距不设 token——数值直接落栅格；跨组件关系才进变量（--below-dock / --drawer-h / 抽屉让位链），别再写魔法数副本 */
+
   /* 字体（不含任何禁用字体） */
   --font-sans: "Avenir Next", "Avenir", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-serif: "Iowan Old Style", "Palatino", "Songti SC", "Noto Serif CJK SC", serif;
@@ -53,6 +56,15 @@
 
   /* 布局：dock 工具条高度随内容与折行变化，跟在它下面的浮卡（版本历史 / toast 等）统一从这里取偏移，别再写魔法数 */
   --below-dock: 84px;
+
+  /* 数据源抽屉高度：抽屉本体与给它让路的浮层（左下开关、底中待确认面板）都从这里取，别再写 56% 副本 */
+  --drawer-h: 56%;
+
+  /* 抽屉让位链：浮层贴抽屉上沿留 12；左下开关高约 37（.btn 的 8px 上下衬 + 12px 字号行高，改按钮内衬同步这里）；
+     面板底中叠在开关上方，上面再留一个 12 */
+  --drawer-gap: 12px;
+  --schema-toggle-h: 37px;
+  --panel-lift: calc(var(--drawer-gap) + var(--schema-toggle-h) + var(--drawer-gap));
 }
 
 * { box-sizing: border-box; }
@@ -89,7 +101,7 @@ input { font-family: inherit; outline: none; }
 .workspace-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   border: none;
   cursor: pointer;
   font-size: 12px;
@@ -140,9 +152,9 @@ input { font-family: inherit; outline: none; }
 .verdict-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 10px;
+  gap: 4px 10px;
   align-items: baseline;
-  padding: 9px 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--hairline);
   border-radius: 8px;
   cursor: pointer;
@@ -202,7 +214,7 @@ input { font-family: inherit; outline: none; }
   font-size: 11px;
   font-weight: 650;
   color: var(--accent-ink);
-  padding-top: 3px;
+  padding-top: 4px;
 }
 .pair-ev.is-mid .pair-ev-k { color: var(--ink-2); }
 .pair-ev.is-low .pair-ev-k,
@@ -229,7 +241,7 @@ input { font-family: inherit; outline: none; }
   line-height: 1.2;
   vertical-align: -1px;
 }
-.pair-q { font-size: 13px; margin-top: 14px; }
+.pair-q { font-size: 13px; margin-top: 16px; }
 
 /* ---------- Double-Bezel（外壳托盘 + 内核） ---------- */
 .bezel {
@@ -255,7 +267,7 @@ input { font-family: inherit; outline: none; }
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-3);
-  padding: 3px 10px;
+  padding: 4px 10px;
   border-radius: var(--r-chip);
   border: 1px solid var(--line);
   background: var(--panel);
@@ -263,7 +275,7 @@ input { font-family: inherit; outline: none; }
 .tag {
   font-size: 11px;
   border-radius: var(--r-chip);
-  padding: 2px 9px;
+  padding: 2px 8px;
   background: var(--accent-soft);
   color: var(--accent-ink);
 }
@@ -303,7 +315,7 @@ input { font-family: inherit; outline: none; }
   justify-content: center;
   min-width: 17px;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   margin-left: 6px;
   border-radius: 999px;
   background: var(--warn-soft);
@@ -321,7 +333,7 @@ input { font-family: inherit; outline: none; }
   border: none;
   cursor: pointer;
   font-size: 13px;
-  padding: 9px 16px;
+  padding: 8px 16px;
   border-radius: var(--r-chip);
   background: var(--accent);
   color: #fff;
@@ -349,7 +361,7 @@ input { font-family: inherit; outline: none; }
   position: relative; /* 四边连接条的定位锚 */
   background: var(--bg-deep);
   border-radius: var(--r-shell);
-  padding: 5px;
+  padding: 6px;
   width: 288px;
   border: 1px solid var(--line);
   box-shadow: var(--shadow-soft);
@@ -417,12 +429,12 @@ input { font-family: inherit; outline: none; }
 .node-kind {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex-shrink: 0;
   font-size: 11px;
   line-height: 1.5;
   border-radius: var(--r-chip);
-  padding: 2px 9px;
+  padding: 2px 8px;
 }
 .node-kind-thing { border: 1px solid var(--hairline-strong); color: var(--ink-2); background: var(--panel-2); }
 .node-kind-event { color: var(--accent-ink); background: var(--accent-soft); }
@@ -501,10 +513,10 @@ input { font-family: inherit; outline: none; }
 }
 .stage-name:hover { text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px; }
 .stage-key { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
-.stage-rename { padding: 1px 7px; font-size: 11px; }
+.stage-rename { padding: 1px 8px; font-size: 11px; }
 .stage-cond { color: var(--ink-3); font-size: 11px; line-height: 1.6; }
 .stage-move { display: flex; gap: 2px; }
-.stage-move .chip { padding: 1px 7px; }
+.stage-move .chip { padding: 1px 8px; }
 .stage-conv { border-left: 2px solid var(--hairline-strong); padding-left: 8px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .stage-conv code { font-family: var(--font-mono); font-size: 11.5px; }
 
@@ -543,6 +555,7 @@ input { font-family: inherit; outline: none; }
 /* 缩放在左下，表结构贴它右侧，不要叠在同一角 */
 .react-flow__panel.bottom.left { left: 16px; bottom: 18px; }
 .schema-toggle { bottom: 18px; left: 68px; }
+.schema-toggle.is-open { bottom: calc(var(--drawer-h) + var(--drawer-gap)); } /* 抽屉开着抬到上沿之上：float-card(z20) 压着 drawer(z15)，抽屉左下角的可点内容不能被它拦住 */
 .react-flow__attribution { display: none; }
 
 /* ---------- 浮动卡 ---------- */
@@ -551,10 +564,11 @@ input { font-family: inherit; outline: none; }
   z-index: 20;
   animation: rise-in 420ms var(--ease-out) both;
 }
-.float-tl { top: 76px; left: 16px; }
-.float-tr { top: 76px; right: 16px; }
+/* 跟在 dock 下面的浮卡（左上卡、右侧卡）统一取 --below-dock 偏移；dock 本体自己钉 14px */
+.float-tl { top: var(--below-dock); left: 16px; }
+.float-tr { top: var(--below-dock); right: 16px; }
 .float-tl.dock { top: 14px; z-index: 30; }
-.float-tl.dock-follow { top: var(--below-dock); z-index: 30; }
+.float-tl.dock-follow { z-index: 30; }
 
 /* 左上工具条：一条，关卡用按钮、其余用文字，竖线隔开几组 */
 .dock { max-width: calc(100vw - 32px); }
@@ -585,41 +599,41 @@ input { font-family: inherit; outline: none; }
 /* 画布节点入场：动内壳不动节点——xyflow 的定位 transform 在节点上，动画改它会覆盖定位（新节点闪现堆叠） */
 .node-shell { animation: rise-in 560ms var(--ease-out) backwards; }
 
-/* ---------- 抽屉 ---------- */
+/* ---------- 抽屉：数据源（两栏）——左栏管源（切换 / 一按接入 / 手动连接），右栏看选中源的表结构并勾选生成 ---------- */
 .drawer {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  height: 44%;
+  height: var(--drawer-h);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
   overflow: auto;
   z-index: 15;
   background: var(--bg-deep);
   border-top: 1px solid var(--hairline-strong);
-  padding: 18px 20px;
   animation: rise-in 480ms var(--ease-out) both;
 }
-
-/* 数据源抽屉（两栏）：左栏管源（切换 / 一按接入 / 手动连接），右栏看选中源的表结构并勾选生成 */
-.drawer-two-pane { display: flex; gap: 14px; flex-wrap: wrap; height: 56%; padding: 12px 16px; }
-.drawer-source-pane { flex: 1 1 230px; min-width: 210px; border-right: 1px solid var(--hairline); padding-right: 14px; overflow-y: auto; }
-.drawer-tables-pane { flex: 3 1 340px; min-width: 280px; overflow-y: auto; }
+.drawer-source-pane { flex: 1 1 230px; min-width: 210px; border-right: 1px solid var(--hairline); padding-right: 16px; overflow-y: auto; }
+.drawer-tables-pane { flex: 3 1 340px; min-width: 280px; overflow-y: auto; padding: 0 6px 6px; } /* 留 6px：勾选描边画在卡外 2+2px，贴边会被滚动容器裁掉 */
 .src-row {
   display: block; width: 100%; text-align: left; font-size: 12px;
-  padding: 6px 8px; border-radius: 8px; margin: 4px 0; cursor: pointer;
+  padding: 6px 8px; border-radius: 8px; margin: 6px 0; cursor: pointer;
   border: 1px solid var(--hairline); background: var(--panel);
 }
 .src-row.is-on { border-color: var(--accent); }
-.src-cand { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 2px; }
+.src-cand { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 2px; }
 .src-cand-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-cand-name b { font-weight: 600; }
 .src-cand-name code { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
-.drawer-src-split { height: 1px; background: var(--hairline); margin: 10px 0; }
+.drawer-src-split { height: 1px; background: var(--hairline); margin: 12px 0; }
 .drawer-src-empty { font-size: 12px; color: var(--ink-3); line-height: 1.7; margin: 6px 0; }
 .drawer-generate-bar {
   position: sticky; top: 0; z-index: 5; background: var(--bg-deep); padding-bottom: 8px;
   display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
 }
 .drawer-generate-bar .btn, .drawer-generate-bar .btn-cta { font-size: 12px; }
-.drawer-table-cards { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.drawer-table-cards { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
 
 
 .fold-body {
@@ -635,7 +649,7 @@ input { font-family: inherit; outline: none; }
 
 .text-in {
   flex: 1;
-  padding: 12px 18px;
+  padding: 12px 16px;
   font-size: 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-chip);
@@ -650,7 +664,7 @@ input { font-family: inherit; outline: none; }
 .ctl {
   height: 30px;
   font-size: 12px;
-  padding: 0 9px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
@@ -658,7 +672,7 @@ input { font-family: inherit; outline: none; }
   font-family: inherit;
 }
 .ctl:focus { outline: none; border-color: var(--accent); }
-textarea.ctl { display: block; height: auto; padding: 7px 9px; line-height: 1.5; resize: vertical; }
+textarea.ctl { display: block; height: auto; padding: 8px; line-height: 1.5; resize: vertical; }
 select.ctl { background: var(--panel); }
 .x-btn {
   border: none;
@@ -681,7 +695,7 @@ select.ctl { background: var(--panel); }
   border: 1px solid var(--line-strong);
   cursor: pointer;
   font-size: 12px;
-  padding: 5px 12px;
+  padding: 6px 12px;
   border-radius: var(--r-chip);
   background: transparent;
   color: var(--ink-2);
@@ -695,6 +709,15 @@ select.ctl { background: var(--panel); }
   max-height: 78%;
 }
 .decide.is-pairs { width: min(760px, calc(100vw - 32px)); }
+/* 抽屉开着时面板上移避让：抬到抽屉与左下开关的上方（--panel-lift），高度封顶不顶到 dock；面板体改可收缩滚动，底部按钮不被裁 */
+.decide.is-lifted {
+  bottom: calc(var(--drawer-h) + var(--panel-lift));
+  max-height: calc(100% - var(--drawer-h) - var(--below-dock) - var(--panel-lift));
+  display: flex;
+}
+.decide.is-lifted .bezel { flex: 1; min-height: 0; display: flex; }
+.decide.is-lifted .bezel-core { max-height: none; height: auto; flex: 1; min-height: 0; }
+.decide.is-lifted .decide-pairs-body { min-height: 0; }
 .decide .bezel-core {
   display: flex;
   flex-direction: column;

@@ -136,7 +136,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   /** 本页一切写路径的唯一入口：写期间 localBusy 置位，轮询不动作也不 toast 成「外部改动」。
    *  finally 里一定放下——失败也放（写成功但 refresh 失败同样放，让下一轮轮询把已落地的草稿拉回来）。 */
   const withLocalWrite = useCallback(
-    async (fn: () => Promise<void>): Promise<boolean> => {
+    async (fn: () => Promise<unknown>): Promise<boolean> => {
       localBusy.current = true;
       try {
         await fn();
@@ -292,18 +292,19 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   }, []);
 
   /** 多选表 → 生成对象 → 直接上画布并收起抽屉（选表与按钮在 SchemaDrawer 里）。
-   *  与 MCP 同两步：propose_objects 只建议，edit_draft import_objects 才落地。 */
+   *  与 MCP 同两步：propose_objects 只建议，edit_draft import_objects 才落地。返回成功与否：抽屉据此决定清不清勾选。 */
   const generateFromTables = async (tables: { connection: string; table: string }[]) => {
-    if (generating) return;
+    if (generating) return false;
     setGenerating(true);
     try {
-      await withLocalWrite(async () => {
+      return await withLocalWrite(async () => {
         const { object_types } = await apiPost<{ object_types: Record<string, unknown> }>("/api/propose_objects", { tables });
         await apiPost("/api/edit_draft", { op: "import_objects", objects: object_types });
         showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）。点「待确认」定唯一键`);
         setDrawerOpen(false);
         await refresh();
         await reloadPairs(); // 新对象上画布，疑似重复计数立刻就位
+        return true;
       });
     } finally {
       setGenerating(false);
@@ -467,11 +468,12 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
       {/* 验收问题集卡 */}
       {card?.kind === "questions" && <QuestionsCard onClose={() => setCard(null)} showToast={showToast} version={ont?.version} />}
 
-      {/* 底中：待确认面板（唯一键 → 疑似重复，两段解锁）。打开时优先于发布条——同一时间底中只有这一张卡 */}
+      {/* 底中：待确认面板（唯一键 → 疑似重复，两段解锁）。打开时优先于发布条——同一时间底中只有这一张卡；抽屉开着时面板上移避让，两者不互关 */}
       {panelOpen && (
         <DecisionPanel
           rows={identityRows(ont?.object_types ?? {}, Object.keys(ont?.object_types ?? {}))}
           pairs={pairs}
+          drawerOpen={drawerOpen}
           onConfirmIdentity={confirmIdentity}
           onPairDone={onPairDone}
           onIdentify={identifyKey}
@@ -479,8 +481,8 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         />
       )}
 
-      {/* 左下：数据源抽屉开关（常驻）。抽屉开着时抬到抽屉上沿之上：float-card(z20) 会压住 drawer(z15) 内容，抽屉左下角的可点内容不能被它拦住 */}
-      <div className="float-card schema-toggle" style={drawerOpen ? { bottom: "calc(56% + 12px)" } : undefined}>
+      {/* 左下：数据源抽屉开关（常驻）。抽屉开着时抬到抽屉上沿之上（.is-open，让位链在 globals.css）：float-card(z20) 会压住 drawer(z15) 内容，抽屉左下角的可点内容不能被它拦住 */}
+      <div className={`float-card schema-toggle${drawerOpen ? " is-open" : ""}`}>
         <button className="btn" onClick={() => setDrawerOpen((v) => !v)}>{drawerOpen ? "收起" : "数据源"}</button>
       </div>
 
