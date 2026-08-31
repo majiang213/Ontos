@@ -179,54 +179,88 @@ describe("裁决写草稿", () => {
     assertPublishable(d);
   });
 
-  it("部分重叠：公共属性立上位对象并移走，识别字段复制不移动", () => {
+  it("生命周期多段：第二次 stage 裁决采纳既有 status——新段规则前插、值补上、转化关系与动作各立一套", () => {
     const d = twoClasses();
-    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
-    const parent = d.object_types.shared_po_a_po_b;
-    expect(parent).toBeDefined();
-    expect(Object.keys(parent.properties).sort()).toEqual(["name", "sn"]);
-    expect(d.object_types.po_a.properties.sn).toBeDefined(); // 识别字段留在原类
-    expect(d.object_types.po_a.properties.name).toBeUndefined(); // 公共属性移上去
-    expect(d.object_types.po_a.properties.extra_a).toBeDefined(); // 特有留下
-    expect(parent.sources!.sa.fields).toEqual({ sn: "sn", name: "item_name" });
-    expect(d.class_conclusions).toEqual([{ kind: "overlap", classes: ["po_a", "po_b"], shared: "shared_po_a_po_b" }]);
+    d.object_types.po_c = {
+      kind: "thing",
+      identity: "sn",
+      properties: { sn: { type: "string" }, reason: { type: "string" } },
+      sources: { sc: { connection: "asset_sys", table: "disposal", pk: "record_no", fields: { sn: "sn", reason: "reason" } } },
+    };
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Stage, { from: "in_transit", to: "in_service" });
+    applyVerdict(d, { class_a: "po_a", class_b: "po_c" }, Verdict.Stage, { from: "in_service", to: "scrapped" });
+    const A = d.object_types.po_a;
+    expect(d.object_types.po_c).toBeUndefined();
+    const st = A.properties.status;
+    expect((st.values ?? []).map((v) => (v !== null && typeof v === "object" ? String(v.value) : String(v)))).toEqual(["in_transit", "in_service", "scrapped"]);
+    // 新段规则前插（先命中先赢）：有处置源的行读 scrapped，压过 device 源的在役规则
+    const rules = st.derived as { when: Record<string, unknown>; value: string }[];
+    expect(rules[0]).toEqual({ when: { sc: true }, value: "scrapped" });
+    expect(rules[1]).toEqual({ when: { sa: true, sb: false }, value: "in_transit" });
+    expect(rules[2]).toEqual({ when: { sb: true }, value: "in_service" });
+    expect(d.link_types.po_a_to_in_service.transition).toEqual({ property: "status", from: "in_transit", to: "in_service" });
+    expect(d.link_types.po_a_to_scrapped.transition).toEqual({ property: "status", from: "in_service", to: "scrapped" });
+    expect(A.actions!.convert_to_in_service).toBeDefined();
+    expect(A.actions!.convert_to_scrapped).toBeDefined();
     assertPublishable(d);
   });
 
-  it("部分重叠：识别字段不同名时，各侧源条目显式带 key", () => {
+  it("生命周期多段：B 拷进来的状态列不算「已有时期」——数据列仍让人先改名让位（stageStatusClash）", () => {
+    const d = twoClasses();
+    d.object_types.po_b.properties.status = { type: "enum", values: ["in_service", "scrapped"] }; // B 的台账状态列
+    try {
+      applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Stage, { from: "in_transit", to: "in_service" });
+      expect.unreachable("应抛 stageStatusClash");
+    } catch (e) {
+      expect((e as Error).message).toContain("先把它改名或删掉");
+    }
+  });
+
+  it("部分重叠：同一概念的表并成一个多源类（来源覆盖面差异是数据事实），不再建链立上位对象", () => {
+    const d = twoClasses();
+    applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
+    expect(d.object_types.shared_po_a_po_b).toBeUndefined(); // 不再立上位对象（ADR 0013 再修订）
+    expect(d.link_types.po_a_to_po_b).toBeUndefined(); // 同概念不建链
+    expect(d.object_types.po_b).toBeUndefined(); // 并类：po_b 消亡
+    expect(d.object_types.po_a.properties.name).toBeDefined(); // 公共属性并进来
+    expect(d.object_types.po_a.properties.extra_a).toBeDefined(); // 特有保留
+    expect(d.object_types.po_a.properties.extra_b).toBeDefined(); // 对方特有也并进来
+    expect(d.class_conclusions ?? []).toEqual([]); // 结论与证据住裁决留痕，不进配置
+    assertPublishable(d);
+  });
+
+  it("部分重叠：识别字段不同名时，并入后源条目按留类的键改写", () => {
     const d = twoClasses();
     d.object_types.po_b.identity = "serial_no";
     d.object_types.po_b.properties = { serial_no: { type: "string" }, name: { type: "string" }, extra_b: { type: "string" } };
     d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", name: "name" };
     applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
-    const parent = d.object_types.shared_po_a_po_b;
-    expect(parent.sources!.sa.key).toBe("sn");
-    expect(parent.sources!.sb.key).toBe("serial_no");
+    expect(d.object_types.po_b).toBeUndefined(); // 并类消亡
+    // B 的识别属性不另立（A 已有 sn），B 源条目的识别键改写为 A 的键
+    expect(d.object_types.po_a.properties.sn ?? d.object_types.po_a.properties.serial_no).toBeDefined();
+    expect(d.object_types.po_a.properties.extra_b).toBeDefined();
     assertPublishable(d);
   });
 
-  it("部分重叠：没有同名公共字段仍立公共对象，只带唯一键", () => {
+  it("部分重叠：没有同名公共字段也并成一个多源类（各自属性都保留）", () => {
     const d = twoClasses();
     d.object_types.po_b.identity = "serial_no";
     d.object_types.po_b.properties = { serial_no: { type: "string" }, extra_b: { type: "string" } };
     d.object_types.po_b.sources!.sb.fields = { serial_no: "serial_no", extra_b: "name" };
     applyVerdict(d, { class_a: "po_a", class_b: "po_b" }, Verdict.Overlap);
-    const parent = d.object_types.shared_po_a_po_b;
-    expect(parent).toBeDefined();
-    expect(parent.properties.name).toBeUndefined(); // 没有同名公共字段，不上移
-    expect(parent.properties.sn).toBeDefined(); // 唯一键复制上去
-    expect(parent.properties.serial_no).toBeDefined();
+    expect(d.object_types.po_b).toBeUndefined(); // 并类消亡
     expect(d.object_types.po_a.properties.extra_a).toBeDefined();
-    expect(d.object_types.po_b.properties.extra_b).toBeDefined();
+    expect(d.object_types.po_a.properties.extra_b).toBeDefined(); // 对方特有并入
+    expect(d.class_conclusions ?? []).toEqual([]);
     assertPublishable(d);
   });
 
-  it("同形异义：两类留下，写入 class_conclusions；classes 按名字排序", () => {
+  it("同形异义：两类留下，结论住裁决留痕不进配置；classes 按名字排序", () => {
     const d = twoClasses();
     applyVerdict(d, { class_a: "po_b", class_b: "po_a" }, Verdict.NameSimilar);
     expect(d.object_types.po_a).toBeDefined();
     expect(d.object_types.po_b).toBeDefined();
-    expect(d.class_conclusions).toEqual([{ kind: "homonym", classes: ["po_a", "po_b"] }]);
+    expect(d.class_conclusions ?? []).toEqual([]); // 结论住裁决留痕，不进配置
     assertPublishable(d);
   });
 
@@ -660,10 +694,10 @@ describe("裁决流水线", () => {
     expect(calls).toBe(1);
     unwrap(await decide(env, { class_a: "a", class_b: "b", verdict: Verdict.Overlap }));
     const left = unwrap(await listCandidates(env));
-    expect(left.some(pairOf("a", "b"))).toBe(false);
-    expect(left.some(pairOf("b", "c"))).toBe(true);
+    expect(left.some(pairOf("a", "b"))).toBe(false); // 已裁
+    // 并入多源类（ADR 0013 再修订）：b 消亡——跟 b 牵着的候选随之消失，改问由下一轮召回按新草稿重推
+    expect(left.some(pairOf("b", "c"))).toBe(false);
     expect(left.some((p) => p.class_a.startsWith("shared_") || p.class_b.startsWith("shared_"))).toBe(false);
-    expect(calls).toBe(1);
   });
 
   it("疑似重复串：A–C 已跳过，「同一」把 B 并进 A 后不重开 A–C", async () => {

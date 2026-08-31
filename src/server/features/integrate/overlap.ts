@@ -39,6 +39,7 @@ export interface OverlapResult {
   count_b: number;
   count_hit: number;
   rate: number;
+  fields: Record<string, string>; // 命中的字段：每边用的唯一键属性名（按类名索引）——留痕证据的「命中的字段」
 }
 
 /** 同一规则归一化后算交集。每源只读一次：前 20 条挑规则，全量进集合；值集合算完即弃。 */
@@ -69,6 +70,10 @@ export async function overlapRate(driver: SourceDriver, clsA: Cls, clsB: Cls, me
     count_b: b.size,
     count_hit: hit,
     rate: Math.max(a.size, b.size) === 0 ? 0 : hit / Math.max(a.size, b.size),
+    fields: {
+      [clsA.name]: clsA.def.identity ?? "",
+      [clsB.name]: clsB.def.identity ?? "",
+    },
   };
   try {
     await meta?.recordOverlap(workspace, result); // 只落计数与比率；值集合随函数返回即弃

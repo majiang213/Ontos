@@ -20,6 +20,7 @@ export interface Condition {
 export interface TableInfo {
   name: string;
   columns: { name: string; type: string; pk: boolean; unique?: boolean; comment?: string }[];
+  sample?: Record<string, unknown>[]; // 脱敏采样行（建模请求带给模型——枚举取值从真实数据抄）
 }
 
 export interface SourceDriver {

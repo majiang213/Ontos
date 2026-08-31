@@ -1,5 +1,7 @@
 # AGENTS.md — Ontos（安托斯）
 
+> **2026-09-01 本体认识纠错注记**：判定归 Agent（五选一面板退场）、结论留痕迁工作记录（`adj_decision`）、生成改概念归纳、链带领域谓词、记录表与主体表分流。落点清单见 `.scratch/palantir-alignment/ontology-error-inventory.md`。本文件各节已按目标状态改写；对应代码迁移见其任务拆解。
+
 通用 Ontology 平台（Next.js 前后端一体，仓库根目录即应用）：现有数据库 → 逆向本体 → 多源整合 → 原库上问数/动作。不造新库、本期不出码。产品与技术定义见《Ontology平台MVP设计文档.md》。
 
 ## 语言规则（先读这个再动文案）
@@ -68,15 +70,15 @@
 配置只读账号接入源库，并读取其表结构（表/列/类型/主键/注释 + 3 行脱敏采样）。
 
 **逆向建模** 🔶：
-AI 读表结构产出本体对象，直接上画布；表只是原料。有抉择才打断人。
+模型从勾选的表**归纳**出概念级对象（跨表归并同一概念、多源挂载、时期派生按需），直接上画布；表只是原料。整合由 Agent 按证据继续，人审画布。
 _UI 说法_：逆向建模（步骤名保留）；动作用「生成对象」。
 
 **多源整合** 🔴：
-对疑似同义对象做对齐裁决的步骤（不同库，或同一库的两张表）。
-_UI 说法_：步骤名保留；动作一律说「裁决」。
+Agent 按证据对齐疑似同义的对象——该合并的合并、该连线的连线，全部落可回滚草稿（不同库，或同一库的两张表）；记录表与主体表的分流见「多源归并与关联链」。人在画布上审结果，不同意就在对话里指令推翻。
+_UI 说法_：步骤名保留；纠正动作说「让 Agent 改」。
 
 **发布本体**：
-裁决结果合并为单一事实源 `ontology.yaml`，版本化。
+人审画布后亲手发布——草稿里的对象、链、动作定稿为单一事实源 `ontology.yaml`，版本化。发布永不经 Agent 之手。
 _Avoid_：上线、提交、保存本体
 
 **映射**：
@@ -116,20 +118,20 @@ _UI 说法_：中文名、改标识。
 ### 整合方法论（差异化核心）
 
 **对齐判定** 🔴：
-候选对上人对齐时的定案。定义见 CONTEXT「类与类」。不是类与类关系的穷尽（部分与整体、不相交本期不定案）。工程纪律：类等价、部分重叠、生命周期、同形异义在 demo 里可落本体；子类型 / 部分与整体 / 不相交本期不定案；跳过不是关系，配置不动；同形异义写入 `class_conclusions`；不同库和同一库的两张表都进裁决。
-_UI 说法_：裁决按钮「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」（`VERDICT_LABELS`；decisions API 与 adj_decision 留痕存英文键 `same / overlap / stage / name_similar / skip`，汉字只当描述不当 Key）。_Avoid_: **对类关系计数的任何说法，一律不能用**——「五种结论」「二期三结论」「还剩几个」全在禁内：数几个都是在暗示这是一张封闭清单。类关系不是封闭清单：能落的逐个点名（类等价、部分重叠、生命周期、同形异义），未定案的逐个点名（子类型、部分与整体、不相交）；跳过是动作不是关系。文档与对话一视同仁。
+候选对的对齐定案，由 Agent 依证据（交集率、字段对应）执行，人在画布上审结果。定义见 CONTEXT「类与类」。不是类与类关系的穷尽（部分与整体、不相交本期不定案）。工程纪律：类等价、部分重叠、生命周期、同形异义在 demo 里可落本体；子类型 / 部分与整体 / 不相交本期不定案；跳过不是关系，配置不动；同一概念的表并入一个多源类（时期派生按需）；match 链（领域谓词）只在不同概念之间（ADR 0013）；结论与证据留痕住 `adj_decision`，不进本体配置；不同库和同一库的两张表都进召回。
+_UI 说法_：判定是 Agent 的内部步骤，不设按钮（`VERDICT_LABELS`；decisions API 与 adj_decision 留痕存英文键 `same / overlap / stage / name_similar / skip`，汉字只当描述不当 Key）。_Avoid_: **对类关系计数的任何说法，一律不能用**——「五种结论」「二期三结论」「还剩几个」全在禁内：数几个都是在暗示这是一张封闭清单。类关系不是封闭清单：能落的逐个点名（类等价、部分重叠、生命周期、同形异义），未定案的逐个点名（子类型、部分与整体、不相交）；跳过是动作不是关系。文档与对话一视同仁。
 
 **裁决** 🔴：
-人对候选对选择关系类型的定案动作。LLM 只建议，裁决权永远在人；留下谁、谁早谁晚、时期名由建议给出，人不另选。裁决+证据快照全部留痕、可回滚。
+候选对的对齐定案：Agent 依证据执行并留痕，人在画布上审结果、以指令最终裁定去留——决定权在人的审与指令。留下谁、谁早谁晚、时期名由证据给出。裁决+证据快照全部留痕、可回滚。
 _UI 说法_：裁决（产品核心词，保留）。
 
 **候选对** 🔴：
 定义见 CONTEXT「候选对」。工程纪律：模型提议按草稿内容快照落 `adj_candidates`——同一投喂形状（类名/连接集/字段名）只问一次模型，定案过滤在读时套，计数因此稳定，不当计算器的模型只补倾向与可执行方案（留下谁 / 谁早 / 时期名）。
-_UI 说法_：疑似重复（面板②区块标题「疑似重复」，入口按钮「待确认」——它同时装唯一键确认）；「候选对」只留在文档与代码。
+_UI 说法_：疑似重复（Agent 建稿过程的召回结果，待定卡可见）；「候选对」只留在文档与代码。
 
 **疑似重复串** 🔴：
 定义见 CONTEXT「疑似重复串」。
-_UI 说法_：不出现。待确认仍一次一对。_Avoid_: 簇、连通分量、独立题、一次裁整串
+_UI 说法_：不出现。召回一次一对的认识保留。_Avoid_: 簇、连通分量、独立题、一次裁整串
 
 **交集率** 🔴：
 定义与公式见 CONTEXT「交集率」。
@@ -142,9 +144,9 @@ _UI 说法_：统一格式。_Avoid_：normalize 直出
 **三层证据链** 🔴：
 判定办法的三问与硬约束见 CONTEXT「判定办法」。工程纪律：两版建议是同一裁判——看过交集率后的第二版以清单快照里的第一版为锚；验收问题集不参与裁决。
 
-**上位对象** 🔴：
-定义见 CONTEXT「上位对象」。工程纪律：落地时同名公共属性移上去，没有同名则只带唯一键（ADR 0001）；各源对象只留特有属性。
-_UI 说法_：避免直出；②选项文案：「有一部分是同一批东西，看交集率。两边各留特有字段；同名的公共字段会立一个公共对象。」
+**多源归并与关联链** 🟡：
+同一概念的表**并成一个多源类**（来源覆盖面不同是数据事实，不是结构），时期语义用派生属性表达（ADR 0013）。**不同概念之间**的关联由 Agent 建**带领域谓词的 match 链**（模型按表间语义起名，如 `on_equipment`；起不出领域名的链不建）。历史草稿的 shared_ 公共对象仍按旧结论渲染。
+_UI 说法_：避免"上位对象/公共对象"直出。
 
 ### 数据与边界
 
@@ -194,12 +196,12 @@ _UI 说法_：取数路径。
 | 生成对象 | 「生成对象」（先建议再导入） | `/api/propose_objects` 再 `/api/edit_draft`（`import_objects`） | `proposeObjects` 再 `import_objects` | `propose_objects` 再 `edit_draft`（`import_objects`） |
 | 表结构 | 「数据源」抽屉右栏 | `/api/list_tables` | `resolveTableInfos` | `list_tables` |
 | 选择演示库文件 | 数据源抽屉左栏一按接入（也可手动填路径） | `/api/list_sqlite_files` | `listSqliteFiles` | 无 |
-| 疑似重复 | 「待确认」面板②区块（①唯一键确认后才解锁） | `/api/list_candidates` | `listCandidates`（建议原语 `proposePairs`） | `list_candidates`（只看、不定案） |
-| 识别唯一键 | 待确认面板①逐类「识别唯一键」按钮（数据试算 + 综合判断，只建议不落地） | `/api/propose_key` | `proposeKeyFor`（试算原语 `candidateKeyColumns` / `trial`，建议出口 `proposeKey`） | 无（关卡在人） |
-| 交集率 | 「算一算交集率」 | `/api/compute_overlap` | `computeOverlap`（底层算率 `overlapRate`） | 无（关卡在人） |
-| 看过交集率再建议 | 算完交集率后自动再问（面板上「看过交集率」） | `/api/propose_pair` | `proposePair` | 无（关卡在人） |
-| 裁决 | 「类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过」 | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | 无（关卡在人） |
-| 发布 / 放弃 | 「发布 vN+1」「放弃」 | `/api/publish` | `publish` / `discard` | 无（关卡在人） |
+| 疑似重复 | 待定卡（召回提出、还没判定的对，逐行一条带召回依据；有待定才出现） | `/api/list_candidates` | `listCandidates`（建议原语 `proposePairs`） | `list_candidates`（只看、不定案） |
+| 识别唯一键 | Agent 在建稿中调用（数据试算 + 语义判别，结果落草稿） | `/api/propose_key` | `proposeKeyFor`（试算原语 `candidateKeyColumns` / `trial`，建议出口 `proposeKey`） | `propose_key`（开放给 Agent） |
+| 交集率 | Agent 调用拿证据 | `/api/compute_overlap` | `computeOverlap`（底层算率 `overlapRate`） | `compute_overlap`（开放给 Agent） |
+| 看过交集率再建议 | Agent 二轮定案 | `/api/propose_pair` | `proposePair` | `propose_pair`（开放给 Agent） |
+| 裁决 | Agent 落结论（合并/建链/时期） | `/api/decide` | `decide` → `adjudicate`（走 mutateDraft 通道）→ `applyVerdict`（纯配置变换） | `decide`（开放给 Agent） |
+| 发布 / 放弃 | 「发布 vN+1」「放弃」——**只有人点** | `/api/publish` | `publish` / `discard` | 无（发布永不经 Agent） |
 | 画布编辑 | 对象卡、连线 | `/api/edit_draft` | `editDraft`，17 个 op（15 条改本体 + `save_layout` / `save_edge_bend`；钉点随建线/改接的 `pins` 同车；整理布局清弯折/钉点走 `save_layout` 的 `clear_bends` / `clear_pins` 旗标） | `edit_draft`（吃同一批内容 op，不含界面状态） |
 | 问数 | 问题集「全量跑一遍」/「对草稿跑一遍」 | `/api/questions`（`?run=1`，可选 `&target=draft`）、`/api/query` | `nlToQuery` + `query` | `query`（入参已是结构化查询，Ontos 不编） |
 | 动作执行 | 无（站外 Agent 驱动） | — | `runAction` | `run_action` |
@@ -207,7 +209,7 @@ _UI 说法_：取数路径。
 五条纪律：
 - 同名同义才许同名：路由、引擎、MCP 三层同一个名字指同一个行为；行为不同必须不同名。`propose_objects` 只建议、不落地；落地一律 `edit_draft` + `import_objects`。画布按钮把这两步连着发，不另开一键路由。
 - 通道与载荷分开：`edit_draft` 是通道（路由、引擎、MCP 同名），17 个 op 是载荷（MCP 抽掉 2 条界面状态，剩 15 条）——op 名在页面内部调用和 MCP 入参里是同一个词。
-- 页面暴露任务层（一个按钮一个动作），MCP 暴露 op 层——粒度不同是设计，不是遗漏。裁决、发布、交集率、看过交集率再建议没有 MCP 工具是刻意的：关卡留给人。疑似重复清单只读开放（`list_candidates`），定案仍在人。
+- 页面不设判定交互（判定归 Agent），MCP 暴露建稿原语与证据工具——粒度分层是设计，不是遗漏。发布没有 MCP 工具是刻意的：发布是人对结果的最终确认。裁决、交集率、识别唯一键、看过交集率再建议已开放给 Agent；疑似重复清单只读开放（`list_candidates`）。
 - 新加入口时词干从本表已有工程词里取，不另造。只建议不落地的工具一律 `propose_` 前缀（`propose_objects` / `propose_action` / `propose_pair`）。
 - 形状规约 module 统一 `*Spec.ts` 后缀（`valueSpec` / `filterSpec` / `actionSpec`），收在 `src/server/schema/spec/`；纯结构 Zod（config / ops / request）留在 schema 根，不用此后缀；schema 也是**共享内核**——跨域词汇（对齐判定的 `schema/verdict`：机器键、展示文案、建议形状）住这里，领域与前端都能安全引用。规约表是「位置 → 该位置允许的取值形状」的单一事实源：执行、静态校验、表单白名单都消费它，不另写手写投影。
 
@@ -219,8 +221,17 @@ _UI 说法_：取数路径。
 2. **不变量落在哪**。一条不变量一个家，且家是文件不是注释：每步改动的「落定」在 `commit.ts`、引用扫描在 `refs.ts`、界面状态跟随在 `canvasState.ts`、op 分派在 `ops/index.ts`、厚不变量一文件一个（`editObject` / `renameObject` / `editStages` / `editProperty` / `editLink` / `importObjects` / `replaceObject`）。文件头注释第一行写它回答的问题，不写谁调它。
 3. **打开文件能否读完一个问题**。切分轴是「编辑一份规定这条链上的问题」，不是按本体要素（类/关系/动作）分，也不是按 17 个 op 一人一个文件。浅 case（单点赋值级）留分派，厚不变量（跨键跟随级）独立成文件。一个概念要跨三个以上文件才能读完，就是切错了。
 4. **命名谓宾搭配**。主语要真：`configStore` 那种「声称存 config 实际不是」的假主语不许再出现。谓语和宾语要对得上：被 apply 的是 op 不是 draft，所以通道叫 `editDraft` 不叫 applyDraft。动词短语不当模块名（`editProperty` 这种「做什么编辑」的动名允许，因为它说的是住着的知识；`mustType` 这种纯调用句不行）。读路径和写路径共用规则时，规则放纯函数层，不许读 import 写。
-5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、唯一键判据与召回特征 `IDENTITY_COL_RULE` / `KEY_HINT_NAME_RE` / `KEY_HINT_DESC_RE`（infra/llm/identityHint，判定与召回分层：判定不按名字猜，召回只进门、数据判定）、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、「空 group_by = 全体合计」`aggregateSchema`（schema/request，总数聚合；对错板对聚合按合计比对）、运算符块判定 `isOpObject`（spec/filterSpec）、聚合产出列名 `metricColumn`（features/query/assemble）、转化动作名 `conversionActionName`（features/ontology/skeletons）、公共对象名 `sharedObjectName` / `isSharedObjectName`（schema/config；features/ontology/sharedName 原地再出口）、过滤条件白话 `conditionText` / `filterText` / `operandText`（features/ontology/filterText，阶段条件全文与动作前置摘要共用）、枚举值域取 key 与中文名 `enumValueKey` / `enumValueLabel`（schema/config）、转化动作判定 `conversionActionOf`（features/ontology/stages）、对齐判定执行计划 `executionPlan` 与成对点名 `onPair`（schema/verdict）、类与类结论 `class_conclusions`（schema/config；画布投影 `overlapLinksOf` / `homonymPeerMap` / `verdictBadgesOf`）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、insert-ignore 与方言 upsert `insertIgnoreSql` / `upsertSql`（meta/stores/base）、元库 DSN 方言 `metaDialectOf`（meta/datasource）、边界入口 Result 收尾 `toResult`（server/errors，各入口不再自写 try/catch 阶梯）、业务拒绝落日志 `logReject`（server/errors，REST 与 MCP 的收尾共用一处）、元库 PG 占位符 `toPgPlaceholders`（meta/datasource；源驱动下推另有 `renderPlaceholders`，不互相 import）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**、十二套演示系统的清单/注释/文件播种与 sidecar 读写 `DEMO_SYSTEMS` / `DEMO_COMMENTS` / `writeDemoFiles` / `readSidecarComments`（infra/demoSystems，叶子模块：裸 node 可跑）、生成撞名改名规则 `prefixedTableName` 与落地前硬闸 `disambiguateClassNames`（infra/llm/llm）、四波对错板 `QUESTION_PACKS`（features/acceptance/questionPacks）、演示问数剧本与候选对剧本 `demoQueries` / `DEMO_PAIRS`（infra/llm/demo，test 空间无 Key 的确定性演示，正则顺序即优先级、剧本类名与模板隐式耦合——模板改名要同步这里）。新单源先登记本表再落地。
+5. **纪律单一住所**。同一规则 / 同一知识只写一遍，其余 import。现行登记处：名字形状 `NAME_RE`（schema/ops）、空间名 `WORKSPACE_NAME_RE`（infra/workspace，多许中划线是另一种纪律）、对齐属性 `sourceKeyProp`、唯一键判据与召回特征 `IDENTITY_COL_RULE` / `KEY_HINT_NAME_RE` / `KEY_HINT_DESC_RE`（infra/llm/identityHint，判定与召回分层：判定不按名字猜，召回只进门、数据判定）、「空=至今」`treatsNullAsUntilNow` / `treatsExpectedNullAsUntilNow`（schema/config）、「空 group_by = 全体合计」`aggregateSchema`（schema/request，总数聚合；对错板对聚合按合计比对）、运算符块判定 `isOpObject`（spec/filterSpec）、聚合产出列名 `metricColumn`（features/query/assemble）、转化动作名 `conversionActionName`（features/ontology/skeletons）、公共对象名 `sharedObjectName` / `isSharedObjectName`（schema/config；features/ontology/sharedName 原地再出口；历史草稿渲染用，新裁决建链名走 `overlapLinkName`）、过滤条件白话 `conditionText` / `filterText` / `operandText`（features/ontology/filterText，阶段条件全文与动作前置摘要共用）、枚举值域取 key 与中文名 `enumValueKey` / `enumValueLabel`（schema/config）、转化动作判定 `conversionActionOf`（features/ontology/stages）、对齐判定执行计划 `executionPlan` 与成对点名 `onPair`（schema/verdict）、裁决留痕 `adj_decision`（元库；画布徽章/虚线投影读它，历史草稿的 class_conclusions 兼容渲染——E1 迁移后现行口径）、界面状态原语 `definedPinEnds`（features/ontology/canvasState）、insert-ignore 与方言 upsert `insertIgnoreSql` / `upsertSql`（meta/stores/base）、元库 DSN 方言 `metaDialectOf`（meta/datasource）、边界入口 Result 收尾 `toResult`（server/errors，各入口不再自写 try/catch 阶梯）、业务拒绝落日志 `logReject`（server/errors，REST 与 MCP 的收尾共用一处）、元库 PG 占位符 `toPgPlaceholders`（meta/datasource；源驱动下推另有 `renderPlaceholders`，不互相 import）、验收状态词表 `Q_STATUS`（features/acceptance/questionStatus）、**用户可见错误文案 `MSG`（server/errors，唯一出处）**、十二套演示系统的清单/注释/文件播种与 sidecar 读写 `DEMO_SYSTEMS` / `DEMO_COMMENTS` / `writeDemoFiles` / `readSidecarComments`（infra/demoSystems，叶子模块：裸 node 可跑）、生成撞名改名规则 `prefixedTableName` 与落地前硬闸 `disambiguateClassNames`（infra/llm/llm）、底中判定卡行首标签 `verdictLabel`（components/canvas/sharedOrigin，留痕/待定两卡共用，Tendency ⊂ Verdict 同一次查表）、四波对错板 `QUESTION_PACKS`（features/acceptance/questionPacks）、演示问数剧本与候选对剧本 `demoQueries` / `DEMO_PAIRS`（infra/llm/demo，test 空间无 Key 的确定性演示，正则顺序即优先级、剧本类名与模板隐式耦合——模板改名要同步这里）。新单源先登记本表再落地。
 6. **代码坏味道**。报错文案不当机器判据（判定走结构参数，如 `exceptAction`）；吞错必须注释说清为什么安全；错误类型按域归一（EngineReject / DraftReject / ConnectionReject / WorkspaceReject），调用方不猜类型；内部形状（SQL / 主机 / 路径 / 堆栈）不进用户可见输出，生产只给「内部错误」（`_shared.internalErrorMessage` 单闸）；无调试残留（console.log / dbg）；无死导出。
+
+**评审检查单（每轮 review 按此过，Spec 轴同样适用；源自 2026-09-02 六票评审的真实漏诊）**：
+
+- **前端·卡面契约**：`float-card` 只定位不画背景——卡面必须由 `<Bezel>`（.bezel/.bezel-core）提供；每个 float-card 使用点核对 Bezel 配套，或组件有替代表面。新写浮动卡照 `DecideCard` 的外壳结构，不手抄。
+- **前端·CSS 存活对应（双向）**：组件的 JSX 结构满足类名对应的 CSS 契约（如 `.decide` = 根容器 + Bezel + decide-head + decide-body 滚动区）；反向，CSS 里组件已不引用的选择器 = 死样式。删组件连坐专属样式段与专属测试。
+- **前端·渲染边界**：列表容器要有滚动/裁剪约束（max-height + overflow），不能让内容溢出面板铺满画布；数据清空时卡片与入口的消失行为要有断言或实测（例：待定清零自动收卡）。
+- **前端·渲染实测**：卡面、溢出、层级这类结构问题 tsc 与单测全绿也抓不住——评审通过后用浏览器实测工具复现过的场景（ego-browser / Chrome DevTools 均可）。
+- **序列场景**：写操作之后的后续编辑是 bug 高发序列（反面案例：钉快照漏带 per-class 指纹，一次合并判定后收敛失效）——「不会回流 / 不会重复 / 记忆随写延续」类断言要显式测试钉住，单点测试绿不代表序列不炸。
+- **票面核对（Spec 轴）**：不采信交付者自述——票面勾选 `[x]` 逐条对照代码独立核实；实现期的设计修正要回写票面，定案与实现不得自相矛盾；审查「守门落在文档/行为规范」类的勾选时，确认被挡住的行为真的有闸。
 
 ## 本体论要素 × 落地（附录对照，写代码按此表）
 
@@ -228,13 +239,13 @@ _UI 说法_：取数路径。
 |---|---|
 | 类 / 属性 / 关系 | **已落地** |
 | 识别标准 `identity` | **已落地** |
-| 类等价 / 部分重叠（上位对象） / 生命周期 / 同形异义 | **已落地**（类等价合并；生命周期转化；部分重叠与同形异义写入 `class_conclusions`） |
+| 同一概念 / 不同概念关联 / 时期 / 同形异义 | **已落地**（同一概念的表并成一个多源类，时期派生按需；不同概念之间建带领域谓词的 match 链（ADR 0013）；结论与证据留痕住 `adj_decision`，不进本体配置） |
 | 派生属性（status） | **已落地** |
 | 个体 ABox | **不做**（数据留源库） |
 | 子类型 / `parent` | **未做**（V2） |
 | 部分与整体 | **未做**（V2） |
 | 不相交 | **未做**（V2） |
-| 事物 vs 事件 `kind` | **字段有**，未约束（引擎不按 thing/event 分支） |
+| 事物 vs 事件 `kind` | **已约束**（召回按 kind 分流：记录表与主体表不互比；记录表的承接是与主体建链。见「多源归并与关联链」与纠错清单 E5） |
 | 公理 / 谓词 / 动作 | 动作 **已落地**（`features/action` 执行器，对外经 MCP `run_action`）；公理 mutex 写入时校验，其余类型能写不跑；谓词即布尔派生，**已落地**（不另设构造）。导入落草稿时每类自动补一条 `set_fields`（按 identity 认人、写字段，唯一键与派生属性不可写，无可写字段不生成；字段改名/删除、部分重叠上移时级联跟随）；转化动作由生命周期裁决自动立（`convert_to_<晚阶段>`）；业务动作经 `set_action` 由人/Agent 写 |
 | 变更事件与告知 | 拼装 **已落地**（`features/action/notify`，随 `run_action` 结果返回，`delivered: false`）；外发 **未做** |
 | 推理机 / OWL | **未做** |
@@ -244,7 +255,7 @@ _UI 说法_：取数路径。
 - **不造新库。** 写 = 改本体世界，再投影回原库。客户应用不改代码，最多给可写账号。
 - **执行器写在 Ontos 后端一份**（`features/action`，对外经 MCP 的 `run_action` 工具）。不为每个源系统定制执行器；进新系统只加连接/映射/动作定义。
 - **动作语言** = Zod JSON：`{ action, object, identity }`。本体里 `pre` / `effect` 必须机器可读；写回按效应和 `sources` 推出，动作上不写表名。禁止 `record: hr.employee` 直接绑表。禁止 PATCH 派生 `status`。录用前置只看 `person.status === 候选人`。
-- **生成要模型，执行不要。** 模型只产草稿（对象/关系/动作定义），人裁决。执行器解释已发布本体，禁自由 SQL。缺参可先补全，补完仍交执行器。
+- **生成要模型，执行不要。** 模型产草稿并按证据整合（合并、连线、定键），人审画布、以指令纠偏。执行器解释已发布本体，禁自由 SQL。缺参可先补全，补完仍交执行器。
 - **不是 ReAct。** 画布纠错 = 人改字段或再勾表点「生成对象」（`proposeObjects` 一次）→ 停。不要后端自转圈、自己调工具写库。Claude / Codex 是 MCP 调用方，不是把循环做进 Ontos。
 - **持久化**：本体、动作定义、映射、`log_action`。SQL 即用即弃。业务行留原库。
 - **create 幂等**：无状态化后没有进程内串行队列，并发重发同一 create 靠「源表 identity 列唯一索引 + 插入失败重查兜底」——源表 identity 列必须是唯一索引（fixture 已补），重发命中记幂等 note，不重复落行。
@@ -256,17 +267,17 @@ _UI 说法_：取数路径。
 - **单一画布页**：「本体构建」是唯一页面；问数与动作不外置 UI——外部 Agent 经 MCP（`/api/<空间名>/mcp`，配套 skill 在 `skills/` 下四个目录：ontos-query / ontos-action-run / ontos-canvas / ontos-action）驱动，Claude / Codex 是 MCP 调用方，循环不做进 Ontos。
 
 - **工作台 = 本体画布**：初始即空画布。画布内容永远是当前工作副本（已发布合并本体上的未发布改动；空空间是空画布），随时可拖、可点节点编辑。
-- **画布只放本体对象，schema 永不当节点**：源表是只读原料，躺在「数据源」抽屉里（每列标出映射去向）；画布节点 = 本体对象。对象 ↔ 源列是**多对多**：一列可喂多个对象，一个对象可挂多张表（编辑卡可从任意已连接源拉列进对象）。部分重叠立出的公共对象，从两个原类各画一条虚线指向它，线上标「公共部分」：由来边是配置 `class_conclusions`（`kind: overlap`，`shared`）的投影，不进 `link_types`。同形异义不连线，节点上互标芯片「同形异义 · 对方类名」，悬停高亮；一行一次裁决，不合成一团。
-- **多选 → 生成对象 → 直接上画布 → 至多一张抉择卡**：表结构抽屉勾选表后点「生成对象」——对象立刻上画布并收起抽屉。**没有预览卡、没有确认草稿卡**。表永远是原料不上画布（节点只可能是本体对象）。有抉择进「待确认」面板（工具条入口，生成后不自动弹出；关掉可再进）：先定唯一键，确认后疑似重复才展开——交集率、阶段配对都建在唯一键上，键没定就裁会出「合法但错误」的关系。同一时间底中只浮一张卡。点节点可随时改字段。
+- **画布只放本体对象，schema 永不当节点**：源表是只读原料，躺在「数据源」抽屉里（每列标出映射去向）；画布节点 = 本体对象。对象 ↔ 源列是**多对多**：一列可喂多个对象，一个对象可挂多张表（编辑卡可从任意已连接源拉列进对象）。同一概念的表并成一个多源类（画布一个节点、多来源）；不同概念之间的关联由 Agent 建带领域谓词的 match 链；历史草稿的 shared_ 公共对象仍按 `class_conclusions`（`kind: overlap`，`shared`）的虚线投影渲染，线上标「公共部分」。同形异义不连线，节点上互标芯片「同形异义 · 对方类名」，悬停高亮；一行一次裁决，不合成一团。
+- **多选 → 生成对象 → 直接上画布**：表结构抽屉勾选表后点「生成对象」——模型归纳出概念级对象立刻上画布并收起抽屉。**没有预览卡、没有确认草稿卡**。表永远是原料不上画布（节点只可能是本体对象）。生成后的整合（定键、对齐、建链）由 Agent 按证据继续，人审画布、随时指令。点节点可随时改字段。
 - **发布后修改走发布流程**：画布是**工作副本**——发布后的编辑（改字段/拉列/连线/删节点/加表）只标「待发布」，点工具条「发布 vN+1」才升版本入历史；问数与动作始终读**已发布**的快照。
 - **手动建模暂不设站内入口**：对象一律从源表勾选生成；「新建对象」按钮已撤（2026-08-31，演示链路用不上），手动建模排到二期/三期、需要时再做。`create_object` op 保留——外部 Agent 经 MCP `edit_draft` 仍可建对象。无源对象不挂 `sources`，与导入的对象同等进工作副本。
-- **没有步骤条**：阶段由状态推导（连接→生成对象→裁决→发布），浮动卡按状态出现；**侧栏没有流程列表**——引导全部由交互承担（空画布提示、数据源抽屉、待确认面板、发布条、对象编辑卡）。发布后问数/动作读已发布快照，不出码。
+- **没有步骤条**：阶段由状态推导（连接→生成对象→Agent 整合→发布），Agent 的决定与证据在留痕卡可见、未判定的对在待定卡可见（有待定才出现）；**侧栏没有流程列表**——引导全部由交互承担（空画布提示、数据源抽屉、发布条、对象编辑卡）。发布后问数/动作读已发布快照，不出码。
 - **编辑→发布**：发布后画布是工作副本，发布按钮**常驻工具条**、永可点——有改动时是「发布 vN+1 / 放弃」，没改动时点「发布」弹提示（不置灰）；放弃=回退到已发布快照；问数与动作始终读**已发布**版本。
-- **步骤动作 = 画布浮动卡**：左上一条工具条只放任务按钮（待确认、发布与版本、验收问题集），待确认面板（底中，唯一键 → 疑似重复两段）、数据源抽屉开关（左下）、对象编辑卡与关系详情（右侧）。连接数据源进**数据源抽屉**左栏（演示文件一按接入 / 手动填只读连接），右栏按选中源勾选表 → 生成对象（不取业务行）；表结构和映射都收在底部抽屉。
+- **步骤动作 = 画布浮动卡**：左上一条工具条只放任务按钮（留痕、待定、发布与版本、验收问题集；待定只在有待定时出现），数据源抽屉开关（左下）、对象编辑卡与关系详情（右侧）；Agent 整合过程的决定与证据在留痕卡（底中浮动卡，只读），未判定的对在待定卡（底中浮动卡，只读、逐行一条带召回依据）。连接数据源进**数据源抽屉**左栏（演示文件一按接入 / 手动填只读连接），右栏按选中源勾选表 → 生成对象（不取业务行）；表结构和映射都收在底部抽屉。
 - **随时可加数据源**：数据源抽屉常驻；发布后也可加——新源的表经勾选上画布，只裁决新产生的候选对。
 - **页内无对话列**：点击不发消息。外部 Agent 经 MCP 工作，循环不做进 Ontos。
 - **操作指引写在对应卡片上**；锁定/拦截反馈用瞬时 toast。
-- **AI 的活自动跑，不为 AI 设点击**；人的点击只留给关卡——选表、待确认（唯一键与裁决）、发布。
+- **AI 的活自动跑，不为 AI 设点击**；人的点击只留给选表与发布——判定、整合全由 Agent 完成，人审画布、下指令。
 
 ## Agent skills
 

@@ -16,7 +16,7 @@ export const QUESTION_PACKS: QuestionPack[] = [
   {
     key: "wave1",
     name: "第一波",
-    // 设备前半生：设备 × 资产类等价、点检 × 设备部分重叠、采购 × 设备生命周期（早 in_transit / 晚 in_service）之后
+    // 设备一生：同一概念的表并成一个多源类（资产、点检并入），时期三段（采购 在途→台账 在役、处置 已处置），订单 × 条目跳过之后
     questions: [
       { question: "在役设备一共多少台", expected: "97" }, // 设备源 100 行 − 3 台台账 scrapped；来源标签认设备台账那张表，不是公共对象
       { question: "在途设备一共多少台", expected: "81" }, // 121 − 40
@@ -27,8 +27,8 @@ export const QUESTION_PACKS: QuestionPack[] = [
   {
     key: "wave2",
     name: "第二波",
-    // 办公线：生产设备 × 办公设备同形异义、维修工单 × IT 报修单同形异义、台账车间 × OA 部门同形异义、
-    // 办公账号 × 门禁卡部分重叠之后
+    // 办公线：生产设备 × 办公设备、维修工单 × IT 报修单、台账车间 × OA 部门三对同形异义，
+    // 办公账号 × 门禁卡不比同类（行=挂在账号上的卡，落法是建 has_card 链，holder 是引用列）之后
     questions: [
       { question: "有门禁卡的正式账号有多少个", expected: "35" }, // 40 账号中 35 正式都有卡，5 外包没卡
       { question: "外包账号有多少个", expected: "5" },
@@ -39,8 +39,8 @@ export const QUESTION_PACKS: QuestionPack[] = [
   {
     key: "wave3",
     name: "第三波",
-    // 设备后半生：设备 × 处置档案生命周期、保修卡 × 设备跳过、采购订单 × 采购条目跳过之后
-    // （初稿的「资产 × 保修卡」随类等价合并消失——asset 已并入设备类，同库两张表由 order × po_item 承担）
+    // 保修与验收：保修卡 × 设备不比同类（建 covered_by 链，序列号配对）之后；订单 × 条目跳过在第一波裁
+    // （概念归纳后 po_item 已并进设备类，初稿的「资产 × 保修卡」等派生对随之消失）
     questions: [
       { question: "处置档案记录了多少台设备", expected: "8" }, // 处置档案表 8 行（3 台台账 scrapped + 5 台台账已移除）
       { question: "保修期内的设备有多少台", expected: "20" }, // 30 张保修卡，10 张已过期

@@ -351,17 +351,17 @@ describe("配置存储（工作副本与发布）", () => {
     expect((await s.getDraft(WORKSPACE)).draft.object_types.Bad_Name).toBeUndefined();
   });
 
-  it("放弃草稿：未绑版本的裁决留痕标「已放弃」，不挂到下一次发布", async () => {
+  it("放弃草稿：未绑版本的裁决留痕标「已放弃」（墓碑不进清单），不挂到下一次发布", async () => {
     const s = await freshStore(tmp);
     const m = await meta();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, WORKSPACE);
     await m.recordDecision(WORKSPACE, { class_a: "a", class_b: "b", source_a: "s1", source_b: "s2", verdict: Verdict.Skip, decided_by: "测试" });
     await s.discard(WORKSPACE);
-    expect((await m.listDecisions(WORKSPACE))[0].version).toBe(-1); // 已放弃
-    // 下一次发布不回填它
+    expect(await m.listDecisions(WORKSPACE)).toEqual([]); // 已放弃的墓碑不进清单
+    // 下一次发布不回填它（墓碑仍是 -1，清单里依旧没有）
     await s.editDraft({ op: "create_object", name: "vendor2", kind: "thing" }, WORKSPACE);
     await s.publish(WORKSPACE);
-    expect((await m.listDecisions(WORKSPACE))[0].version).toBe(-1);
+    expect(await m.listDecisions(WORKSPACE)).toEqual([]);
   });
 
   it("跨类动作引用守卫：删 repair.is_open 被拒（equipment.finish_repair 在用）", async () => {

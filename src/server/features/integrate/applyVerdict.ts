@@ -1,7 +1,7 @@
 // 定案应用 —— 把对齐裁决写成配置（《ontos-article.md》§3.2）。
 // 类等价：合并为一个对象、挂多源。生命周期：收成一类 + 派生阶段 + 转化关系 + 转化动作。
-// 部分重叠：同名公共属性立公共对象（移上去，识别字段复制不移动）；没有同名则公共对象只带唯一键；写入 class_conclusions。
-// 同形异义：两类都留下，写入 class_conclusions。跳过：不是类与类关系，配置不动。
+// 部分重叠：同一概念的表并成一个多源类（来源覆盖面差异是数据事实，ADR 0013 再修订）。
+// 同形异义：两类都留下。跳过：不是类与类关系，配置不动。结论与证据住裁决工作记录（adj_decision），不进配置。
 // 骨架（conversionAction / set_fields）的唯一构造点在 draft/skeletons.ts，这里只消费。
 
 import type { ActionDef, OntologyConfig, WhenRule } from "../../schema/config";
@@ -9,11 +9,9 @@ import { resolveLink, walkFilter } from "../../schema/spec/filterSpec";
 import { walkEffectItems } from "../../schema/spec/actionSpec";
 import { dropClass } from "../ontology/ops/editObject";
 import { mutateDraft } from "../ontology/editDraft";
-import { conversionAction, conversionActionName, removeFieldsUpdateKeys } from "../ontology/skeletons";
-import { sharedObjectName } from "../ontology/sharedName";
+import { conversionAction, conversionActionName } from "../ontology/skeletons";
 import type { EngineEnv } from "../env";
-import { commonProperties } from "./eligibility";
-import { Verdict, executionPlan, stageValues } from "../../schema/verdict";
+import { FALLBACK_STAGE_LABELS, Verdict, executionPlan, stageValues } from "../../schema/verdict";
 import { MSG } from "../../errors";
 
 export type { Verdict } from "../../schema/verdict";
@@ -130,13 +128,16 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
   const { class_a: a, class_b: b } = pair;
   switch (verdict) {
     case Verdict.Same:
+    case Verdict.Overlap: {
+      // 同一概念的表并成一个多源类（来源覆盖面差异是数据事实，ADR 0013 再修订）——判定归 Agent：
+      // 它按行的性质判"是同一概念"才走到这里；合并 = B 的源挂到 A、B 消亡，两类一落法
       mergeInto(d, a, b);
       break;
+    }
     case Verdict.Skip:
       break; // 不是类与类关系，配置不动
     case Verdict.NameSimilar:
-      // 两类都留下；结论写进 class_conclusions，问数/动作/画布才读得到
-      (d.class_conclusions ??= []).push({ kind: "homonym", classes: [a, b].sort() });
+      // 两类都留下；结论与证据住裁决留痕（adj_decision），不进本体配置
       break;
     case Verdict.Stage: {
       // 时期标识的兜底单源在 executionPlan（schema/verdict）：缺时期名时用中性占位 early/late，不在这里再造一套
@@ -145,6 +146,9 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       const to = stageNames?.to ?? plan.stage!.to;
       const A = d.object_types[a];
       if (!A || !d.object_types[b]) throw new Error(MSG.classPairNotFound(a, b));
+      // 并前先取 status：B 的状态列拷进来不算「已有时期」——数据列的归宿是改名让位（如 mark），不是被派生顶掉
+      const statusBefore = A.properties.status;
+      const adopting = statusBefore?.type === "enum" && Array.isArray(statusBefore.derived) && statusBefore.derived.length > 0;
       // 先并属性与源（与类等价同款），再立生命周期结构
       const srcKeysBefore = new Set(Object.keys(A.sources ?? {}));
       mergeInto(d, a, b);
@@ -152,19 +156,32 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       const srcA = Object.keys(A.sources ?? {})[0];
       const srcB = newKeys[0] ?? srcA; // B 并进来的第一个源条目
       if (!srcA || !srcB || srcA === srcB) throw new Error(MSG.stageNeedsTwoSources);
-      // 撞名不静默覆盖：合并后已有 status 属性 / 同名关系 / 同名动作时让人先改名
-      if (A.properties.status) throw new Error(MSG.stageStatusClash(a));
+      // 撞名不静默覆盖：同名关系 / 同名动作时让人先改名
       if (d.link_types[`${a}_to_${to}`]) throw new Error(MSG.stageLinkNameClash(`${a}_to_${to}`));
       if (A.actions?.[conversionActionName(to)]) throw new Error(MSG.stageActionNameClash(conversionActionName(to)));
-      A.properties.status = {
-        type: "enum",
-        values: stageValues(from, to), // 占位词带中文名（早期/晚期），建议词裸 key（中文名由改标识补）
-        description: "阶段",
-        derived: [
-          { when: { [srcA]: true, [srcB]: false }, value: from },
-          { when: { [srcB]: true }, value: to },
-        ],
-      };
+      if (adopting && statusBefore) {
+        // 多段时期（在途→在役→已处置…）：采纳既有 status——新源是新的一段，规则前插（先命中先赢），值缺就补
+        const derived = statusBefore.derived as { when: WhenRule["when"]; value: string }[];
+        statusBefore.derived = [{ when: { [srcB]: true }, value: to }, ...derived];
+        const vals = [...(statusBefore.values ?? [])];
+        if (!vals.some((v) => (v !== null && typeof v === "object" ? v.value : v) === to)) {
+          const label = FALLBACK_STAGE_LABELS[to];
+          vals.push(label ? { value: to, label } : { value: to });
+        }
+        statusBefore.values = vals;
+      } else {
+        // 第一段时期：新建 status（占位词带中文名（早期/晚期），建议词裸 key（中文名由改标识补））
+        if (A.properties.status) throw new Error(MSG.stageStatusClash(a));
+        A.properties.status = {
+          type: "enum",
+          values: stageValues(from, to),
+          description: "阶段",
+          derived: [
+            { when: { [srcA]: true, [srcB]: false }, value: from },
+            { when: { [srcB]: true }, value: to },
+          ],
+        };
+      }
       d.link_types[`${a}_to_${to}`] = {
         from: a,
         to: a,
@@ -174,51 +191,6 @@ export function applyVerdict(d: OntologyConfig, pair: { class_a: string; class_b
       };
       A.actions = A.actions ?? {};
       A.actions[conversionActionName(to)] = conversionAction(`${a}_to_${to}`, d.link_types[`${a}_to_${to}`]);
-      break;
-    }
-    case Verdict.Overlap: {
-      // 公共属性立上位对象：属性移上去，识别字段复制不移动（移了原类悬空）
-      const A = d.object_types[a];
-      const B = d.object_types[b];
-      if (!A || !B) throw new Error(MSG.classPairNotFound(a, b));
-      const idProps = new Set([A.identity, B.identity].filter(Boolean) as string[]);
-      const common = commonProperties(A, B); // 同名才上移；没有同名不挡——公共对象只带唯一键
-      const shared = sharedObjectName(a, b);
-      // 上位对象的源：公共列 + 识别列（识别列是读公共属性的对齐齐）
-      const sharedSources: NonNullable<OntologyConfig["object_types"][string]["sources"]> = {};
-      for (const [side, cls] of [["a", A], ["b", B]] as const) {
-        for (const [srcName, entry] of Object.entries(cls.sources ?? {})) {
-          const keep = [...common, ...idProps].filter((p) => entry.fields[p]);
-          if (keep.length === 0) continue;
-          const fields = Object.fromEntries(keep.map((p) => [p, entry.fields[p]]));
-          // 该侧源条目映射到的识别属性显式写进 key——上位对象的 identity 只取其一，另一侧靠 key 认行
-          const sideId = [...idProps].find((p) => fields[p]);
-          sharedSources[sharedSources[srcName] ? `${srcName}_${side}` : srcName] = { ...entry, fields, key: sideId };
-        }
-      }
-      const sharedProps: OntologyConfig["object_types"][string]["properties"] = {};
-      for (const p of common) {
-        sharedProps[p] = A.properties[p];
-        delete A.properties[p];
-        delete B.properties[p];
-        for (const entry of Object.values(A.sources ?? {})) delete entry.fields[p];
-        for (const entry of Object.values(B.sources ?? {})) delete entry.fields[p];
-      }
-      removeFieldsUpdateKeys(a, A, common); // 公共属性挪到上位对象，set_fields 摘键（摘空整条撤掉）
-      removeFieldsUpdateKeys(b, B, common);
-      // 识别属性复制给上位对象（不移动）
-      for (const p of idProps) {
-        const def = A.properties[p] ?? B.properties[p];
-        if (def) sharedProps[p] = def;
-      }
-      d.object_types[shared] = {
-        kind: "thing",
-        description: `${a} 与 ${b} 的公共部分`,
-        identity: [...idProps][0],
-        properties: sharedProps,
-        sources: sharedSources,
-      };
-      (d.class_conclusions ??= []).push({ kind: "overlap", classes: [a, b].sort(), shared });
       break;
     }
   }

@@ -72,9 +72,13 @@ describe("错误分层：400 / 422 / 500", () => {
     expect(r.data.error).toBe("内部错误");
   });
 
-  it("decisions：自配对 400；同一库两张表可以定案", async () => {
+  it("decisions：自配对 400；同一库两张表可以定案；evidence 放行 fields（命中的字段入留痕）", async () => {
     expect((await post("decide", JSON.stringify({ class_a: "equipment", class_b: "equipment", verdict: Verdict.Same }), undefined, TEST)).status).toBe(400);
     expect((await post("decide", JSON.stringify({ class_a: "repair", class_b: "assignment", verdict: Verdict.Skip }), undefined, TEST)).status).toBe(200);
+    const withFields = await post("decide", JSON.stringify({ class_a: "repair", class_b: "assignment", verdict: Verdict.Skip, evidence: { rate: 0, count_hit: 0, fields: { repair: "repair_no", assignment: "asgn_no" } } }), undefined, TEST);
+    expect(withFields.status).toBe(200);
+    const stored = (await get("decide", undefined, TEST)).data.decisions.find((d: { class_a: string; class_b: string; evidence?: { fields?: Record<string, string> } }) => d.class_a === "repair" && d.class_b === "assignment");
+    expect(stored.evidence.fields).toEqual({ repair: "repair_no", assignment: "asgn_no" });
   });
 
   it("overlap：自配对 400", async () => {
@@ -121,11 +125,13 @@ describe("错误分层：400 / 422 / 500", () => {
     expect((await s.getDraft(TEST)).draft.object_types.po_item.identity).toBeUndefined();
   });
 
-  it("overlap：无源类 422（幻影 rate 不产）；同一库两张表可以算", async () => {
+  it("overlap：无源类 422（幻影 rate 不产）；同一库两张表可以算；产出带命中字段（每边的唯一键属性名）", async () => {
     const s = await draftEngine();
     await s.editDraft({ op: "create_object", name: "vendor", kind: "thing" }, TEST); // 手工对象，无源
     expect((await post("compute_overlap", JSON.stringify({ class_a: "equipment", class_b: "vendor" }), undefined, TEST)).status).toBe(422);
-    expect((await post("compute_overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }), undefined, TEST)).status).toBe(200);
+    const ok = await post("compute_overlap", JSON.stringify({ class_a: "repair", class_b: "assignment" }), undefined, TEST);
+    expect(ok.status).toBe(200);
+    expect(ok.data.fields).toEqual({ repair: "repair_no", assignment: "asgn_no" }); // 命中的字段：每边的唯一键属性名
   });
 
   it("connections：相对路径 sqlite 按运行态 cwd 解析（不读 process.cwd）", async () => {

@@ -148,101 +148,6 @@ input { font-family: inherit; outline: none; }
 }
 .workspace-row:hover { background: var(--panel-2); color: var(--ink); }
 
-/* ---------- 裁决结论行（疑似重复面板） ---------- */
-.verdict-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  align-items: baseline;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--hairline);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background var(--t-fast), opacity var(--t-fast);
-}
-.verdict-row:last-child { border-bottom: none; }
-.verdict-row:hover { background: var(--panel-2); }
-.verdict-row[aria-disabled="true"] { opacity: 0.45; cursor: default; }
-.verdict-row[aria-disabled="true"]:hover { background: transparent; }
-.verdict-name { font-size: 13px; font-weight: 600; color: var(--ink); flex-shrink: 0; min-width: 66px; }
-.verdict-suggest {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--accent-ink);
-  background: var(--panel);
-  padding: 1px 8px;
-  border-radius: var(--r-chip);
-}
-.verdict-hint { font-size: 12px; color: var(--ink-3); flex: 1; }
-
-.pair { padding: 4px 0 8px; }
-.pair-names { font-size: 16px; font-weight: 600; }
-.pair-and {
-  font-weight: 400;
-  font-size: 13px;
-  color: var(--ink-3);
-  margin: 0 8px;
-}
-.pair-ev {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 12px;
-  align-items: start;
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: var(--accent-soft);
-  border-left: 3px solid var(--accent);
-  border-radius: 0 8px 8px 0;
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.pair-ev.is-mid {
-  background: var(--panel-2);
-  border-left-color: var(--line-strong);
-}
-.pair-ev.is-low {
-  background: var(--warn-soft);
-  border-left-color: var(--warn);
-}
-.pair-ev.is-high {
-  background: var(--ok-soft);
-  border-left-color: var(--ok);
-}
-.pair-ev-k {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--accent-ink);
-  padding-top: 4px;
-}
-.pair-ev.is-mid .pair-ev-k { color: var(--ink-2); }
-.pair-ev.is-low .pair-ev-k,
-.pair-ev.is-low .pair-ev-num { color: var(--warn); }
-.pair-ev.is-high .pair-ev-k,
-.pair-ev.is-high .pair-ev-num { color: var(--ok); }
-.pair-ev-v { min-width: 0; overflow-wrap: anywhere; }
-.pair-ev-badge {
-  display: inline-block;
-  margin-right: 8px;
-  padding: 1px 8px;
-  border-radius: var(--r-chip);
-  background: var(--panel);
-  color: var(--accent-ink);
-  font-size: 12px;
-  font-weight: 700;
-}
-.pair-ev-num {
-  display: inline-block;
-  margin-right: 8px;
-  font-size: 18px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-  vertical-align: -1px;
-}
-.pair-q { font-size: 13px; margin-top: 16px; }
-
 /* ---------- Double-Bezel（外壳托盘 + 内核） ---------- */
 .bezel {
   background: var(--bg-deep);
@@ -703,12 +608,11 @@ select.ctl { background: var(--panel); }
 }
 .chip:hover { background: var(--panel); color: var(--ink); transform: translateY(-1px); }
 
-/* ---------- 待确认面板（底中决策单：格子选唯一键 + 钉住的确认条 + 锁住的疑似重复托盘） ---------- */
+/* ---------- 底中判定卡（留痕：已落定的判定与证据；待定：召回提出还没判定的对。两张卡共用 DecideCard 外壳） ---------- */
 .decide {
   width: min(640px, calc(100vw - 32px));
   max-height: 78%;
 }
-.decide.is-pairs { width: min(760px, calc(100vw - 32px)); }
 /* 抽屉开着时面板上移避让：抬到抽屉与左下开关的上方（--panel-lift），高度封顶不顶到 dock；面板体改可收缩滚动，底部按钮不被裁 */
 .decide.is-lifted {
   bottom: calc(var(--drawer-h) + var(--panel-lift));
@@ -717,7 +621,6 @@ select.ctl { background: var(--panel); }
 }
 .decide.is-lifted .bezel { flex: 1; min-height: 0; display: flex; }
 .decide.is-lifted .bezel-core { max-height: none; height: auto; flex: 1; min-height: 0; }
-.decide.is-lifted .decide-pairs-body { min-height: 0; }
 .decide .bezel-core {
   display: flex;
   flex-direction: column;
@@ -725,9 +628,8 @@ select.ctl { background: var(--panel); }
   min-width: 0;
   overflow: hidden;
 }
-.decide-head,
-.decide-foot { flex-shrink: 0; }
 .decide-head {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -739,7 +641,6 @@ select.ctl { background: var(--panel); }
   font-weight: 600;
 }
 .decide-head-actions { display: flex; align-items: center; gap: 6px; }
-.decide-pairs-body { flex: 1; min-height: 200px; }
 .decide-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -764,9 +665,7 @@ select.ctl { background: var(--panel); }
   align-items: center;
   gap: 10px;
   min-width: 0;
-  cursor: pointer;
 }
-.decide-row:focus-within { background: var(--panel-2); }
 .decide-obj {
   width: 140px;
   flex-shrink: 0;
@@ -775,87 +674,22 @@ select.ctl { background: var(--panel); }
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-.decide-hint {
-  width: 4.5em;
-  flex-shrink: 0;
+.decide-evidence {
   font-size: 11px;
   color: var(--ink-3);
-  text-align: right;
 }
-.decide-row-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 24px;
-  padding-left: 150px;
-}
-.decide-row-tools .chip { flex-shrink: 0; }
-.decide-key-evidence {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.decide-note {
   font-size: 11px;
   color: var(--ink-3);
-  line-height: 1.5;
-}
-.decide-key-evidence .tag.is-hard { color: var(--ok); }
-.decide-key-evidence .tag.is-soft { color: #b8860b; }
-.decide-select { position: relative; display: block; flex: 1; min-width: 0; }
-.decide-select::after {
-  content: "";
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid var(--ink-2);
-  border-bottom: 1.5px solid var(--ink-2);
-  transform: translateY(-70%) rotate(45deg);
-  pointer-events: none;
-}
-.decide-row select.ctl {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  height: 32px;
-  font-size: 13px;
-  padding-right: 28px;
-  appearance: none;
-  -webkit-appearance: none;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  padding: 0 0 2px 150px;
 }
 .decide-empty {
   font-size: 12px;
   color: var(--ink-3);
   line-height: 1.6;
   margin-top: 4px;
-}
-.decide-lock {
-  flex-shrink: 0;
-  align-self: stretch;
-  min-width: 0;
-  margin: 0 16px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--panel-2);
-}
-.decide-lock-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-.decide-lock-note {
-  font-size: 12px;
-  color: var(--ink-3);
-  margin-top: 4px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-.decide-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 10px 16px 12px;
-  border-top: 1px solid var(--hairline);
 }
 
 /* ---------- 响应式：窄视口阶梯收窄 ---------- */
@@ -873,8 +707,6 @@ select.ctl { background: var(--panel); }
   /* 顶栏瘦身（版本号已在 900px 档隐藏） */
   .nav-brand { padding: 4px 4px 4px 0; }
   .decide-obj { width: 108px; }
-  .decide-head, .decide-body, .decide-foot { padding-left: 12px; padding-right: 12px; }
-  .decide-lock { margin-left: 12px; margin-right: 12px; }
-  .decide-foot { justify-content: stretch; }
-  .decide-foot .btn-cta { width: 100%; justify-content: center; }
+  .decide-note { padding-left: 118px; }
+  .decide-head, .decide-body { padding-left: 12px; padding-right: 12px; }
 }

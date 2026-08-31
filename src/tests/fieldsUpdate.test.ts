@@ -116,16 +116,17 @@ describe("set_fields：导入自动生成与级联", () => {
     expect(dev.sources!.cref.fields.note).toBe("note");
   });
 
-  it("部分重叠：公共属性挪到上位对象，两类的 set_fields 摘键", async () => {
+  it("部分重叠：并成一个多源类，set_fields 随合并走（b_only 搬进留类）", async () => {
     const s = await freshStore(tmp);
     await s.editDraft({ op: "import_objects", objects: { pa: mkCls("a_no", ["name", "a_only"], "ca"), pb: mkCls("b_no", ["name", "b_only"], "cb") } }, WORKSPACE);
     const { decide } = await import("../server/features/integrate/decide");
     const { Verdict } = await import("../server/schema/verdict");
     await decide(s.env, { class_a: "pa", class_b: "pb", verdict: Verdict.Overlap }, WORKSPACE);
     const d = (await s.getDraft(WORKSPACE)).draft;
-    expect(d.object_types.shared_pa_pb).toBeDefined();
-    expect(updatePropsOf(d.object_types.pa as never)).toEqual({ a_only: { from: "request" } });
-    expect(updatePropsOf(d.object_types.pb as never)).toEqual({ b_only: { from: "request" } });
+    expect(d.object_types.shared_pa_pb).toBeUndefined(); // 不再立上位对象（ADR 0013 再修订）
+    expect(d.object_types.pb).toBeUndefined(); // 并类消亡
+    // set_fields 不吸收并入属性（与类等价合并同款纪律）：b_only 可经画布加键
+    expect(updatePropsOf(d.object_types.pa as never)).toEqual({ name: { from: "request" }, a_only: { from: "request" } });
     expect((await s.publish(WORKSPACE)).code).toBe(200);
   });
 

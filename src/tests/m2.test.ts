@@ -1,6 +1,9 @@
 // M2 测试：配置三视图、LLM 演示实现、生成对象导入草稿。
 
 import { describe, expect, it } from "vitest";
+import type { ClassShot } from "../server/infra/llm/llm";
+
+const EVENT_NAMES = new Set(["repair", "it_ticket", "assignment", "disposal"]);
 import { load } from "js-yaml";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -191,6 +194,43 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen).toContain("in_service"); // equipment.status 的枚举值进了 prompt
   });
 
+  it("proposeObjects 的 prompt 带采样行；enum 空取值降级 string（不交空壳枚举）", async () => {
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
+    const fakeModel = { modelId: "test-model" } as never;
+    let seen = "";
+    const slot = new AiSdkLlm(fakeModel, (async (args: { prompt: string }) => {
+      seen = args.prompt;
+      return {
+        text: JSON.stringify({
+          object_types: {
+            device: {
+              kind: "thing",
+              identity: "serial_no",
+              properties: {
+                serial_no: { type: "string", description: "设备序列号" },
+                status: { type: "enum", values: [] }, // 模型没从采样抄到取值：空壳 enum
+              },
+            },
+          },
+        }),
+      };
+    }) as never);
+    const draft = await slot.proposeObjects([
+      {
+        connection: "device_sys",
+        table: {
+          name: "device",
+          columns: [{ name: "serial_no", type: "TEXT", pk: false }, { name: "status", type: "TEXT", pk: false, comment: "台账状态" }],
+          sample: [{ serial_no: "SN-40080", status: "in_service" }, { serial_no: "SN-40081", status: "scrapped" }],
+        },
+      },
+    ]);
+    expect(seen).toContain("SN-40080"); // 采样行进 prompt：枚举取值从真实数据抄
+    expect(seen).toContain("至少 2 个");
+    expect(draft.device.properties.status.type).toBe("string"); // 空取值枚举降级为 string，不交空壳
+    expect(draft.device.properties.status).not.toHaveProperty("values");
+  });
+
   it("proposePair 的 prompt 带交集率与判定顺序，零温度固定种子，空表不要只因 0% 判同形异义", async () => {
     const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
     const fakeModel = { modelId: "test-model" } as never;
@@ -200,8 +240,8 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
       return { text: JSON.stringify({ class_a: "device", class_b: "asset", tendency: "same", reason: "空表不算不相干" }) };
     }) as never);
     const advice = await slot.proposePair({
-      class_a: { name: "device", sources: ["device_sys"], fields: ["sn"], enums: [] },
-      class_b: { name: "asset", sources: ["asset_sys"], fields: ["sn"], enums: [] },
+      class_a: { name: "device", kind: "thing", sources: ["device_sys"], fields: ["sn"], enums: [] },
+      class_b: { name: "asset", kind: "thing", sources: ["asset_sys"], fields: ["sn"], enums: [] },
       overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 },
       base: { tendency: Verdict.Overlap, reason: "字段部分重合" },
     });
@@ -213,9 +253,30 @@ describe("撞名消解与 prompt 枚举（PR3）", () => {
     expect(seen.prompt).toContain("判定顺序");
     expect(seen.prompt).toContain("第一版建议");
     expect(seen.prompt).toContain(`命中大于零不许给${VERDICT_LABELS[Verdict.NameSimilar]}`);
-    expect(seen.prompt).toContain("命中为零不许给部分重叠");
+    expect(seen.prompt).toContain(`命中为零不许给${VERDICT_LABELS[Verdict.Same]}、${VERDICT_LABELS[Verdict.Overlap]}、${VERDICT_LABELS[Verdict.Stage]}`);
+    expect(seen.prompt).toContain("不许维持"); // 0% 是三种"同一批个体"结论的反证：第一版说什么都要改口
     expect(seen.prompt).toContain("keep");
     expect(seen.prompt).toContain("stage.earlier");
+  });
+
+  it("proposeKey 的 prompt 先分行：记录表的引用列命中越多越除名", async () => {
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
+    const fakeModel = { modelId: "test-model" } as never;
+    let seen = "";
+    const slot = new AiSdkLlm(fakeModel, (async (args: { prompt: string }) => {
+      seen = args.prompt;
+      return { text: JSON.stringify({ key: "card_id", reason: "记录表用自身单号列" }) };
+    }) as never);
+    const advice = await slot.proposeKey({
+      name: "warranty_card",
+      candidates: [
+        { name: "card_id", unique: true, rows: 52, distinct: 52, intraUnique: true, hits: [] },
+        { name: "sn", rows: 52, distinct: 52, intraUnique: true, hits: [{ class_b: "device", column: "serial_no", hit: 52, total_a: 52, total_b: 100 }] },
+      ],
+    });
+    expect(advice.key).toBe("card_id");
+    expect(seen).toContain("先分行");
+    expect(seen).toContain("引用不是身份");
   });
 
   it("AiSdkLlm 失败落盘：原始产出写临时目录，OPENAI_API_KEY 字面值打码", async () => {
@@ -407,18 +468,32 @@ describe("LLM 演示实现（离线）", () => {
 
   it("候选对建议：字段重合才成对；同一库两张表也可以成对", async () => {
     const pairs = await slot.proposePairs([
-      { name: "a", sources: ["s1"], fields: ["sn", "name"], enums: [] },
-      { name: "b", sources: ["s2"], fields: ["sn", "name", "status"], enums: [] },
-      { name: "c", sources: ["s1"], fields: ["sn", "name"], enums: [] }, // 与 a 同一连接、不同类
-      { name: "d", sources: ["s2"], fields: ["xyz"], enums: [] },
+      { name: "a", kind: "thing", sources: ["s1"], fields: ["sn", "name"], enums: [] },
+      { name: "b", kind: "thing", sources: ["s2"], fields: ["sn", "name", "status"], enums: [] },
+      { name: "c", kind: "thing", sources: ["s1"], fields: ["sn", "name"], enums: [] }, // 与 a 同一连接、不同类
+      { name: "d", kind: "thing", sources: ["s2"], fields: ["xyz"], enums: [] },
     ]);
     // a-b、b-c 跨源字段重合；a-c 同一库也可以成对；d 字段对不上
     expect(pairs.map((p) => `${p.class_a}-${p.class_b}`).sort()).toEqual(["a-b", "a-c", "b-c"]);
     expect(pairs.find((p) => p.class_a === "a" && p.class_b === "b")?.tendency).toBe(Verdict.Stage); // 含状态字段
   });
 
+  it("召回提示词含行的性质分流判据（T2）：记录/凭证×主体的配对不比同类，倾向同形异义归宿建链", async () => {
+    const { AiSdkLlm } = await import("../server/infra/llm/aiSdk");
+    let seen = "";
+    const fakeModel = { modelId: "test-model" } as never;
+    const cap = new AiSdkLlm(fakeModel, (async (args: { prompt: string }) => {
+      seen = args.prompt; // 捕获真提示词：假 gen 的第一个实参就是 gen 配置，prompt 在里面
+      return { text: JSON.stringify({ pairs: [] }) };
+    }) as never);
+    await cap.proposePairs([{ name: "device", kind: "thing", sources: ["s"], fields: ["serial_no"], enums: [] }, { name: "repair", kind: "event", sources: ["s2"], fields: ["serial_no"], enums: [] }]);
+    expect(seen).toContain("行的性质");
+    expect(seen).toContain(VERDICT_LABELS[Verdict.NameSimilar]);
+    expect(seen).toContain("归宿是与主体建链");
+  });
+
   it("候选对剧本（ADR 0012 合并世界投影）：模板类提 6 对、倾向按故事，剧本外仍走字段启发式", async () => {
-    const cls = (name: string, fields: string[]) => ({ name, sources: ["s"], fields, enums: [] });
+    const cls = (name: string, fields: string[]) => ({ name, kind: (EVENT_NAMES.has(name) ? "event" : "thing") as "event" | "thing", sources: ["s"], fields, enums: [] });
     const classes = [
       cls("equipment", ["name", "serial_no", "status"]),
       cls("department", ["name", "dept_id"]),
@@ -441,9 +516,9 @@ describe("LLM 演示实现（离线）", () => {
     // 剧本六对齐全、倾向按故事（跳过由人裁，建议只给四档）
     expect(byPair.get("equipment-it_device")?.tendency).toBe(Verdict.NameSimilar);
     expect(byPair.get("equipment-instrument")?.tendency).toBe(Verdict.Overlap);
-    expect(byPair.get("equipment-warranty_card")?.tendency).toBe(Verdict.Overlap);
+    expect(byPair.get("equipment-warranty_card")?.tendency).toBe(Verdict.NameSimilar); // 凭证表不比同类：倾向改口同形异义，落法是建链
     expect(byPair.get("department-oa_dept")?.tendency).toBe(Verdict.NameSimilar);
-    expect(byPair.get("account-card_holder")?.tendency).toBe(Verdict.Overlap);
+    expect(byPair.get("account-card_holder")?.tendency).toBe(Verdict.NameSimilar); // 卡挂在账号上：不比同类，建「谁的卡」链
     expect(byPair.get("repair-it_ticket")?.tendency).toBe(Verdict.NameSimilar);
     // 剧本对不重复；剧本外字段对不上的不硬凑
     expect(new Set(pairs.map((p) => `${p.class_a}-${p.class_b}`)).size).toBe(pairs.length);
@@ -455,10 +530,10 @@ describe("LLM 演示实现（离线）", () => {
 
   it("候选对建议：留下谁由建议给；谁早、时期名不猜（引擎占位 early/late）", async () => {
     const pairs = await slot.proposePairs([
-      { name: "shared_x", sources: ["s1"], fields: ["sn", "name"], enums: [] },
-      { name: "device", sources: ["s2"], fields: ["sn", "name"], enums: [] },
-      { name: "po", sources: ["s3"], fields: ["sn", "name"], enums: [] },
-      { name: "dev", sources: ["s4"], fields: ["sn", "name", "status"], enums: [] },
+      { name: "shared_x", kind: "thing", sources: ["s1"], fields: ["sn", "name"], enums: [] },
+      { name: "device", kind: "thing", sources: ["s2"], fields: ["sn", "name"], enums: [] },
+      { name: "po", kind: "thing", sources: ["s3"], fields: ["sn", "name"], enums: [] },
+      { name: "dev", kind: "thing", sources: ["s4"], fields: ["sn", "name", "status"], enums: [] },
     ]);
     const same = pairs.find((p) => p.class_a === "shared_x" && p.class_b === "device");
     expect(same?.tendency).toBe(Verdict.Same);
@@ -472,8 +547,8 @@ describe("LLM 演示实现（离线）", () => {
   });
 
   it("看过交集率再建议：命中为零不改口同形异义；空表不否定类等价", async () => {
-    const a = { name: "device", sources: ["device_sys"], fields: ["sn", "name"], enums: [] };
-    const b = { name: "asset", sources: ["asset_sys"], fields: ["sn", "name"], enums: [] };
+    const a: ClassShot = { name: "device", kind: "thing", sources: ["device_sys"], fields: ["sn", "name"], enums: [] };
+    const b: ClassShot = { name: "asset", kind: "thing", sources: ["asset_sys"], fields: ["sn", "name"], enums: [] };
     const empty = await slot.proposePair({ class_a: a, class_b: b, overlap: { rate: 0, count_a: 100, count_b: 0, count_hit: 0 } });
     expect(empty.tendency).toBe(Verdict.Same);
     expect(empty.reason).toContain("还没有行");
@@ -481,8 +556,8 @@ describe("LLM 演示实现（离线）", () => {
     expect(miss.tendency).toBe(Verdict.Same); // 不是同一批，但不能据此否定同一
     expect(miss.reason).toContain("不是同一批");
     const mid = await slot.proposePair({
-      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },
-      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] },
+      class_a: { name: "po", kind: "thing", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },
+      class_b: { name: "dev", kind: "thing", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] },
       overlap: { rate: 0.33, count_a: 121, count_b: 100, count_hit: 40 },
     });
     expect(mid.tendency).toBe(Verdict.Stage);
@@ -492,8 +567,8 @@ describe("LLM 演示实现（离线）", () => {
 
   it("看过交集率再建议：命中为零则数据不支持部分重叠，空表改口同一", async () => {
     const advice = await slot.proposePair({
-      class_a: { name: "asset", sources: ["asset_sys"], fields: ["asset_id", "sn"], enums: [] },
-      class_b: { name: "device", sources: ["device_sys"], fields: ["dev_id", "serial_no"], enums: [] },
+      class_a: { name: "asset", kind: "thing", sources: ["asset_sys"], fields: ["asset_id", "sn"], enums: [] },
+      class_b: { name: "device", kind: "thing", sources: ["device_sys"], fields: ["dev_id", "serial_no"], enums: [] },
       overlap: { rate: 0, count_a: 0, count_b: 100, count_hit: 0 },
       base: { tendency: Verdict.Overlap, reason: "第一版按语义对应给的" },
     });
@@ -502,8 +577,8 @@ describe("LLM 演示实现（离线）", () => {
   });
 
   it("看过交集率再建议：接近全交不压过第三问——有状态字段且第一版是生命周期则维持生命周期", async () => {
-    const a = { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] };
-    const b = { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] };
+    const a: ClassShot = { name: "po", kind: "thing", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] };
+    const b: ClassShot = { name: "dev", kind: "thing", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] };
     const full = { rate: 0.92, count_a: 100, count_b: 100, count_hit: 92 };
     const stage = await slot.proposePair({ class_a: a, class_b: b, overlap: full, base: { tendency: Verdict.Stage, reason: "字段像阶段" } });
     expect(stage.tendency).toBe(Verdict.Stage); // 合成表「是 | 命中大于零 | 是 → 阶段」，比率不单独压过第三问
@@ -513,8 +588,8 @@ describe("LLM 演示实现（离线）", () => {
   });
 
   it("看过交集率再建议：有交集又不是全交时维持第一版（锚不被状态字段翻掉）", async () => {
-    const a = { name: "equipment", sources: ["device_sys"], fields: ["name", "serial_no", "status"], enums: [] };
-    const b = { name: "instrument", sources: ["inspect_sys"], fields: ["name", "serial_no"], enums: [] };
+    const a: ClassShot = { name: "equipment", kind: "thing", sources: ["device_sys"], fields: ["name", "serial_no", "status"], enums: [] };
+    const b: ClassShot = { name: "instrument", kind: "thing", sources: ["inspect_sys"], fields: ["name", "serial_no"], enums: [] };
     const mid = { rate: 0.667, count_a: 100, count_b: 60, count_hit: 40 };
     // 剧本第一版是部分重叠：数据（有交集非全交）支持它，状态字段不翻案
     const anchored = await slot.proposePair({
@@ -530,8 +605,8 @@ describe("LLM 演示实现（离线）", () => {
 
   it("看过交集率再建议：两边都有行、命中为零，阶段立不住——改口同一（空表才沉默）", async () => {
     const advice = await slot.proposePair({
-      class_a: { name: "po", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },
-      class_b: { name: "dev", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] },
+      class_a: { name: "po", kind: "thing", sources: ["purchase_sys"], fields: ["sn", "name"], enums: [] },
+      class_b: { name: "dev", kind: "thing", sources: ["device_sys"], fields: ["sn", "name", "status"], enums: [] },
       overlap: { rate: 0, count_a: 100, count_b: 80, count_hit: 0 },
       base: { tendency: Verdict.Stage, reason: "字段像阶段" },
     });

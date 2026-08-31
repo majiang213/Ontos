@@ -38,6 +38,22 @@ describe("applyOp（脱离队列与元库直测）", () => {
     expect(() => applyOp(state, { op: "save_edge_bend", name: "ghost", bend: null }, published)).toThrow(/关系不存在/);
   });
 
+  it("建链拒机器拼名：{from}_to_{to} / {from}_{to} 是拼出来的形状，不是领域谓词（T3）", () => {
+    const state = freshState();
+    for (const name of ["a_to_b", "a_b"]) {
+      try {
+        applyOp(state, { op: "create_link", name, from: "a", to: "b", match: { from: "x", to: "y" } }, published);
+        expect.unreachable(`应拒机器拼名 ${name}`);
+      } catch (e) {
+        expect((e as Error).message).toContain("机器拼接");
+      }
+    }
+    expect(state.draft.link_types.a_to_b).toBeUndefined();
+    // 领域谓词名照常建
+    applyOp(state, { op: "create_link", name: "serves_a", from: "a", to: "b", match: { from: "x", to: "y" } }, published);
+    expect(state.draft.link_types.serves_a).toBeDefined();
+  });
+
   it("钉点随建线/改接同车：create_link 写 edgePins；update_link 按端合并（改名写新名）", () => {
     const state = freshState();
     applyOp(

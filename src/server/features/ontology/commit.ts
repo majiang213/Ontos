@@ -22,7 +22,7 @@ export async function commitDraft(env: EngineEnv, workspace: string, state: Draf
 }
 
 /** 三道校验单源（结构 + 语义 + 动作形状四查）：草稿写入与发布同调这一份。
- *  opts.allowKeyless 只给草稿写路径（待确认面板①定键前允许有源无键）；发布不传，拦在发布闸。
+ *  opts.allowKeyless 只给草稿写路径（Agent 定键前允许有源无键）；发布不传，拦在发布闸。
  *  rollbackTo/getPublished 只用前两道（configSchema.parse + validateSemantics，不走本函数）——
  *  历史已发布的坏配置加载放行，运行期由 action.ts 兜底；「哪里查几道」的边界就是有没有调本函数。 */
 export function validateFull(raw: OntologyConfig, opts: ValidateOptions = {}): OntologyConfig {

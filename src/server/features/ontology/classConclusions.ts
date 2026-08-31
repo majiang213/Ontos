@@ -7,7 +7,8 @@ export function liveConclusions(config: Pick<OntologyConfig, "object_types" | "c
   const live = new Set(Object.keys(config.object_types));
   return (config.class_conclusions ?? []).filter((row) => {
     if (!row.classes.every((c) => live.has(c))) return false;
-    if (row.kind === "overlap" && (!row.shared || !live.has(row.shared))) return false;
+    // 历史草稿的 overlap 带 shared：上位对象还活着结论才活着；新裁决（ADR 0013）不写 shared，只看两类
+    if (row.kind === "overlap" && row.shared && !live.has(row.shared)) return false;
     return true;
   });
 }

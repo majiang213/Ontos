@@ -24,11 +24,4 @@ export function pairEligible(a: ObjectType, b: ObjectType, decidedKeys: Set<stri
   return hasSources(a) && hasSources(b) && !decidedKeys.has(pairKey(nameA, nameB));
 }
 
-/** 部分重叠会上移到公共对象的字段（唯一出处）：同名、两边都非派生、不是任一侧的唯一键。
- *  没有同名不挡裁决——公共对象仍立，只带唯一键；同义不同名（sn 对 serial_no）各留在原类。 */
-export function commonProperties(a: ObjectType, b: ObjectType): string[] {
-  const idProps = new Set([a.identity, b.identity].filter(Boolean) as string[]);
-  return Object.keys(a.properties).filter((p) => p in b.properties && !a.properties[p].derived && !b.properties[p].derived && !idProps.has(p));
-}
-
 

@@ -209,7 +209,7 @@ type SourceEntry = NonNullable<OntologyConfig["object_types"][string]["sources"]
 async function project(env: Env, p: Planned, req: ActionRequest, ctx: EvalContext): Promise<ProjectionRecord[]> {
   if (p.kind === "update") return projectUpdate(env, p, ctx);
   if (p.kind === "create") return projectCreate(env, p, ctx);
-  if (p.kind === "link") return projectLink(env, p, req);
+  if (p.kind === "link") return projectLink(env, p, req, ctx);
   return projectDelete(env, p);
 }
 
@@ -350,24 +350,34 @@ async function alreadyInserted(env: Env, p: Extract<Planned, { kind: "create" }>
   return dup.length > 0;
 }
 
-async function projectLink(env: Env, p: Extract<Planned, { kind: "link" }>, req: ActionRequest): Promise<ProjectionRecord[]> {
+async function projectLink(env: Env, p: Extract<Planned, { kind: "link" }>, req: ActionRequest, ctx: EvalContext): Promise<ProjectionRecord[]> {
   const driver = env.driver;
   const out: ProjectionRecord[] = [];
-  // 转化：插入该类里第 3 步没有行、又映射了识别字段的源；值取读到的个体属性，写回不再查一遍
+  // 转化：插入该类里第 3 步没有行、又映射了识别字段的源；值取读到的个体属性，写回不再查一遍。
+  // 多段时期世界里先模拟：插了这行之后派生时期必须仍落在 transition.to——
+  // 验收（→在役）不该把行插进处置档案，把同一个体读成已处置；不一致的源跳过（个体只是不被那个源覆盖）。
   const cls = p.cls; // 计划成品带类（planEffect 已钉死 cls≡reqCls），不再回 config 补
   const subject = p.subject;
+  const transition = env.config.link_types[p.linkName]?.transition;
+  const rows: Record<string, Record<string, unknown> | null | undefined> = { ...subject.rows };
   for (const [srcName, entry] of sourcesOf(cls)) {
     if (subject.rows[srcName] != null) continue; // 已有行的源不动
     const idProp = sourceKeyProp(cls.def, entry); // 对齐属性随源条目（部分重叠的上位对象有显式 key），不绕过单源
     if (!idProp || !entry.fields[idProp]) continue;
+    const row: Record<string, unknown> = {};
+    const dialect = dialectFor(driver, entry.connection);
+    for (const [prop, col] of Object.entries(entry.fields)) {
+      const v = prop === idProp ? req.identity : propValue(cls, subject, prop);
+      if (v !== undefined && v !== null) row[col] = toColumnValue(v, cls.def.properties[prop]?.type, dialect);
+    }
+    if (transition) {
+      const trial = { ...subject, rows: { ...rows, [srcName]: row } } as Individual;
+      const period = await evalDerived(cls, trial, transition.property, env, { ...ctx, allowPreKeys: false });
+      if (period !== transition.to) continue; // 这行会把个体读成别的时期：不插
+    }
     try {
-      const row: Record<string, unknown> = {};
-      const dialect = dialectFor(driver, entry.connection);
-      for (const [prop, col] of Object.entries(entry.fields)) {
-        const v = prop === idProp ? req.identity : propValue(cls, subject, prop);
-        if (v !== undefined && v !== null) row[col] = toColumnValue(v, cls.def.properties[prop]?.type, dialect);
-      }
       await driver.insert(entry.connection, entry.table, row);
+      rows[srcName] = row;
       out.push({ source: srcName, table: entry.table, op: "insert", ok: true });
     } catch (e) {
       out.push({ source: srcName, table: entry.table, op: "insert", ok: false, error: err(e) });

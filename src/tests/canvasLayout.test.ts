@@ -5,7 +5,8 @@ import { edgeBlocked, estimateHeight, layoutObjects, NODE_W, type CanvasLink, ty
 import { edgePath, type RouteEnd } from "../components/canvas/router";
 import { floatingEndsOf, type Pt } from "../components/canvas/geometry";
 import { countEdgeCrossings, crosses, samplePath } from "./canvasPath";
-import { overlapLinksOf } from "../components/canvas/sharedOrigin";
+import { overlapEdgesOf, type DecisionRow } from "../components/canvas/sharedOrigin";
+import { Verdict } from "../server/schema/verdict";
 
 const obj = (name: string): CanvasObject => ({
   name,
@@ -91,7 +92,7 @@ describe("有关系布局（dagre 分层）", () => {
     const names = ["asset", "device", "shared_asset_device"];
     const pos = layoutObjects(
       names.map(obj),
-      overlapLinksOf([{ kind: "overlap", classes: ["asset", "device"], shared: "shared_asset_device" }])
+      overlapEdgesOf([{ classes: ["asset", "device"], verdict: Verdict.Overlap, shared: "shared_asset_device" }])
     );
     expect(pos.get("shared_asset_device")!.y).toBeLessThan(pos.get("asset")!.y);
     expect(pos.get("shared_asset_device")!.y).toBeLessThan(pos.get("device")!.y);

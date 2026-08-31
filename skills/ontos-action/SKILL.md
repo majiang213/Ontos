@@ -5,7 +5,7 @@ description: 通过 MCP 在 Ontos 本体画布的工作副本（草稿）里编�
 
 # Ontos 写动作定义（草稿世界 · 写）
 
-动作定义写在草稿里，**写完不生效**：`run_action` 只执行已发布快照上的动作，人在画布上点「发布」才生效。发布、放弃、裁决都是人的关卡，**没有这些工具，也不要去找**。
+动作定义写在草稿里，**写完不生效**：`run_action` 只执行已发布快照上的动作，人在画布上点「发布」才生效。发布与放弃是人的动作，**没有这两个工具，也不要去找**；判定与整合归 Agent（见 ontos-canvas）。
 
 这个 skill 只写动作定义。改对象/字段/关系归 `ontos-canvas`；执行动作归 `ontos-action-run`；查数归 `ontos-query`。
 
@@ -73,7 +73,7 @@ inform:                     # 告知（可选）：先把变更事件发给谁
 
 - 请求点名的那个体，效应写 `object` + `identity: { from: "identity" }`；其他已有个体写 `object` + `filter`。**不许省略 `object`，不许 `$root`。**
 - 动作上不写 `write` 名单；写回按效应和 `sources` 推出。
-- **转化关系由裁决独占**：`create_link` 不收 `transition`，你造不出转化关系；效应 `link` 只能指向已有的转化关系。
+- **转化关系由生命周期判定独占**：`create_link` 不收 `transition`，你造不出转化关系；效应 `link` 只能指向已有的转化关系。
 - 删掉转化关系的唯一引用动作会被引擎拦（转化成对）。**逃生路径**：先 `set_action` 一条同样 `link` 该转化关系的替代动作，再 `remove_action` 删旧的——转化关系本身被引用保护，`delete_link` 删不掉。
 - `import_objects` / `replace_object` 的类体会被剥掉 `actions`——新类的动作也要另走 `set_action`，不要整份塞 `actions` map，不臆造 `set_actions`。
 - 写带 `inform` 的动作前，先从 `list_classes { space: "draft" }` 的 `outlets` 确认出站已声明；没出站就去掉 `inform`，不编造出站名。空白空间（default 与新建空间）没有出站。
@@ -93,8 +93,8 @@ inform:                     # 告知（可选）：先把变更事件发给谁
 ## 红线
 
 1. 写动作只走 `set_action` / `remove_action`（经 `edit_draft`，必带 `base_rev`）。
-2. 动作写进草稿不等于生效；不调用、不臆造 `publish` / `discard` / `decide` / `rollback` 工具。
+2. 动作写进草稿不等于生效；不调用、不臆造 `publish` / `discard` / `rollback` 工具（没有这些工具，发布由人在画布上点）。
 3. 同名覆盖现有动作前，先 `read_class { space: "draft" }` 读回完整定义确认要改什么。
-4. 转化关系由裁决独占：不造转化关系；删转化动作走「先替代、再删」。
+4. 转化关系由生命周期判定独占：不造转化关系；删转化动作走「先替代、再删」。
 5. 不编造类名、属性名、关系名、出站名——拿不准就 `read_class` / `list_classes`（都带 `space: "draft"`）。
 6. 同一次会话里 `initialize` 只做一次；`notifications/*` 等不到响应是正常的。

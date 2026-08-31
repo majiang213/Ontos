@@ -17,6 +17,10 @@ type UpdateLinkOp = Extract<DraftOp, { op: "update_link" }>;
 export function createLink(state: DraftState, input: CreateLinkOp): void {
   const d = state.draft;
   if (!NAME_RE.test(input.name)) throw new DraftReject(MSG.linkNameBad);
+  // 机器拼名废弃（T3）：{from}_to_{to} / {from}_{to} 是拼出来的形状，不是领域谓词——链名要回答一个领域问题
+  if (input.name === `${input.from}_to_${input.to}` || input.name === `${input.from}_${input.to}`) {
+    throw new DraftReject(MSG.linkNameMachine(input.from, input.to));
+  }
   if (d.link_types[input.name]) throw new DraftReject(MSG.linkExists(input.name));
   mustClass(d, input.from);
   mustClass(d, input.to);

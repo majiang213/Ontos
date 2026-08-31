@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { engineEnv } from "@/server/runtime";
 import { getDriverRegistry } from "@/server/infra/connections";
-import { disambiguateClassNames, proposeObjectsFor } from "@/server/infra/llm/llm";
+import { disambiguateClassNames, PROPOSE_SAMPLE_ROWS, proposeObjectsFor } from "@/server/infra/llm/llm";
 import { getDraft } from "@/server/features/ontology/current";
 import { EngineReject } from "@/server/errors";
 import { bodyJson, rejectRes, respond, workspaceOf } from "@/app/api/_shared";
@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ workspa
     const workspace = await workspaceOf(params);
     const registry = await getDriverRegistry(workspace);
     const occupied = Object.keys((await getDraft(env, workspace)).draft.object_types); // 草稿已有类名：提示模型 + 硬闸都用这份
-    const r = await proposeObjectsFor(env.llm(workspace), registry, tables, (m) => new EngineReject(m), occupied);
+    const r = await proposeObjectsFor(env.llm(workspace), registry, tables, (m) => new EngineReject(m), occupied, { sample: PROPOSE_SAMPLE_ROWS });
     if (r.code !== 200) return rejectRes(r);
     return { object_types: disambiguateClassNames(r.value, occupied) };
   });

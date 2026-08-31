@@ -1,4 +1,4 @@
-// MCP 工具端点测试：JSON-RPC 信封、十个工具的形状与纪律（从 m4m6.test.ts 拆出）。
+// MCP 工具端点测试：JSON-RPC 信封、十四个工具的形状与纪律（从 m4m6.test.ts 拆出）。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupRuntime, draftEngine, setupRuntime } from "./helpers";
@@ -26,7 +26,7 @@ describe("MCP 工具端点", () => {
   }
   const call = (name: string, args: Record<string, unknown>, headers?: Record<string, string>) => rpc("tools/call", { name, arguments: args }, undefined, headers);
 
-  it("initialize 握手 + tools/list 列出十个工具（顺序钉死）+ id 回显", async () => {
+  it("initialize 握手 + tools/list 列出十四个工具（顺序钉死）+ id 回显", async () => {
     const init = await rpc("initialize");
     expect(init.id).toBe(7);
     expect(init.result.serverInfo.name).toBe("ontos");
@@ -40,6 +40,10 @@ describe("MCP 工具端点", () => {
       "read_class",
       "search",
       "list_candidates",
+      "propose_key",
+      "compute_overlap",
+      "propose_pair",
+      "decide",
       "list_tables",
       "edit_draft",
     ]);
@@ -102,6 +106,8 @@ describe("MCP 工具端点", () => {
     expect((await call("run_action", { action: "convert", object: "equipment", identity: "SN-40217", space: "draft" })).error?.code).toBe(-32602);
     expect((await call("propose_objects", { tables: [{ connection: "device_sys", table: "department" }], space: "draft" })).error?.code).toBe(-32602);
     expect((await call("list_candidates", { space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("decide", { class_a: "repair", class_b: "assignment", verdict: "skip", space: "draft" })).error?.code).toBe(-32602);
+    expect((await call("propose_key", { object: "po_item", space: "draft" })).error?.code).toBe(-32602);
   });
 
   it("space=draft 看见未发布类（带状态与 rev）；缺省看不见；query/propose_action 不受草稿影响", async () => {
@@ -246,6 +252,59 @@ describe("MCP 工具端点", () => {
     expect(hit[0].reason).toBeTruthy();
     expect((await s.getDraft("test")).draft.object_types.po_a).toBeDefined();
     expect((await s.getDraft("test")).draft.object_types.po_b).toBeDefined(); // 只看，没把两并成一个
+  });
+
+  it("Agent 整合全链路：propose_key → compute_overlap → propose_pair → decide(same) 合并 + 留痕；propose_* 一律不落地", async () => {
+    const s = await draftEngine();
+    const rev = (await call("list_classes", { space: "draft" })).result.structuredContent.rev as number;
+    const imp = await call("edit_draft", {
+      op: "import_objects",
+      objects: {
+        po_a: { kind: "thing", identity: "sn", description: "采购单行", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sa: { connection: "purchase_sys", table: "po_item", pk: "po_id", fields: { sn: "sn", name: "item_name" } } } },
+        po_b: { kind: "thing", identity: "sn", description: "设备台账", properties: { sn: { type: "string" }, name: { type: "string" } }, sources: { sb: { connection: "device_sys", table: "device", pk: "dev_id", fields: { sn: "serial_no", name: "name" } } } },
+      },
+      base_rev: rev,
+    });
+    expect(imp.error).toBeUndefined();
+    // 出键建议：只建议，草稿 identity 不动
+    const key = await call("propose_key", { object: "po_a" });
+    expect(key.error).toBeUndefined();
+    expect(key.result.structuredContent.key).toBe("sn");
+    expect((await s.getDraft("test")).draft.object_types.po_a.identity).toBe("sn");
+    // 算交集 → 二轮倾向 → 落结论（证据随行进留痕）
+    const ov = await call("compute_overlap", { class_a: "po_a", class_b: "po_b" });
+    expect(ov.error).toBeUndefined();
+    const { rate, count_a, count_b, count_hit } = ov.result.structuredContent as { rate: number; count_a: number; count_b: number; count_hit: number };
+    const pair = await call("propose_pair", { class_a: "po_a", class_b: "po_b", rate, count_a, count_b, count_hit });
+    expect(pair.error).toBeUndefined();
+    expect(pair.result.structuredContent.tendency).toBeTruthy();
+    expect(pair.result.structuredContent.reason).toBeTruthy();
+    // 未授权写闸：decide 是写工具，没令牌 -32001
+    process.env.ONTOS_TOKEN = "t0ken";
+    try {
+      expect((await call("compute_overlap", { class_a: "po_a", class_b: "po_b" })).error?.code).toBe(-32001); // 全量扫 + 落计数，写闸与 REST 对齐
+      expect((await call("decide", { class_a: "po_a", class_b: "po_b", verdict: "same" })).error?.code).toBe(-32001);
+      const dec = await call("decide", { class_a: "po_a", class_b: "po_b", verdict: "same", evidence: { rate, count_a, count_b, count_hit } }, { authorization: "Bearer t0ken" });
+      expect(dec.error).toBeUndefined();
+      expect(dec.result.structuredContent).toMatchObject({ ok: true, recorded: true });
+    } finally {
+      delete process.env.ONTOS_TOKEN;
+    }
+    // 合并落地：po_b 消亡，po_a 挂两个源；留痕带 Agent 判定者与证据
+    const draft = (await s.getDraft("test")).draft;
+    expect(draft.object_types.po_b).toBeUndefined();
+    expect(Object.keys(draft.object_types.po_a.sources ?? {})).toEqual(["sa", "sb"]);
+    const { metaStore } = await import("../server/meta/store");
+    const decisions = await metaStore().listDecisions("test");
+    expect(decisions.at(-1)).toMatchObject({ class_a: "po_a", class_b: "po_b", verdict: "same", decided_by: "Agent（MCP）" });
+    expect(decisions.at(-1)?.evidence).toMatchObject({ rate, count_a, count_b, count_hit });
+  });
+
+  it("decide：自配对 -32602；缺工具无 —— publish 永不在工具清单", async () => {
+    expect((await call("decide", { class_a: "equipment", class_b: "equipment", verdict: "same" })).error?.code).toBe(-32602);
+    expect((await call("compute_overlap", { class_a: "equipment", class_b: "equipment" })).error?.code).toBe(-32602);
+    const list = await rpc("tools/list");
+    expect(list.result.tools.map((t: { name: string }) => t.name)).not.toContain("publish");
   });
 
   it("set_action 经 edit_draft 落地：草稿视图读回完整定义；names 是 类名.动作名；发布前已发布世界不受影响", async () => {

@@ -5,21 +5,27 @@ import type { DriverRegistry } from "./registry";
 import type { TableInfo } from "./driver";
 import { MSG } from "../errors";
 
-/** 按连接分组内省、逐表定位（每个连接只内省一次）。找不到表时抛 notFound 产出的错误（调用方定错误类型）。 */
+/** 按连接分组内省、逐表定位（每个连接只内省一次）。找不到表时抛 notFound 产出的错误（调用方定错误类型）。
+ *  opts.sample 给了就按表附采样行（建模请求要把采样带给模型——枚举取值从真实数据抄）。 */
 export async function resolveTableInfos(
   registry: DriverRegistry,
   tables: { connection: string; table: string }[],
-  notFound: (msg: string) => Error
-): Promise<{ connection: string; table: TableInfo }[]> {
+  notFound: (msg: string) => Error,
+  opts: { sample?: number } = {}
+): Promise<{ connection: string; table: TableInfo & { sample?: Record<string, unknown>[] } }[]> {
   const byConn = new Map<string, TableInfo[]>();
   for (const { connection } of tables) {
     if (!byConn.has(connection)) byConn.set(connection, await registry.introspect(connection));
   }
-  return tables.map(({ connection, table }) => {
-    const info = byConn.get(connection)!.find((t) => t.name === table);
-    if (!info) throw notFound(MSG.tableNotFound(connection, table));
-    return { connection, table: info };
-  });
+  return Promise.all(
+    tables.map(async ({ connection, table }) => {
+      const info = byConn.get(connection)!.find((t) => t.name === table);
+      if (!info) throw notFound(MSG.tableNotFound(connection, table));
+      return opts.sample
+        ? { connection, table: { ...info, sample: await registry.sample(connection, table, opts.sample).catch(() => [] as Record<string, unknown>[]) } } // 采样失败降级为空采样：列定义是建模的主料，采样只是附属（listTables 同口径）
+        : { connection, table: info };
+    })
+  );
 }
 
 /** 逐连接读表结构：单连接失败降级为 error 条目，不让整个调用变成信封错误；驱动报错可能含主机/路径，不原样出网。

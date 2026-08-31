@@ -12,9 +12,10 @@ import type { DriverRegistry } from "../../infra/registry";
 import { resolveTableInfos } from "../../infra/tables";
 import { MSG, toResult, type Result } from "../../errors";
 
-/** 建议输入里的一个类的快照：名字、连接集、字段名，外加枚举属性的取值（时期名判据的证据——建议词必须从这里面原样取）。 */
+/** 建议输入里的一个类的快照：名字、连接集、存在方式（kind 分流：记录表与主体表不比同类）、字段名，外加枚举属性的取值（时期名判据的证据——建议词必须从这里面原样取）。 */
 export interface ClassShot {
   name: string;
+  kind: "thing" | "event";
   sources: string[];
   fields: string[];
   enums: { name: string; values: Literal[] }[];
@@ -65,13 +66,26 @@ export async function proposeObjectsFor(
   registry: DriverRegistry,
   tables: { connection: string; table: string }[],
   notFound: (msg: string) => Error,
-  occupied?: string[]
+  occupied?: string[],
+  opts: { sample?: number } = {}
 ): Promise<Result<Record<string, ObjectType>>> {
   return toResult(async () => {
-    const infos = await resolveTableInfos(registry, tables, notFound);
+    const infos = await resolveTableInfos(registry, tables, notFound, opts);
     return llm.proposeObjects(infos, occupied);
   }, (v) => MSG.resultProposed(Object.keys(v).length));
 }
+
+/** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
+ *  allowDate=false 给破格进属性的主键用（主键当唯一键时只分 number/string）。 */
+export function columnPropType(rawType: string, allowDate = true): "string" | "number" | "date" {
+  const t = rawType.toUpperCase();
+  if (t.includes("INT")) return "number";
+  if (allowDate && (t.includes("DATE") || t.includes("TIME"))) return "date";
+  return "string";
+}
+
+/** 建模请求附的脱敏采样行数（提示词让 enum 取值从真实数据抄——3 行是采样与上下文长度的折中，唯一出处）。 */
+export const PROPOSE_SAMPLE_ROWS = 3;
 
 /** 撞名时的改名规则（唯一出处）：{connection}_{table}。演示实现（本次/草稿已占）与落地前硬闸同用这一条。 */
 export function prefixedTableName(connection: string, table: string): string {

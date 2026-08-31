@@ -7,6 +7,7 @@ import { adjudicate, type Verdict } from "./applyVerdict";
 import { pinCandidateSnapshot } from "./candidates";
 import { hasSources } from "./eligibility";
 import { VERDICT_LABELS } from "../../schema/verdict";
+import type { DecideRequest } from "../../schema/request";
 import { EngineReject, MSG, toResult, type Result } from "../../errors";
 import { DEFAULT_WORKSPACE } from "../../infra/workspace";
 
@@ -16,13 +17,7 @@ export interface DecideInput {
   verdict: Verdict;
   stage_names?: { from: string; to: string };
   llm_advice?: string;
-  evidence?: {
-    norm_rule?: string;
-    count_a?: number;
-    count_b?: number;
-    count_hit?: number;
-    rate?: number;
-  };
+  evidence?: DecideRequest["evidence"]; // 形状单一住所：schema/request 的 decideRequestSchema
   decided_by?: string;
 }
 

@@ -5,7 +5,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 
 # Ontos 改画布（草稿世界 · 读写）
 
-画布上的内容 = 工作副本（草稿）：已发布 + 没发布的改动。你经 `edit_draft` 写的就是这份草稿——**写完不生效**：问数（`query`）与已发布动作（`run_action`）只读已发布快照，人在画布上点「发布」才生效。发布、放弃、裁决、回滚都是人的关卡，**没有这些工具，也不要去找**。
+画布上的内容 = 工作副本（草稿）：已发布 + 没发布的改动。你经 `edit_draft` 写的就是这份草稿——**写完不生效**：问数（`query`）与已发布动作（`run_action`）只读已发布快照，人在画布上点「发布」才生效。**判定与整合是你的职责**：按证据定唯一键、算交集率、该合并的合并、该连线的连线，全部落草稿——画布与留痕视图让人看见你的每个决定与证据。发布与放弃是人的动作，**没有这两个工具，也不要去找**。
 
 这个 skill 管对象/字段/关系/阶段/导入/整份替换。写动作定义（`set_action` / `remove_action`）归 `ontos-action`；查数归 `ontos-query`；执行动作归 `ontos-action-run`。
 
@@ -38,29 +38,34 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 |---|---|---|
 | `list_tables` | 列出已连接库里的表和列（只读列定义，没有采样行） | `{ connection? }` |
 | `propose_objects` | 对选中的表产对象建议（**不落到画布**） | `{ tables: [{ connection, table }] }` |
+| `propose_key` | 对一个类出唯一键建议（数据试算 + 语义判别） | `{ object }` |
 | `list_classes` | 列草稿里的类（带 `state` / `dirty` / `rev` / `outlets` / 唯一键 `identity`） | `{ space: "draft" }` |
 | `read_class` | 读草稿里一个类的字段、关系、来源对照、能不能整份替换（`replaceable` / `replace_blockers`） | `{ name, space: "draft" }` |
 | `search` | 在草稿的类名、说明、关系名里检索 | `{ text, space: "draft" }` |
-| `list_candidates` | 列出等着人裁的疑似重复（**只看、不定案**） | 无入参 |
+| `list_candidates` | 列出召回的疑似重复对与证据（判定的参考） | 无入参 |
+| `compute_overlap` | 算候选对的交集率（判定的硬证据） | `{ class_a, class_b }` |
+| `decide` | 落判定结论：合并 / 建链 / 时期（写草稿与留痕） | `{ class_a, class_b, verdict, ... }` |
 | `edit_draft` | 改草稿，一次只改一步 | `{ op, ...，必带 base_rev }` |
 
 **发现类工具必须传 `space: "draft"`**——缺省读已发布，你会看不见人还没发布的改动，也会盖掉它们。`list_tables` / `list_candidates` / `propose_objects` / `edit_draft` **不接受** `space`（传了 `-32602`）。
 
-## 方法论（四步）：发现草稿 → 组装 op → 应用 → 停下请人发布
+## 方法论（五步）：发现草稿 → 组装 op → 应用 → 整合 → 停下请人发布
 
 1. **发现（草稿）**：`list_classes { space: "draft" }` 拿类清单和 **`rev`**；`read_class { name, space: "draft" }` 看字段与来源对照。需要表名时用 `list_tables`，不要编连接名。`query` 读的是已发布快照，**不能当画布真相**。
 2. **组装**：严格按下表拼**一条** op。从某张表建新对象：先 `propose_objects`（只建议，不写草稿），检查类名是否已在草稿里。
 3. **应用**：`edit_draft`，带上刚读到的 `rev` 作为 `base_rev`。`-32000` 说「草稿已变」就是 rev 过期——重新 `list_classes { space: "draft" }` 拿新 `rev` 再发；别的 `-32000` 读 message 修 op 再发。**同一个错误不要原样重发。**
-4. **停下**：告诉人「草稿已改，请到画布上看；要问数/动作生效，请在画布上点发布」。新建了有来源的对象时（同一库两张表也可能成对），走下面「待确认」手递，不要自己裁。**不要**寻找发布、放弃、裁决、回滚、算交集率的工具——没有这些工具。
+4. **整合（你的职责，见下节）**：定唯一键 → 算交集率 → 按问题树落判定（合并 / 建链 / 各自独立），全部经工具落草稿；拿不准的留着不裁，画布上人看得见。
+5. **停下**：告诉人「草稿已改、整合已做，请到画布上审；要问数/动作生效，请在画布上点发布」。**不要**寻找发布、放弃、回滚的工具——那是人的动作。
 
-## 待确认（人的关卡；你只看清、交出去）
+## 整合（你的职责）：定键 → 算交集 → 落判定
 
-有来源的对象上画布之后，按这个顺序交人，不要含糊说「请去确认」。同一库的两张表也可能成对。
+有来源的对象上画布之后，按这个顺序自己做，不要交回去。同一库的两张表也可能成对。
 
-1. **唯一键**：`list_classes { space: "draft" }`。每条的 `identity` 是已定的唯一键字段名；没有这个键就是还没定。还没定的，交给人——待确认面板①每行有「识别唯一键」按钮（数据试算 + 模型综合判断，证据行标「硬保证」= 有唯一索引 / 「软保证」= 仅数据验证），人确认才落地。**不要按字段名字猜键、不要自行 `set_identity`**（判据明文不按列名前后缀猜），除非人明确指示。
-2. **疑似重复**：`list_candidates`，读 `candidates`。每条是 `{ class_a, class_b, tendency, reason }`。`tendency` 是机器倾向（`same` / `overlap` / `stage` / `name_similar`），**不是定案**。
-3. **对人说清楚**：哪些对象唯一键你已经写上了、哪些还需要人看；有几对疑似重复，每对机器倾向是什么。然后请人到画布点「待确认」：先核对唯一键，再一对一对裁（类等价 / 部分重叠 / 生命周期 / 同形异义 / 跳过）。裁「类等价」或「生命周期」之后，跟被并掉的类还牵着的会改问留下的类，不是另起炉灶；你不要替人猜下一对该裁成哪一种。裁完点发布。
-4. **不要**调用或臆造 `decide` / `compute_overlap` / `propose_pair` / `publish`。交集率和定案只在人的卡上。转化关系也只有人裁「生命周期」才会立，不要用 `create_link` 去造。
+1. **定唯一键**：先分行——行是个体本身（或其时期）的类，取个体编号列；行是关于个体的记录（工单、卡）的类，取自己的单号列。数据试算用 `propose_key`（命中作参考：记录表身上指向他类的编号列命中越多，越证明它是引用、不做身份）。定了就 `edit_draft set_identity` 落草稿。
+2. **算交集**：`compute_overlap` 对候选对取硬证据（归一化后两端取值的集合重合）。0% 与 100% 都是硬结论的依据。
+3. **落判定**：按问题树走——是同一个概念（同一批个体或其时期）→ `decide` 合并（不同时期带时期参数）；不是同一个概念 → 有没有关联（一边的字段指向另一边的个体）？有 → 建链（`create_link`，match 用配对字段，链名起领域谓词）；没有 → 各自独立（`decide` 同形异义）。拿不准的留着不裁，人在画布上看得见。
+4. **对人说清楚**：你落了哪些判定、依据是什么（交集率、命中的字段）——留痕视图里每条都可查、可回滚。然后请人到画布审；发布由人点。
+5. **转化关系不归你造**：生命周期判定经 `decide` 落地时由引擎立（状态字段、转化关系、转化动作一套），不要用 `create_link` 去造。
 
 ## edit_draft 的 op 一览（一次调用一条，不收数组）
 
@@ -74,7 +79,7 @@ description: 通过 MCP 编辑 Ontos 本体画布的工作副本（草稿）：�
 | `remove_property` | `{ object, name }` | 删字段（被引用的拒） |
 | `update_property` | `{ object, name, new_name?, type?, values?, description? }` | 改字段 |
 | `set_identity` | `{ object, name }` | 设唯一键字段（name 空串 = 取消） |
-| `create_link` | `{ name, from, to, match: { from, to }, inverse?, card?, description? }` | 建关系；只收配对（match），**转化关系由裁决独占** |
+| `create_link` | `{ name, from, to, match: { from, to }, inverse?, card?, description? }` | 建关系；只收配对（match），**转化关系由生命周期判定独占**。`name` 必须是领域谓词——回答一个领域问题（如 on_equipment：维修的是哪台设备）；机器拼名（{a}_to_{b}）不收，起不出名字回问人 |
 | `delete_link` / `update_link` | `{ name }` / `{ name, new_name?, description?, inverse? }` | 删/改关系（被引用的拒） |
 | `import_objects` | `{ objects: { 类名: 类体 } }` | 整批导入新类；撞名整批拒。类体里的 `actions` / `axioms` 会被剥掉（动作走 `ontos-action`） |
 | `replace_object` | `{ name, def: 类体 }` | 整份替换**未锁定**的类；关系与摆位保留 |
@@ -98,7 +103,7 @@ propose_objects 得到 object_types
 2. 不把 `read_class` 的返回塞进 `replace_object.def`。
 3. 没挂来源的类可以整份替换（残缺生成靠这个补来源）；一换会盖掉人在这个类上加的字段——人已经在画布上改过就改用逐步操作。
 4. 不对已锁定类（含已经发布过的类）`delete_object` 再 `import_objects` 来绕过锁定（会拆关系）。引擎不拦这条路，靠这条红线和人点发布/放弃。
-5. 不调用、不臆造 `publish` / `discard` / `decide` / `compute_overlap` / `propose_pair` / `rollback` / `generate` / `save_layout` 工具。摆位（节点位置）不归你写。
+5. 不调用、不臆造 `publish` / `discard` / `rollback` / `save_layout` 工具——发布与放弃是人点；摆位（节点位置）不归你写。
 6. 不编造类名、字段名、连接名、表名——拿不准就 `list_classes space=draft` / `list_tables`。
 7. `query` / `run_action` / `propose_objects` / `edit_draft` / `list_tables` / `list_candidates` 不要传 `space`。
 8. 同一次会话里 `initialize` 只做一次；`notifications/*` 等不到响应是正常的。

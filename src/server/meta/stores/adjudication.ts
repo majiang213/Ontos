@@ -16,7 +16,11 @@ export class AdjudicationStore extends ConcernStore {
 
   async listDecisions(workspace: string): Promise<(DecisionRec & { id: number; created_at: string })[]> {
     const id = await this.wsId(workspace);
-    const rows = await this.datasource.all(`SELECT * FROM adj_decision WHERE workspace_id = ? ORDER BY id DESC`, [id]);
+    // 已放弃的裁决（version=-1，放弃草稿时的墓碑）不进清单——留痕即日志，草稿行与已发布行都算数
+    const rows = await this.datasource.all(
+      `SELECT * FROM adj_decision WHERE workspace_id = ? AND (version IS NULL OR version >= 1) ORDER BY id DESC`,
+      [id]
+    );
     return rows.map((r) => ({ ...r, evidence: r.evidence ? JSON.parse(String(r.evidence)) : undefined })) as never[];
   }
 
@@ -58,9 +62,9 @@ export class AdjudicationStore extends ConcernStore {
     const rows = await this.datasource.all(`SELECT shot_hash, proposals FROM adj_candidates WHERE workspace_id = ?`, [id]);
     if (rows.length === 0) return null;
     const raw = JSON.parse(String(rows[0].proposals));
-    // 旧行是 PairAdvice[]；新行是 { pairs, names }，名字用来分辨并类还是加了新对象
+    // 旧行是 PairAdvice[]；新行是 { pairs, names, hashes }，名字分辨并类还是加了新对象，哈希是增量召回的记忆
     if (Array.isArray(raw)) return { shot_hash: String(rows[0].shot_hash), proposals: raw };
-    return { shot_hash: String(rows[0].shot_hash), proposals: raw.pairs ?? [], class_names: raw.names };
+    return { shot_hash: String(rows[0].shot_hash), proposals: raw.pairs ?? [], class_names: raw.names, class_hashes: raw.hashes };
   }
 
   /** 写候选快照：每空间一行，方言 upsert（并发重算同一内容，败者覆盖同值，无害）。 */
@@ -73,6 +77,6 @@ export class AdjudicationStore extends ConcernStore {
       ["workspace_id"],
       ["shot_hash", "proposals"]
     );
-    await this.datasource.run(sql, [id, snap.shot_hash, JSON.stringify({ pairs: snap.proposals, names: snap.class_names ?? [] })]);
+    await this.datasource.run(sql, [id, snap.shot_hash, JSON.stringify({ pairs: snap.proposals, names: snap.class_names ?? [], hashes: snap.class_hashes ?? {} })]);
   }
 }

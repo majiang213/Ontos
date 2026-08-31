@@ -1,9 +1,9 @@
-// MCP 工具注册表 —— 十个工具的名字、说明、inputSchema、space 与令牌闸、handler 全部只在这里登记一份。
+// MCP 工具注册表 —— 十四个工具的名字、说明、inputSchema、space 与令牌闸、handler 全部只在这里登记一份。
 // tools/list 与 tools/call 都读这张表；加/改工具只动这一个文件。
 // inputSchema 一律从 zod 派生（z.toJSONSchema），不与运行期校验双轨手写。
 
 import { z } from "zod";
-import { actionRequestSchema, queryRequestSchema } from "@/server/schema/request";
+import { actionRequestSchema, decideRequestSchema, overlapRequestSchema, pairAdviceRequestSchema, proposeKeyRequestSchema, queryRequestSchema } from "@/server/schema/request";
 import { affectedNames, mcpDraftOpSchema } from "@/server/schema/ops";
 import type { OntologyConfig } from "@/server/schema/config";
 import type { EngineEnv } from "@/server/features/env";
@@ -11,8 +11,12 @@ import { query } from "@/server/features/query/query";
 import { runAction } from "@/server/features/action/action";
 import { DraftReject, EngineReject } from "@/server/errors";
 import { actionSkeletonFor } from "@/server/features/ontology/skeletons";
-import { proposeObjectsFor } from "@/server/infra/llm/llm";
+import { PROPOSE_SAMPLE_ROWS, proposeObjectsFor } from "@/server/infra/llm/llm";
 import { listCandidates } from "@/server/features/integrate/candidates";
+import { decide } from "@/server/features/integrate/decide";
+import { computeOverlap } from "@/server/features/integrate/overlap";
+import { proposeKeyFor } from "@/server/features/integrate/proposeKey";
+import { proposePair } from "@/server/features/integrate/advise";
 import { draftClassesPayload, listClasses, readClass, readClassDraft, search } from "@/server/features/ontology/views";
 import { listTables } from "@/server/infra/tables";
 import type { DriverRegistry } from "@/server/infra/registry";
@@ -68,7 +72,7 @@ const editDraftInputSchema = {
 
 const json = (s: z.ZodType) => z.toJSONSchema(s) as Record<string, unknown>;
 
-/** 顺序即 tools/list 顺序（测试钉死）：query → run_action → propose_* → 发现 → list_candidates → list_tables → edit_draft。 */
+/** 顺序即 tools/list 顺序（测试钉死）：query → run_action → propose_* → 发现 → 整合证据与判定 → list_tables → edit_draft。 */
 export const TOOLS: ToolDef[] = [
   {
     name: "query",
@@ -102,7 +106,7 @@ export const TOOLS: ToolDef[] = [
     handler: async (ctx, args) => {
       const tables = z.array(z.object({ connection: z.string(), table: z.string() })).nonempty().parse(args.tables ?? []);
       // 按连接分组内省 + 逐表定位 + 实现产草稿：组合原语（llm/llm.proposeObjectsFor，REST 同款）
-      const r = await proposeObjectsFor(ctx.env.llm(ctx.workspace), ctx.driver, tables, (m) => new EngineReject(m));
+      const r = await proposeObjectsFor(ctx.env.llm(ctx.workspace), ctx.driver, tables, (m) => new EngineReject(m), undefined, { sample: PROPOSE_SAMPLE_ROWS });
       if (r.code !== 200) throw new EngineReject(r.message); // 域拒绝经 Result 返回，按 MCP 约定转 -32000（route 的 catch 接）
       return { payload: { object_types: r.value } };
     },
@@ -155,12 +159,62 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "list_candidates",
-    description: "列出草稿里等着人裁的疑似重复（只看、不定案）。每条带两个类名、机器倾向和一句依据。入参无。不接受 space。",
+    description: "列出草稿里还没定案的疑似重复（只看；定案用 decide）。每条带两个类名、机器倾向和一句依据。入参无。不接受 space。",
     inputSchema: json(z.object({})),
     handler: async (ctx) => {
       const r = await listCandidates(ctx.env, ctx.workspace);
       if (r.code !== 200) throw new EngineReject(r.message);
       return { payload: { candidates: r.value } };
+    },
+  },
+  {
+    name: "propose_key",
+    description:
+      "对一个草稿类出唯一键建议（只建议、不落地；落地用 edit_draft 的 set_identity）。返回 { key, reason, hard, evidence }：hard 表示建议列带唯一约束或主键。入参：{ object }。不接受 space。",
+    inputSchema: json(proposeKeyRequestSchema),
+    handler: async (ctx, args) => {
+      const { object } = proposeKeyRequestSchema.parse(args);
+      const r = await proposeKeyFor(ctx.env, ctx.workspace, object);
+      if (r.code !== 200) throw new EngineReject(r.message);
+      return { payload: r.value };
+    },
+  },
+  {
+    name: "compute_overlap",
+    description:
+      "算两个类的交集率：两边同一批个体的比例，数据现算（归一化后取集合重合，只读采样、集合算完即弃）。入参：{ class_a, class_b }。不接受 space。",
+    inputSchema: json(overlapRequestSchema),
+    auth: true, // 触发两列全量扫 + 写计数，与 REST 同名路由同一把闸
+    handler: async (ctx, args) => {
+      const { class_a, class_b } = overlapRequestSchema.parse(args);
+      const r = await computeOverlap(ctx.env, ctx.workspace, class_a, class_b);
+      if (r.code !== 200) throw new EngineReject(r.message);
+      return { payload: r.value };
+    },
+  },
+  {
+    name: "propose_pair",
+    description:
+      "看过交集率之后的二轮倾向（只建议、不落地）。入参：{ class_a, class_b, rate, count_a, count_b, count_hit }，数字来自 compute_overlap 的结果。返回 { class_a, class_b, tendency, reason }。不接受 space。",
+    inputSchema: json(pairAdviceRequestSchema),
+    handler: async (ctx, args) => {
+      const { class_a, class_b, rate, count_a, count_b, count_hit } = pairAdviceRequestSchema.parse(args);
+      const r = await proposePair(ctx.env, ctx.workspace, class_a, class_b, { rate, count_a, count_b, count_hit });
+      if (r.code !== 200) throw new EngineReject(r.message);
+      return { payload: r.value };
+    },
+  },
+  {
+    name: "decide",
+    description:
+      "落一条判定结论并留痕（写草稿 + 裁决工作记录 adj_decision）：类等价 / 部分重叠 = 两类并成一个多源类（被并的类消亡）；生命周期 = 收成一类 + 时期派生 + 转化关系与动作（stage_names 给时期标识）；同形异义 = 两类都留下；跳过 = 配置不动。证据（compute_overlap 的数字）随入参进留痕。入参：{ class_a, class_b, verdict: same|overlap|stage|name_similar|skip, stage_names?, llm_advice?, evidence?, decided_by? }。发布、放弃、回滚没有工具——由人在画布上点。不接受 space。",
+    inputSchema: json(decideRequestSchema),
+    auth: true,
+    handler: async (ctx, args) => {
+      const input = decideRequestSchema.parse(args);
+      const r = await decide(ctx.env, { ...input, decided_by: input.decided_by ?? "Agent（MCP）" }, ctx.workspace);
+      if (r.code !== 200) throw new EngineReject(r.message);
+      return { payload: r.value };
     },
   },
   {

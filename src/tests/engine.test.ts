@@ -118,6 +118,41 @@ describe("M7 查询", () => {
 });
 
 describe("M8 动作", () => {
+  it("多段时期：验收写回跳过会把个体读成别的时期的源（处置档案不进验收行）", async () => {
+    // 附录 C 配置加处置源与第三段时期（在役→已处置），模拟走查世界
+    const cfg = configSchema.parse(structuredClone(JSON.parse(JSON.stringify(config))));
+    const eq = cfg.object_types.equipment;
+    (eq.sources ?? {}).asset_sys_disposal = { connection: "asset_sys", table: "disposal", pk: "record_no", fields: { serial_no: "sn" } };
+    eq.properties.asset_name ??= { type: "string", description: "资产名称" };
+    eq.properties.status.values!.push({ value: "scrapped", label: "已处置" });
+    eq.properties.status.derived = [
+      { when: { asset_sys_disposal: true }, value: "scrapped" },
+      ...((eq.properties.status.derived ?? []) as { when: { asset_sys_disposal: boolean }; value: string }[]),
+    ];
+    (cfg.object_types.equipment.actions ??= {}).convert_to_scrapped = {
+      description: "报废",
+      pre: { status: "in_service" },
+      effect: [{ link: "equipment_to_scrapped" }],
+    };
+    cfg.link_types.equipment_to_scrapped = { from: "equipment", to: "equipment", card: "1:1", transition: { property: "status", from: "in_service", to: "scrapped" } };
+
+    const driver = freshDriver();
+    // 验收：设备源、资产源各插一行；处置源会把个体读成已处置——跳过不插
+    const res = await runAction(env, cfg, driver, { action: "convert", object: "equipment", identity: "SN-40217" });
+    expect(res.ok).toBe(true);
+    const tables = res.projections.filter((p) => p.ok).map((p) => p.table).sort();
+    expect(tables).toEqual(["asset", "device", "warranty_card"]); // 没有 disposal
+    const after = await query(env, cfg, driver, { object: "equipment", identity: "SN-40217", properties: ["status"], filter: { status: "in_service" } });
+    expect(after.rows).toHaveLength(1);
+    // 报废：处置源插一行，个体读成已处置
+    const scrap = await runAction(env, cfg, driver, { action: "convert_to_scrapped", object: "equipment", identity: "SN-40085" });
+    expect(scrap.ok).toBe(true);
+    expect(scrap.projections.filter((p) => p.ok).map((p) => p.table)).toEqual(["disposal"]);
+    const gone = await query(env, cfg, driver, { object: "equipment", identity: "SN-40085", properties: ["status"], filter: { status: "scrapped" } });
+    expect(gone.rows).toHaveLength(1);
+  });
+
+
   it("验收一台在途设备：设备源、资产源各插一行，立一张保修卡；再读已在役、在保、转化成立", async () => {
     const driver = freshDriver();
     const res = await runAction(env, config, driver, { action: "convert", object: "equipment", identity: "SN-40217" });

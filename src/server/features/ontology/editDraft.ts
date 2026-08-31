@@ -37,7 +37,7 @@ export async function editDraft(env: EngineEnv, input: DraftOp, workspace: strin
       try {
         applyOp(state, input, published);
         // 每步操作后立即校验，不合法整体回退（含 import_objects 这类批量：fields 指向不存在字段的坏草稿不能攒到发布一刻才炸）。
-        // 草稿放开「有源无键」一条（allowKeyless）：键在待确认面板①定，发布闸拦——模型没猜到唯一键不能卡死导入。
+        // 草稿放开「有源无键」一条（allowKeyless）：键由 Agent 经 set_identity 补定，发布闸拦——模型没猜到唯一键不能卡死导入。
         validateFull(state.draft, { allowKeyless: true });
       } catch (e) {
         state.draft = backup;

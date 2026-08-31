@@ -176,24 +176,21 @@ export const classConclusionSchema = z
   .object({
     kind: z.enum(CLASS_CONCLUSION_KINDS),
     classes: z.array(z.string()).min(2),
-    shared: z.string().optional(), // 仅 overlap：上位对象名
+    shared: z.string().optional(), // 仅 overlap：历史草稿的上位对象名（ADR 0013 起新裁决不写 shared，改自动建 match 链）
   })
   .superRefine((row, ctx) => {
     if (new Set(row.classes).size !== row.classes.length) {
       ctx.addIssue({ code: "custom", message: MSG.cfgConclusionDupClass });
     }
-    if (row.kind === "overlap") {
-      if (!row.shared) ctx.addIssue({ code: "custom", message: MSG.cfgConclusionOverlapNoShared });
-      else if (row.classes.includes(row.shared)) ctx.addIssue({ code: "custom", message: MSG.cfgConclusionSharedInClasses });
-    } else if (row.shared !== undefined) {
+    if (row.kind !== "overlap" && row.shared !== undefined) {
       ctx.addIssue({ code: "custom", message: MSG.cfgConclusionSharedOnlyOverlap });
     }
   });
 export type ClassConclusion = z.infer<typeof classConclusionSchema>;
 
-/* ---------- 公共对象名（唯一出处） ----------
-   部分重叠立出的上位对象：shared_${a}_${b}。起名与判定都住 schema——infra/llm 的离线建议也要认它，
-   又不许 infra 上指 features，这里是最低的可共居层。 */
+/* ---------- 公共对象名与重叠链名（唯一出处） ----------
+   shared_*：部分重叠立出的上位对象，历史草稿渲染用（ADR 0013 起新裁决不再立，改自动建 match 链）。
+   起名与判定都住 schema——infra/llm 的离线建议也要认它，又不许 infra 上指 features，这里是最低的可共居层。 */
 const SHARED_PREFIX = "shared_";
 
 export function isSharedObjectName(name: string): boolean {

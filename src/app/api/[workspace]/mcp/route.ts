@@ -1,7 +1,7 @@
 // MCP 端点：JSON-RPC 2.0 信封（Streamable HTTP 形态），外部 Agent 经这里调 Ontos 的工具。
 // initialize 握手；tools/list 列工具；tools/call 执行。循环不做进 Ontos——外部 Agent 是调用方。
 // 约定：HTTP 一律 200，成败看信封；领域拒绝（EngineReject/DraftReject）用 error code -32000，参数形状不合法 -32602。
-// 十个工具本身登记在同目录 tools.ts 的注册表里（说明/inputSchema/space/令牌/handler 一份）——本文件只剩信封与调度。
+// 十四个工具本身登记在同目录 tools.ts 的注册表里（说明/inputSchema/space/令牌/handler 一份）——本文件只剩信封与调度。
 
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";

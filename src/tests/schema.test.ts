@@ -42,15 +42,17 @@ describe("configSchema", () => {
     };
     expect(() => configSchema.parse(cfg)).toThrow(/不能为空/);
   });
-  it("class_conclusions：部分重叠必须写 shared；同形异义不许写；classes 不得重复", () => {
+  it("class_conclusions：部分重叠可不写 shared（ADR 0013 新式）；shared 只有部分重叠能写；classes 不得重复", () => {
     const objects = {
       a: { kind: "thing" as const, properties: { n: { type: "string" as const } } },
       b: { kind: "thing" as const, properties: { n: { type: "string" as const } } },
       shared_a_b: { kind: "thing" as const, properties: { n: { type: "string" as const } } },
     };
-    expect(() =>
-      configSchema.parse({ object_types: objects, class_conclusions: [{ kind: "overlap", classes: ["a", "b"] }] })
-    ).toThrow(/必须写 shared/);
+    const ok = configSchema.parse({
+      object_types: objects,
+      class_conclusions: [{ kind: "overlap", classes: ["a", "b"] }],
+    });
+    expect(ok.class_conclusions).toEqual([{ kind: "overlap", classes: ["a", "b"] }]); // 新式：不写 shared，链在 link_types
     expect(() =>
       configSchema.parse({
         object_types: objects,
@@ -60,11 +62,11 @@ describe("configSchema", () => {
     expect(() =>
       configSchema.parse({ object_types: objects, class_conclusions: [{ kind: "homonym", classes: ["a", "a"] }] })
     ).toThrow(/有重复的类名/);
-    const ok = configSchema.parse({
+    const legacy = configSchema.parse({
       object_types: objects,
       class_conclusions: [{ kind: "overlap", classes: ["a", "b"], shared: "shared_a_b" }],
     });
-    expect(ok.class_conclusions).toEqual([{ kind: "overlap", classes: ["a", "b"], shared: "shared_a_b" }]);
+    expect(legacy.class_conclusions).toEqual([{ kind: "overlap", classes: ["a", "b"], shared: "shared_a_b" }]); // 历史草稿照旧合法
   });
   it("派生属性进 fields 是语义问题，schema 不抢话（归 validateSemantics）", () => {
     // fields 收任意属性名；派生拦截在引擎语义校验——分层各管一段，这里只钉结构

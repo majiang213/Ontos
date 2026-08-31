@@ -18,7 +18,7 @@ import { isSharedObjectName } from "../ontology/sharedName";
  *  3：入围改为有源∧未定案（同一库两张表可成对）；三问改口规则。
  *  4：建议带可执行方案（keep / stage），人只点关系类型。
  *  5：建议输入带枚举值域 enums——时期名判据（原样取现成取值，不新造词）；演示实现不再带时期名与先后。 */
-const ADVICE_RULES_VERSION = 5;
+const ADVICE_RULES_VERSION = 7; // 6→7：召回提示词加行的性质分流；增量重问（快照记忆 per-class 指纹）
 
 /** 投喂形状的哈希：类名 + 连接集 + 字段名 + 枚举值域（各自排序后序列化），前缀建议规则版本。快照的失效键——
  *  唯一键、字段类型、来源列对照、摆位都不在里头，改了不重算（它们不在模型的输入里；唯一键只是读时过滤清单，见 listCandidates）。
@@ -26,7 +26,7 @@ const ADVICE_RULES_VERSION = 5;
 function shotHash(classes: ClassShot[]): string {
   const canon = [
     ADVICE_RULES_VERSION,
-    ...classes.map((c) => [c.name, c.sources, [...c.fields].sort(), [...c.enums].sort((x, y) => (x.name < y.name ? -1 : 1))] as const).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)),
+    ...classes.map((c) => [c.name, c.kind, c.sources, [...c.fields].sort(), [...c.enums].sort((x, y) => (x.name < y.name ? -1 : 1))] as const).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)),
   ];
   return createHash("sha1").update(JSON.stringify(canon)).digest("hex");
 }
@@ -37,6 +37,7 @@ export function classShots(d: OntologyConfig): ClassShot[] {
     .filter(([, t]) => hasSources(t))
     .map(([name, t]) => ({
       name,
+      kind: t.kind,
       sources: [...connectionsOf(t)].sort(),
       fields: Object.keys(t.properties),
       enums: Object.entries(t.properties)
@@ -81,20 +82,30 @@ export async function pairProposals(env: EngineEnv, workspace: string = DEFAULT_
   const snap = await env.meta.readCandidateSnapshot(workspace);
   const byName = new Map(Object.entries(d.object_types));
   const none = new Set<string>();
+  const hashes = Object.fromEntries(classes.map((c) => [c.name, shotHash([c])]));
+  const changed = names.filter((n) => snap?.class_hashes?.[n] !== hashes[n]); // 指纹变过/新出现的类：只有它们参与的对需要重问
   let proposals: PairAdvice[];
   if (snap && snap.shot_hash === hash) {
-    proposals = snap.proposals;
+    proposals = snap.proposals; // 内容指纹全同：零模型调用、零新待定
   } else if (snap && nameChangeIsVerdict(snap.class_names, names)) {
     proposals = keepPairs(snap.proposals, byName, none);
     try {
-      await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
+      await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names, class_hashes: hashes });
     } catch {
       // 钉失败不拦答案：本次用还活着的对；下次若仍失配且不是并类，才会再猜
     }
   } else {
-    proposals = keepPairs((await env.llm(workspace).proposePairs(classes)).map(cleanAdvice), byName, none); // 出槽清一遍：stage 空壳不留快照
+    const fresh = keepPairs((await env.llm(workspace).proposePairs(classes)).map(cleanAdvice), byName, none); // 出槽清一遍：stage 空壳不留快照
+    // 增量收敛（不含变化类的提议——无论模型新提还是上一轮旧存——都不进清单）：
+    // 待定清单只回答「最近的改动带来了什么新问题」；这类配对在相关类下次变化时会按当前内容重新召回，不是永久丢失
+    const involvesChanged = (p: PairAdvice) => changed.includes(p.class_a) || changed.includes(p.class_b);
+    const merged = new Map<string, PairAdvice>();
+    for (const p of [...(snap?.proposals ?? []), ...fresh]) {
+      if (involvesChanged(p)) merged.set(pairKey(p.class_a, p.class_b), p);
+    }
+    proposals = [...merged.values()];
     try {
-      await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names });
+      await env.meta.writeCandidateSnapshot(workspace, { shot_hash: hash, proposals, class_names: names, class_hashes: hashes });
     } catch {
       // 快照写失败不拦答案：本次照常返回，下次读重算——快照只是省模型调用，不是事实源
     }
@@ -149,6 +160,7 @@ export async function pinCandidateSnapshot(
       shot_hash: shotHash(classes),
       proposals,
       class_names: classes.map((c) => c.name),
+      class_hashes: Object.fromEntries(classes.map((c) => [c.name, shotHash([c])])), // 指纹记忆随钉快照延续：判定后的小改只增量重问，不回退全量
     });
   } catch {
     // 钉失败不挡定案。listCandidates 若认出是并类/立公共对象，会沿用还活着的对，不把串外拉进来

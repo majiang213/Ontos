@@ -6,7 +6,25 @@ import OntologyCanvas from "./canvas/OntologyCanvas";
 import type { CanvasLink, CanvasObject } from "./canvas/layout";
 import type { BorderPin } from "./canvas/geometry";
 import Bezel from "./cards/Bezel";
-import DecisionPanel, { identityRows, type IdentifySuggestion } from "./cards/DecisionPanel";
+import DecisionLog from "./cards/DecisionLog";
+import PendingPairs from "./cards/PendingPairs";
+
+/** 裁决留痕的一行（/api/decide 的响应行）：画布徽章与留痕视图共用同一形状。 */
+interface AdjDecisionRow {
+  class_a: string;
+  class_b: string;
+  verdict: Verdict;
+  llm_advice?: string;
+  rate?: number;
+  evidence?: {
+    norm_rule?: string;
+    count_a?: number;
+    count_b?: number;
+    count_hit?: number;
+    rate?: number;
+    fields?: Record<string, string>;
+  };
+}
 import { ApiError, apiGet, apiPost, apiDel } from "./workspaceClient";
 import QuestionsCard from "./cards/QuestionsCard";
 import { LinkForm } from "./forms/forms";
@@ -15,13 +33,14 @@ import LinkDetailCard from "./cards/LinkDetailCard";
 import VersionsCard from "./cards/VersionsCard";
 import SchemaDrawer from "./cards/SchemaDrawer";
 import { effectSummary, formCompatible } from "./forms/actionView";
+import { decisionRowsOf } from "./canvas/sharedOrigin";
 import { externalToast, publishTitle, shouldCloseObjectCard, versionLabel, type OntologyResp } from "./ontFrame";
 import { sourceLabel } from "./sourceLabel";
 import { useRevWatcher } from "./revWatcher";
 import { columnTarget as columnTargetOf } from "../server/features/ontology/lineage";
 import { definedPinEnds } from "../server/features/ontology/canvasState";
 import { isUiStateOp } from "../server/schema/ops";
-import type { PairAdvice } from "../server/schema/verdict";
+import { Verdict, type PairAdvice } from "../server/schema/verdict";
 import { classStages, stageHint, stageSourceKeys } from "../server/features/ontology/stages";
 import type { ObjectType } from "../server/schema/config";
 
@@ -35,7 +54,7 @@ interface IntrospectResp {
 
 /** 浮卡（「同一时间只浮一张卡」的类型表达）：开一张 = 收其余，互斥由联合类型保证，不再手工维护。
  *  左上组（版本/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
- *  例外：底中待确认面板与底部数据源抽屉是独立区域，不进联合。 */
+ *  例外：底中留痕视图与底部数据源抽屉是独立区域，不进联合。 */
 type Card =
   | { kind: "versions" }
   | { kind: "questions" }
@@ -50,12 +69,30 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   const [card, setCard] = useState<Card>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairs, setPairs] = useState<PairAdvice[]>([]);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // 底中浮动卡（互斥）：留痕（已落定的判定与证据）/ 待定（召回提出、还没判定的对）——两件事两张卡
+  const [bottom, setBottom] = useState<"log" | "pending" | null>(null);
   const [publishing, setPublishing] = useState(false); // 发布/放弃/回滚同一把闸（mutate 原语）
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState<{ text: string; sticky: boolean } | null>(null);
   // 对象编辑卡与表结构抽屉已各自成 module（cards/ObjectCard、cards/SchemaDrawer）。
   // 页面只留：开哪张卡、卡内表单状态（ObjectCard 经 onFormState 报上来，写进 formStateRef 供守卫读）。
+  const [adjRows, setAdjRows] = useState<AdjDecisionRow[]>([]);
+  // 裁决留痕随 rev 重取（Agent 落判定会 bump rev）：草稿行与已发布行都进画布（留痕即日志），已放弃的行由元库排除。
+  useEffect(() => {
+    let dead = false;
+    apiGet<{ decisions: (Omit<AdjDecisionRow, "verdict"> & { verdict: string })[] }>("/api/decide")
+      .then((d) => {
+        // verdict 由引擎按枚举写入，JSON 边界在这里收口为 Verdict（全库唯一一次）
+        if (!dead) setAdjRows((d.decisions ?? []).map((r) => ({ ...r, verdict: r.verdict as Verdict })));
+      })
+      .catch(() => {
+        // 拉取失败置空由下一轮 rev 变化重拉（轮询寿命与页面同）；不 toast——留痕是附属视图，别拿网络抖动打扰人
+        if (!dead) setAdjRows([]);
+      });
+    return () => {
+      dead = true;
+    };
+  }, [ont?.rev]);
   const ontRef = useRef<OntologyResp | null>(null);
   const cardRef = useRef<Card>(null);
   const formStateRef = useRef<ObjectFormState>({ busy: false, actionForm: null, actionDirty: false });
@@ -115,23 +152,29 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
   // 表结构随连接变化：挂载拉一次，抽屉里接入成功后由 onConnected 再拉（抽屉原地更新）
   const reloadSchema = useCallback(() => apiGet<IntrospectResp>("/api/list_tables").then(setSchema).catch(netErr), [netErr]);
   // 疑似重复列表：每次从服务端按当前草稿重算（已裁的、被合并撤掉的都不再来）
+  const pairsLoadedOnce = useRef(false);
   const loadPairs = useCallback(async () => {
     const data = await apiGet<{ candidates?: PairAdvice[] }>("/api/list_candidates");
+    pairsLoadedOnce.current = true;
     setPairs(data.candidates ?? []);
   }, []);
-  /** 静默补拉待裁计数：失败吞掉——主写已落库，计数只是工具条上的提示，开面板时必重拉补上。 */
+  /** 静默补拉待定计数：失败吞掉——主写已落库，计数只是工具条上的提示，开待定卡时必重拉补上。 */
   const reloadPairs = useCallback(() => loadPairs().catch(() => {}), [loadPairs]);
-  // 首轮加载：本体、表结构、待裁计数（依赖已列全，只跑挂载这一次）
+  // 首轮加载：本体、表结构、待定计数（依赖已列全，只跑挂载这一次）
   useEffect(() => {
     refresh().catch(netErr); // 首轮加载失败也要说
     reloadSchema();
-    loadPairs().catch(netErr); // 工具条「待确认」计数的首轮
+    loadPairs().catch(netErr); // 工具条「待定」徽章计数的首轮
   }, [refresh, netErr, loadPairs, reloadSchema]);
 
-  // 开面板必重拉：面板与计数都要当前草稿算出的候选对（快照命中不过模型，这一下基本免费）
+  // 开待定卡必重拉：待定对要当前草稿算出的（快照命中不过模型，这一下基本免费）
   useEffect(() => {
-    if (panelOpen) loadPairs().catch(netErr);
-  }, [panelOpen, loadPairs, netErr]);
+    if (bottom === "pending") loadPairs().catch(netErr);
+  }, [bottom, loadPairs, netErr]);
+  // 待定清零时自动收卡（Agent 判完的瞬间卡跟着消失——没有就应该没有）；首拉完成前不误收
+  useEffect(() => {
+    if (bottom === "pending" && pairsLoadedOnce.current && pairs.length === 0) setBottom(null);
+  }, [bottom, pairs]);
 
   /** 本页一切写路径的唯一入口：写期间 localBusy 置位，轮询不动作也不 toast 成「外部改动」。
    *  finally 里一定放下——失败也放（写成功但 refresh 失败同样放，让下一轮轮询把已落地的草稿拉回来）。 */
@@ -165,51 +208,6 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         if (!isUiStateOp(String(body.op))) await reloadPairs();
       }),
     [withLocalWrite, refresh, reloadPairs]
-  );
-
-  /** 逐类「识别唯一键」：数据试算 + 模型综合判断（只建议不落地，面板预选、确认才 set_identity）。失败 toast 后返回 null。 */
-  const identifyKey = useCallback(
-    async (name: string): Promise<IdentifySuggestion | null> => {
-      try {
-        return await apiPost<IdentifySuggestion>("/api/propose_key", { object: name });
-      } catch (e) {
-        failToast(e);
-        return null;
-      }
-    },
-    [failToast]
-  );
-
-  /** 待确认面板「确认唯一键」：有改动的对象逐个 set_identity，落草稿后重拉疑似重复；失败返回 false（面板不解锁）。 */
-  const confirmIdentity = useCallback(
-    async (selections: Record<string, string>): Promise<boolean> => {
-      if (Object.values(selections).some((v) => !v)) return false; // 未设置的不落库：有源类取消唯一键会被校验闸拒
-      const changed = Object.entries(selections).filter(
-        ([name, v]) => v !== (ont?.object_types?.[name]?.identity ?? "")
-      );
-      const ok = await withLocalWrite(async () => {
-        for (const [name, v] of changed) {
-          await apiPost("/api/edit_draft", { op: "set_identity", object: name, name: v });
-        }
-        await refresh();
-        await loadPairs(); // 无改动也重拉：区块二要的是当前草稿算出的候选对
-      });
-      if (ok && changed.length > 0) showToast(`唯一键已定：${changed.map(([n, v]) => `${n} → ${v}`).join("、")}`);
-      return ok;
-    },
-    [ont, withLocalWrite, refresh, loadPairs, showToast]
-  );
-
-  /** 裁决一条后：重拉候选对（被合并撤掉的类，挂着它的条目随之消失）+ 刷新画布。空 msg = 不动草稿的结论。 */
-  const onPairDone = useCallback(
-    (msg: string) => {
-      if (msg) showToast(msg);
-      void withLocalWrite(async () => {
-        await loadPairs();
-        await refresh();
-      });
-    },
-    [showToast, withLocalWrite, loadPairs, refresh]
   );
 
   const saveLayout = useCallback(
@@ -277,14 +275,14 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
     );
 
   // Esc 关一切浮卡。输入控件里的 Esc 不拦——那边的 onBlur 自动保存语义不能被关卡吃掉。
-  // Esc：动作表单开着时不关整卡（表单的取消在 ObjectCard 内自闭环，含脏改动确认）；否则关浮卡 / 面板 / 抽屉
+  // Esc：动作表单开着时不关整卡（表单的取消在 ObjectCard 内自闭环，含脏改动确认）；否则关浮卡 / 留痕视图 / 抽屉
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select")) return;
       if (formStateRef.current.actionForm) return; // 表单开着：ObjectCard 的 Esc 自理（取消表单，不关卡）
       setCard(null);
-      setPanelOpen(false);
+      setBottom(null);
       setDrawerOpen(false);
     };
     window.addEventListener("keydown", onKey);
@@ -300,7 +298,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
       return await withLocalWrite(async () => {
         const { object_types } = await apiPost<{ object_types: Record<string, unknown> }>("/api/propose_objects", { tables });
         await apiPost("/api/edit_draft", { op: "import_objects", objects: object_types });
-        showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）。点「待确认」定唯一键`);
+        showToast(`已生成对象：${Object.keys(object_types).join("、")}（草稿，发布后生效）。唯一键和判定让 Agent 在对话里接着做`);
         setDrawerOpen(false);
         await refresh();
         await reloadPairs(); // 新对象上画布，疑似重复计数立刻就位
@@ -365,14 +363,8 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
 
   const sel: ObjectType | null = card?.kind === "object" ? ((ont?.object_types?.[card.name] as ObjectType | undefined) ?? null) : null;
 
-  // 「待确认」计数 = 疑似重复对数 + 没定唯一键的对象数（面板①②两段的活）；都没有不出牌
-  // ①的待办与面板同一把尺：identityRows 里 current 为空的行（全派生字段的对象面板不收，这里也不数）
-  const pendingIdentity = identityRows(ont?.object_types ?? {}, Object.keys(ont?.object_types ?? {})).filter((r) => !r.current).length;
-  const pendingCount = pairs.length + pendingIdentity;
-  const pendingTip = [
-    pairs.length > 0 ? `${pairs.length} 对疑似重复等着裁` : "",
-    pendingIdentity > 0 ? `${pendingIdentity} 个对象没定唯一键` : "",
-  ].filter(Boolean);
+  // 「留痕」待定计数 = 还没定案的疑似重复对数（唯一键是 Agent 建稿的一步，不再单列计数）；没有待定不出牌
+  const pendingCount = pairs.length;
 
   return (
     <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
@@ -400,22 +392,31 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         }}
         onBendChange={(name, bend) => void op({ op: "save_edge_bend", name, bend })} // 拉弯/拉直：静默存，与摆位同理
         onLayoutChange={saveLayout}
-        classConclusions={ont?.class_conclusions ?? []}
+        decisions={decisionRowsOf(ont?.class_conclusions, adjRows)}
       />
 
-      {/* 左上一条工具条：品牌和入口同一行，只放任务按钮（连接数据源在左下数据源抽屉里）。顺序是待确认 → 发布。 */}
+      {/* 左上一条工具条：品牌和入口同一行，只放任务按钮（连接数据源在左下数据源抽屉里）。顺序是留痕 → 待定 → 发布。 */}
       <div className="float-card float-tl dock">
         <Bezel pad="6px 8px">
           <div className="dock-bar">
             <div className="dock-brand">{brand}</div>
             <i className="dock-split" aria-hidden />
             <button
-              className={`btn${panelOpen ? " is-on" : ""}`}
-              title={pendingTip.length > 0 ? `还有 ${pendingTip.join("、")}` : "没有等着确认的事"}
-              onClick={() => setPanelOpen((v) => !v)}
+              className={`btn${bottom === "log" ? " is-on" : ""}`}
+              title="Agent 的判定与证据（只读）"
+              onClick={() => setBottom(bottom === "log" ? null : "log")}
             >
-              待确认{pendingCount > 0 && <span className="btn-badge">{pendingCount}</span>}
+              留痕
             </button>
+            {pendingCount > 0 && (
+              <button
+                className={`btn${bottom === "pending" ? " is-on" : ""}`}
+                title={`还有 ${pendingCount} 对等着 Agent 判定`}
+                onClick={() => setBottom(bottom === "pending" ? null : "pending")}
+              >
+                待定<span className="btn-badge">{pendingCount}</span>
+              </button>
+            )}
             <i className="dock-split" aria-hidden />
             <button className={`btn${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })}>
               {ont ? versionLabel(ont) : "已发布 v…"} ▾
@@ -468,16 +469,19 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
       {/* 验收问题集卡 */}
       {card?.kind === "questions" && <QuestionsCard onClose={() => setCard(null)} showToast={showToast} version={ont?.version} />}
 
-      {/* 底中：待确认面板（唯一键 → 疑似重复，两段解锁）。打开时优先于发布条——同一时间底中只有这一张卡；抽屉开着时面板上移避让，两者不互关 */}
-      {panelOpen && (
-        <DecisionPanel
-          rows={identityRows(ont?.object_types ?? {}, Object.keys(ont?.object_types ?? {}))}
-          pairs={pairs}
+      {/* 底中两张互斥卡：留痕（已落定的判定与证据）/ 待定（召回提出、还没判定的对）。抽屉开着时上移避让，两者不互关 */}
+      {bottom === "log" && (
+        <DecisionLog
+          rows={adjRows.map((r) => ({ classes: [r.class_a, r.class_b] as [string, string], verdict: r.verdict, note: r.llm_advice, rate: r.rate, count_hit: r.evidence?.count_hit, fields: r.evidence?.fields }))}
           drawerOpen={drawerOpen}
-          onConfirmIdentity={confirmIdentity}
-          onPairDone={onPairDone}
-          onIdentify={identifyKey}
-          onClose={() => setPanelOpen(false)}
+          onClose={() => setBottom(null)}
+        />
+      )}
+      {bottom === "pending" && (
+        <PendingPairs
+          pairs={pairs.map((p) => ({ classes: [p.class_a, p.class_b] as [string, string], tendency: p.tendency, reason: p.reason }))}
+          drawerOpen={drawerOpen}
+          onClose={() => setBottom(null)}
         />
       )}
 

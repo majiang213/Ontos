@@ -62,6 +62,21 @@ describe("元数据库", () => {
     expect(Object.keys(overlaps[0]).every((k) => !/value|set|ids/i.test(k))).toBe(true);
   });
 
+  it("裁决留痕的口径：发布回填、放弃墓碑不进清单（留痕即日志）", async () => {
+    await store.recordDecision(WORKSPACE, { class_a: "po_item", class_b: "device", source_a: "purchase", source_b: "device", verdict: Verdict.Stage, decided_by: "demo" });
+    await store.recordDecision(WORKSPACE, { class_a: "device", class_b: "asset", source_a: "device", source_b: "asset", verdict: Verdict.Same, decided_by: "demo" });
+    await store.backfillDecisionVersions(WORKSPACE, 1); // 发布回填：两条都绑上 v1
+    await store.recordDecision(WORKSPACE, { class_a: "repair", class_b: "equipment", source_a: "repair", source_b: "device", verdict: Verdict.NameSimilar, decided_by: "demo", version: 2 });
+    const list = await store.listDecisions(WORKSPACE);
+    expect(list.length).toBe(3); // 草稿行（无）+ v1 两行 + v2 一行：留痕即日志，发布不藏
+    await store.abandonPendingDecisions(WORKSPACE); // 没有未绑版本行：无人变墓碑
+    await store.recordDecision(WORKSPACE, { class_a: "x", class_b: "y", source_a: "a", source_b: "b", verdict: Verdict.Skip, decided_by: "demo" });
+    await store.abandonPendingDecisions(WORKSPACE); // 刚那条变墓碑（-1）
+    const after = await store.listDecisions(WORKSPACE);
+    expect(after.length).toBe(3); // 墓碑不进清单
+    expect(after.every((d) => d.class_a !== "x")).toBe(true);
+  });
+
   it("验收问题集：增删、状态随版本更新、失败原因落 detail", async () => {
     await store.addQuestion(WORKSPACE, "在役设备及其所属部门");
     await store.addQuestion(WORKSPACE, "现在还有多少在途设备");

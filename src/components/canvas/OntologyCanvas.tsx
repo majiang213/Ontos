@@ -1,4 +1,4 @@
-// 本体画布 —— 节点是对象类型；边是两个对象之间的关系，加上 class_conclusions 投影的由来边和同形异义芯片。
+// 本体画布 —— 节点是对象类型；边是两个对象之间的关系，加上 判定留痕 DecisionRow 投影的由来边和同形异义芯片。
 // 转化是对象上的阶段（节点阶段条），不画自己连自己。
 // 位置：已存摆位（草稿里的 layout）优先，其余走 dagre 分层；「整理布局」一键重排并记住。
 "use client";
@@ -28,8 +28,7 @@ import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
-import { SHARED_COLOR, homonymPeerMap, isSharedLink, overlapLinksOf, verdictBadgesOf } from "./sharedOrigin";
-import type { ClassConclusion } from "../../server/schema/config";
+import { DecisionRow, SHARED_COLOR, homonymPeerMap, isSharedLink, overlapEdgesOf, verdictBadgesOf } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import { beginSession, currentSession, dropSession, endSession, fireSession, trackSession, xyDragArgs } from "./connectSession";
@@ -158,7 +157,7 @@ export interface CanvasProps {
   onReconnectLink?: (name: string, from: string, to: string, moved?: { end: "source" | "target"; pin?: BorderPin }) => void; // 拖着已有边的一头改接到别的对象
   onBendChange?: (name: string, bend: Bend | null) => void; // 拖线身捏点拉弯/拉直
   onLayoutChange?: (positions: Record<string, { x: number; y: number }>, opts?: { clearBends?: boolean; clearPins?: boolean }) => void; // 摆位（拖动存 / 整理布局带清弯折钉点旗标）
-  classConclusions?: ClassConclusion[]; // 类与类结论（画布只投影，不猜）
+  decisions?: DecisionRow[]; // 判定留痕的统一行（画布只投影，不猜；历史行带 shared 画由来虚线）
 }
 
 export default function OntologyCanvas(props: CanvasProps) {
@@ -187,12 +186,12 @@ function edgeTone(l: CanvasLink, selectedLink?: string | null): { style: Edge["s
   };
 }
 
-function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange, classConclusions = [] }: CanvasProps) {
+function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSelect, onSelectLink, onConnectRequest, onReconnectLink, onBendChange, onLayoutChange, decisions = [] }: CanvasProps) {
   const viewLinks = useMemo(
-    () => [...links.filter((l) => l.kind !== "transition"), ...overlapLinksOf(classConclusions)],
-    [links, classConclusions]
+    () => [...links.filter((l) => l.kind !== "transition"), ...overlapEdgesOf(decisions)],
+    [links, decisions]
   );
-  const homonymPeers = useMemo(() => homonymPeerMap(classConclusions), [classConclusions]);
+  const homonymPeers = useMemo(() => homonymPeerMap(decisions), [decisions]);
   const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
   // 自动布局计算（整理布局与未存摆位的新节点共用同一份）：独立 memo——同形异义芯片悬停只重算节点列表，不重跑布局
@@ -210,7 +209,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
           ...o,
           label: o.name,
           homonyms: peers,
-          verdicts: verdictBadgesOf(classConclusions, o.name, { stage: Boolean(o.stages) }),
+          verdicts: verdictBadgesOf(decisions, o.name, { stage: Boolean(o.stages) }),
           homonymHot: homonymHot !== null && (o.name === homonymHot || peers.includes(homonymHot)),
           onHomonymHot: setHomonymHot,
         },

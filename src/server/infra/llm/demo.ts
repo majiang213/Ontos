@@ -11,15 +11,7 @@ import type { TableInfo } from "../../infra/driver";
 import { TEST_WORKSPACE } from "../../infra/workspace";
 import { VERDICT_LABELS, Verdict, type PairAdvice, type Tendency } from "../../schema/verdict";
 import { EngineReject, MSG } from "../../errors";
-import { prefixedTableName, type ClassShot, type KeyCandidateShot, type KeySuggestion, type Llm } from "./llm";
-/** 列类型 → 属性类型（唯一出处）：mysql 给 int(11)、pg 给 integer/timestamp，统一大写再判。
- *  allowDate=false 给破格进属性的主键用（主键当唯一键时只分 number/string）。 */
-function columnPropType(rawType: string, allowDate: boolean): "string" | "number" | "date" {
-  const t = rawType.toUpperCase();
-  if (t.includes("INT")) return "number";
-  if (allowDate && (t.includes("DATE") || t.includes("TIME"))) return "date";
-  return "string";
-}
+import { columnPropType, prefixedTableName, type ClassShot, type KeyCandidateShot, type KeySuggestion, type Llm } from "./llm";
 
 export class DemoLlm implements Llm {
   readonly name = "demo-演示实现";
@@ -52,7 +44,7 @@ export class DemoLlm implements Llm {
       }
       // 演示实现没有语义可读，不按列名形状猜唯一键（规则单源 identityHint：形状证明不了唯一，_no/_id 结尾同样可能是自增代理键）。
       // 只认硬信号：主键本身是业务编号（非整数，如 person_no / dept_id）、或带唯一约束的非整数列（如 sn UNIQUE）才当唯一键，破格进属性；
-      // 整数自增主键是表内行号，跨源对不上号，宁缺勿错——identity 留空，人到待确认面板①定。
+      // 整数自增主键是表内行号，跨源对不上号，宁缺勿错——identity 留空，键由 Agent 出键建议后落 set_identity。
       let identity: string | undefined;
       const idCol =
         pkCol && columnPropType(pkCol.type, false) !== "number"
@@ -67,7 +59,7 @@ export class DemoLlm implements Llm {
       // 前缀规则与落地前硬闸同一出处（slot.prefixedTableName）；仍撞的 _2 升级由硬闸（disambiguateClassNames）兜底
       const clsName = out[table.name] || taken.has(table.name) ? prefixedTableName(connection, table.name) : table.name;
       taken.add(clsName);
-      // 来源照挂：没猜到 identity 不丢映射，键在待确认面板①定（草稿允许有源无 identity，发布闸 cfgNoRowKey 拦）
+      // 来源照挂：没猜到 identity 不丢映射，键由 Agent 经 propose_key + set_identity 补定（草稿允许有源无 identity，发布闸 cfgNoRowKey 拦）
       out[clsName] = {
         kind: "thing",
         ...(identity ? { identity } : {}),
@@ -249,9 +241,9 @@ function reviseWithOverlap(
 const DEMO_PAIRS: { a: string; b: string; tendency: Tendency; reason: string }[] = [
   { a: "equipment", b: "it_device", tendency: Verdict.NameSimilar, reason: "都叫设备、都有序列号，但生产设备与办公设备不是同一种东西" },
   { a: "equipment", b: "instrument", tendency: Verdict.Overlap, reason: "点检对象覆盖部分设备（60 个点检对象里 40 台对得上设备序列号）" },
-  { a: "equipment", b: "warranty_card", tendency: Verdict.Overlap, reason: "都有序列号，但保修卡是设备的附属记录，不是设备本身——跳过也是一种答案" },
+  { a: "equipment", b: "warranty_card", tendency: Verdict.NameSimilar, reason: "保修卡是挂在设备上的凭证，不是设备本身——不比同类，落法是与设备建链（保修哪台，靠序列号配对）" },
   { a: "department", b: "oa_dept", tendency: Verdict.NameSimilar, reason: "都叫部门：台账按车间/产线、OA 按行政组织，两套编码没有交集" },
-  { a: "account", b: "card_holder", tendency: Verdict.Overlap, reason: "正式账号都有门禁卡（35/40），外包账号没有" },
+  { a: "account", b: "card_holder", tendency: Verdict.NameSimilar, reason: "门禁卡是挂在账号上的卡，不是账号本身——不比同类，落法是建「谁的卡」链（35 张卡按 holder 配对）" },
   { a: "repair", b: "it_ticket", tendency: Verdict.NameSimilar, reason: "都叫维修/报修，一个管生产设备、一个管办公设备" },
 ];
 

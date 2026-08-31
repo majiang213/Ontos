@@ -6,7 +6,7 @@ import { checkFilterOperands, walkFilter } from "../../schema/spec/filterSpec";
 import { checkActionValue, walkEffectItems, walkEffectValues, type CreateItem, type DeleteItem, type UpdateItem } from "../../schema/spec/actionSpec";
 import { MSG } from "../../errors";
 
-/** 草稿模式：允许有源类暂时没有认行依据（identity/key 未定，待确认面板①定）——只放过 cfgNoRowKey 这一条，
+/** 草稿模式：允许有源类暂时没有认行依据（identity/key 未定，Agent 定键前）——只放过 cfgNoRowKey 这一条，
  *  键已声明但 fields 缺映射等其余指称校验照查；发布路径不传（默认严格）。 */
 export interface ValidateOptions {
   allowKeyless?: boolean;
@@ -123,8 +123,9 @@ export function validateSemantics(config: OntologyConfig, opts: ValidateOptions 
     for (const name of row.classes) {
       if (!config.object_types[name]) throw new Error(MSG.cfgConclusionClassMissing(row.kind, name));
     }
-    if (row.kind === "overlap") {
-      if (!row.shared || !config.object_types[row.shared]) throw new Error(MSG.cfgConclusionSharedMissing(row.shared ?? ""));
+    if (row.kind === "overlap" && row.shared && !config.object_types[row.shared]) {
+      // 历史草稿的 overlap 带 shared：指向上位对象必须存在；新裁决（ADR 0013）不写 shared
+      throw new Error(MSG.cfgConclusionSharedMissing(row.shared));
     }
   }
   for (const [clsName, cls] of Object.entries(config.object_types)) {
