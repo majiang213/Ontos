@@ -450,8 +450,8 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         </Bezel>
       </div>
 
-      {/* 空画布引导：没有任何对象时告诉人两条起步路径 */}
-      {ont && objects.length === 0 && (
+      {/* 空画布引导：没有任何对象时指路；数据源抽屉开着时收起——它引导的正是开抽屉，开着时是重复噪音，还压抽屉上沿 */}
+      {ont && objects.length === 0 && !drawerOpen && (
         <div className="float-card" style={{ top: "40%", left: "50%", translate: "-50% -50%", width: 380 }}>
           <Bezel pad={18} coreStyle={{ fontSize: 13, lineHeight: 2, color: "var(--ink-2)" }}>
             画布还是空的。点左下角「数据源」接入源库，勾选表生成对象；发布后问数与动作就能看见。
@@ -486,7 +486,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
 
       {/* toast：瞬时反馈 */}
       {toast && (
-        <div className="float-card" style={{ top: 76, left: "50%", translate: "-50% 0", zIndex: 40, maxWidth: "min(760px, calc(100vw - 24px))" }}>
+        <div className="float-card" style={{ top: "var(--below-dock)", left: "50%", translate: "-50% 0", zIndex: 40, maxWidth: "min(760px, calc(100vw - 24px))" }}>
           <Bezel pad="8px 16px" coreStyle={{ fontSize: 13, display: "flex", alignItems: "center", gap: 12 }}>
             <span>{toast.text}</span>
             {toast.sticky && (

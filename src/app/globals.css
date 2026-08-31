@@ -50,6 +50,9 @@
   --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
   --t-fast: 180ms var(--ease-out);
   --t-med: 420ms var(--ease-out);
+
+  /* 布局：dock 工具条高度随内容与折行变化，跟在它下面的浮卡（版本历史 / toast 等）统一从这里取偏移，别再写魔法数 */
+  --below-dock: 84px;
 }
 
 * { box-sizing: border-box; }
@@ -551,7 +554,7 @@ input { font-family: inherit; outline: none; }
 .float-tl { top: 76px; left: 16px; }
 .float-tr { top: 76px; right: 16px; }
 .float-tl.dock { top: 14px; z-index: 30; }
-.float-tl.dock-follow { top: 68px; z-index: 30; }
+.float-tl.dock-follow { top: var(--below-dock); z-index: 30; }
 
 /* 左上工具条：一条，关卡用按钮、其余用文字，竖线隔开几组 */
 .dock { max-width: calc(100vw - 32px); }
@@ -838,9 +841,9 @@ select.ctl { background: var(--panel); }
   .workspace-trigger { max-width: 110px; }
 }
 @media (max-width: 768px) {
+  :root { --below-dock: 120px; } /* 窄屏 dock 折两行，底边 ≈106px（实测） */
   .float-tl, .float-tr { left: 12px; right: 12px; }
   .float-tr { top: auto; bottom: 76px; }
-  .float-tl.dock-follow { top: 120px; }
   .dock { max-width: calc(100vw - 24px); }
   .dock-split { display: none; }
   .node-shell { width: min(288px, calc(100vw - 40px)); }
