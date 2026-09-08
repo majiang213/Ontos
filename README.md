@@ -8,7 +8,6 @@ Ontos 是一个通用本体平台：从企业存量数据库里逆向出机器�
 
 > **当前进度**：完整闭环已在真实代码中通车——MySQL / PostgreSQL / SQLite 三种源库接入、十个 MCP 工具对外开放、测试全绿（`npm test`）。系统按生产形态建造：服务无状态可水平扩展、平台元库一行配置切换 MySQL / PostgreSQL、并发编辑有乐观锁保护。本文讲清三件事：它今天能做什么、为什么这样造、下一站去哪里。
 
-![Ontos 画布全景](docs/competition-2026/cover-canvas.png)
 
 ---
 
