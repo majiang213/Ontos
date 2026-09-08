@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Bezel from "./Bezel";
+import AutoTextarea from "./AutoTextarea";
 import { ActionForm } from "../forms/ActionForm";
 import { FieldForm, Section } from "./FieldForm";
 import { effectSummary, formCompatible, preSummary } from "../forms/actionView";
@@ -167,12 +168,11 @@ export default function ObjectCard({
           {states?.[name] === "new" ? "草稿，发布后生效" : states?.[name] === "modified" ? "有未发布改动" : "与已发布一致"}
         </div>
         <Section title="描述">
-          <textarea
+          <AutoTextarea
             key={name} /* 切换对象时强制重挂，否则旧描述会写进新对象 */
             className="ctl"
             defaultValue={sel.description ?? ""}
-            rows={1}
-            style={{ width: "100%" }}
+            minRows={1}
             onBlur={(e) => {
               // 跟挂载时的值比（defaultValue），不跟实时 sel 比——编辑期间的别处 refresh 不换基准
               if (e.target.value !== e.target.defaultValue) void op({ op: "update_object", name, description: e.target.value });

@@ -3,6 +3,7 @@
 "use client";
 
 import Bezel from "./Bezel";
+import AutoTextarea from "./AutoTextarea";
 
 export default function LinkDetailCard({
   name,
@@ -67,11 +68,10 @@ export default function LinkDetailCard({
           </label>
           <label>
             描述（可选）
-            <textarea
+            <AutoTextarea
               key={`desc:${name}`}
               className="ctl"
-              rows={2}
-              style={{ width: "100%" }}
+              minRows={2}
               defaultValue={link.description ?? ""}
               onBlur={async (e) => {
                 if (e.target.value === e.target.defaultValue) return;
