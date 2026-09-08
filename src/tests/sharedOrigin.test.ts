@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Verdict } from "../server/schema/verdict";
-import { DecisionRow, decisionRowsOf, homonymPeerMap, overlapEdgesOf, verdictBadgesOf } from "../components/canvas/sharedOrigin";
+import { DecisionRow, decisionRowsOf, homonymPeerMap, overlapEdgesOf, verdictChipsOf } from "../components/canvas/sharedOrigin";
 
 describe("decisionRowsOf（留痕统一行）", () => {
   it("adj 行原样进；历史 class_conclusions 行按 kind 映射（homonym→name_similar、overlap→overlap，带 shared）", () => {
@@ -56,32 +56,23 @@ describe("homonymPeerMap", () => {
   });
 });
 
-describe("verdictBadgesOf（节点头上的判定结论徽章）", () => {
+describe("verdictChipsOf（节点底部的判定结论芯片）", () => {
   const rows: DecisionRow[] = [
-    { classes: ["asset", "device"], verdict: Verdict.Overlap },
-    { classes: ["fund_account", "login_account"], verdict: Verdict.NameSimilar },
+    { classes: ["po_item", "device"], verdict: Verdict.Stage },
+    { classes: ["asset", "device"], verdict: Verdict.Same },
+    { classes: ["a", "device"], verdict: Verdict.NameSimilar },
+    { classes: ["po_item", "asset"], verdict: Verdict.Overlap, shared: "shared_po_item_asset" },
   ];
 
-  it("多源归并：原类标「部分重叠」，与同形异义不混淆", () => {
-    expect(verdictBadgesOf(rows, "asset")).toEqual(["部分重叠"]);
-    expect(verdictBadgesOf(rows, "fund_account")).toEqual(["同形异义"]);
+  it("芯片统一「结论 · 对方」：和谁一目了然；类等价对方已并入，不打芯片", () => {
+    expect(verdictChipsOf(rows, "device").map((c) => c.text)).toEqual(["生命周期 · po_item", "同形异义 · a"]);
+    expect(verdictChipsOf(rows, "asset").map((c) => c.text)).toEqual(["部分重叠 · po_item"]); // 历史行：源类也标部分重叠（旧世界正确渲染）
   });
 
-  it("历史 shared_ 上位对象标「公共对象」（旧结论兼容渲染），与新裁决的部分重叠徽章不混", () => {
-    const legacy: DecisionRow[] = [
-      { classes: ["po_item", "asset"], verdict: Verdict.Overlap, shared: "shared_po_item_asset" },
-    ];
-    expect(verdictBadgesOf(legacy, "shared_po_item_asset")).toEqual(["公共对象"]);
-    expect(verdictBadgesOf(legacy, "po_item")).toEqual(["部分重叠"]);
-  });
-
-  it("生命周期来自自环转化（调用方以 stage 告知），与同形异义可叠加", () => {
-    expect(verdictBadgesOf(rows, "fund_account", { stage: true })).toEqual(["生命周期", "同形异义"]);
-    expect(verdictBadgesOf(rows, "device", { stage: true })).toEqual(["部分重叠", "生命周期"]);
-  });
-
-  it("没被任何判定点名的对象不标；类等价合并后不留痕，本就不该有行", () => {
-    expect(verdictBadgesOf(rows, "person")).toEqual([]);
-    expect(verdictBadgesOf([], "asset", { stage: true })).toEqual(["生命周期"]);
+  it("虚线只标「两类都留下」（同形异义）；实心标结构变化（并类 / 时期）；历史 shared_ 标公共对象", () => {
+    const chips = verdictChipsOf(rows, "device");
+    expect(chips.every((c) => c.text.includes("生命周期") ? !c.dashed : true)).toBe(true);
+    expect(chips.find((c) => c.text.includes("同形异义"))!.dashed).toBe(true);
+    expect(verdictChipsOf(rows, "shared_po_item_asset").map((c) => c.text)).toEqual(["公共对象"]);
   });
 });

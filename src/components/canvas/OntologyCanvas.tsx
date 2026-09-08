@@ -28,7 +28,7 @@ import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
-import { DecisionRow, SHARED_COLOR, homonymPeerMap, isSharedLink, overlapEdgesOf, verdictBadgesOf } from "./sharedOrigin";
+import { DecisionRow, SHARED_COLOR, homonymPeerMap, isSharedLink, overlapEdgesOf, verdictChipsOf } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import { beginSession, currentSession, dropSession, endSession, fireSession, trackSession, xyDragArgs } from "./connectSession";
@@ -77,11 +77,7 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
               事物
             </span>
           )}
-          {(data.verdicts ?? []).map((v) => (
-            <span key={v} className="tag tag-ok" title={`裁决结论：${v}`}>
-              {v}
-            </span>
-          ))}
+
           {data.state === "new" && <span className="tag tag-warn">草稿</span>}
           {data.state === "modified" && <span className="tag tag-warn">待发布</span>}
         </div>
@@ -122,15 +118,19 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
           {data.actions.map((a) => (
             <span key={a} className="tag tag-ok">{a}</span>
           ))}
-          {(data.homonyms ?? []).map((peer) => (
+          {((data.judgmentChips as { text: string; dashed: boolean; peer: string | null }[]) ?? []).map((chip) => (
             <span
-              key={peer}
-              className="tag is-homonym"
-              title={`同形异义：不是同一种东西`}
-              onPointerEnter={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(peer)}
+              key={chip.text}
+              className={chip.dashed ? "tag is-homonym" : "tag tag-ok"}
+              title={
+                chip.dashed
+                  ? `同形异义：与 ${chip.peer} 不是同一种东西，两类都留下`
+                  : `判定结论：与 ${chip.peer} 的关系已落成（并成多源类或时期）`
+              }
+              onPointerEnter={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(chip.peer ?? "")}
               onPointerLeave={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(null)}
             >
-              同形异义 · {peer}
+              {chip.text}
             </span>
           ))}
         </div>
@@ -209,7 +209,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
           ...o,
           label: o.name,
           homonyms: peers,
-          verdicts: verdictBadgesOf(decisions, o.name, { stage: Boolean(o.stages) }),
+          judgmentChips: verdictChipsOf(decisions, o.name),
           homonymHot: homonymHot !== null && (o.name === homonymHot || peers.includes(homonymHot)),
           onHomonymHot: setHomonymHot,
         },
