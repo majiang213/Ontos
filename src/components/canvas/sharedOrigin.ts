@@ -66,14 +66,31 @@ export function homonymPeerMap(rows: DecisionRow[]): Map<string, string[]> {
   return m;
 }
 
-/** 节点头上的判定结论徽章：这个对象被哪些判定点名——多源归并（部分重叠）、同形异义、
- *  生命周期（带自环转化，调用方以 stage 告知）。类等价合并后不留痕，不标。 */
-export function verdictBadgesOf(rows: DecisionRow[], name: string, opts?: { stage?: boolean }): string[] {
-  const mine = rows.filter((r) => r.classes.includes(name) || r.shared === name);
-  const badges: string[] = [];
-  if (mine.some((r) => r.verdict === Verdict.Overlap && r.classes.includes(name))) badges.push(VERDICT_LABELS[Verdict.Overlap]);
-  if (mine.some((r) => r.shared === name)) badges.push("公共对象"); // 历史 shared_ 上位对象：由来虚线同源（ADR 0013 前的旧结论，兼容渲染）
-  if (opts?.stage) badges.push(VERDICT_LABELS[Verdict.Stage]);
-  if (mine.some((r) => r.verdict === Verdict.NameSimilar)) badges.push(VERDICT_LABELS[Verdict.NameSimilar]);
-  return badges;
+/** 节点底部的判定结论芯片（统一「结论 · 对方」格式）：谁、什么结论，一目了然。
+ *  类等价合并后对方已并入本类（来源芯片即它），不打芯片；历史 shared_ 上位对象标「公共对象」（兼容渲染）。 */
+export interface VerdictChip {
+  text: string;
+  dashed: boolean; // 虚线 = 两类都留下（同形异义）；实心 = 结构变了（并类 / 时期）
+  peer: string | null; // 对方类名（画布上存在时可悬停高亮）
+}
+
+export function verdictChipsOf(rows: DecisionRow[], name: string): VerdictChip[] {
+  const merged = new Map<string, VerdictChip>();
+  for (const r of rows) {
+    if (r.shared === name) {
+      merged.set("公共对象", { text: "公共对象", dashed: false, peer: null }); // 历史 shared_ 上位对象（ADR 0013 前的旧结论，兼容渲染）
+      continue;
+    }
+    if (!r.classes.includes(name) || r.verdict === Verdict.Same) continue; // 类等价：对方已并入本类，来源芯片即它
+    const other = r.classes.find((c) => c !== name);
+    if (!other) continue;
+    const label =
+      r.verdict === Verdict.Overlap
+        ? `部分重叠 · ${other}`
+        : r.verdict === Verdict.Stage
+          ? `生命周期 · ${other}`
+          : `同形异义 · ${other}`;
+    merged.set(label, { text: label, dashed: r.verdict === Verdict.NameSimilar, peer: other });
+  }
+  return [...merged.values()];
 }
