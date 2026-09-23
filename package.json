@@ -1,6 +1,7 @@
 {
   "name": "ontos",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "Ontos 平台（Next.js 前后端一体）：领域包 src/server/features/，种子配置 src/server/config/ontology.yaml，测试 src/tests/。",
   "engines": { "node": ">=22.5" },
   "scripts": {

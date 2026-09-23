@@ -200,3 +200,9 @@ flowchart LR
 | [docs/ontos-article.md](docs/ontos-article.md) | 概念展开与配置骨架：全部键定义、保留字、完整可发布示例 |
 | [docs/真模型端到端测试.md](docs/真模型端到端测试.md) | 设备一生 + 办公线的完整走查剧本 |
 | [AGENTS.md](AGENTS.md) | 仓库约定：用语、术语表、代码结构纪律 |
+
+## 许可证
+
+Copyright (C) 2026 MJ
+
+本项目以 [GNU Affero 通用公共许可证第 3 版](LICENSE)（AGPL-3.0-or-later）发布：任何人可自由使用、修改、再分发；但分发衍生作品或以网络服务形态对外提供时，必须按同一许可证提供完整源代码。
