@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import OntologyCanvas from "./canvas/OntologyCanvas";
-import { edgeEndLabel, type CanvasLink, type CanvasObject } from "./canvas/layout";
+import type { CanvasLink, CanvasObject } from "./canvas/layout";
 import type { BorderPin } from "./canvas/geometry";
 import Bezel from "./cards/Bezel";
 import DecisionLog from "./cards/DecisionLog";
@@ -54,6 +54,7 @@ interface IntrospectResp {
 
 /** 浮卡（「同一时间只浮一张卡」的类型表达）：开一张 = 收其余，互斥由联合类型保证，不再手工维护。
  *  左上组（版本/问题集）与右侧组（连线表单/关系详情/对象编辑）同一联合——开任何一张都收上一张。
+ *  工作空间下拉跟版本历史、验收问题集也互斥：开其中一个就收另外的（Home 上的两个收口）。
  *  例外：底中留痕视图与底部数据源抽屉是独立区域，不进联合。 */
 type Card =
   | { kind: "versions" }
@@ -63,10 +64,29 @@ type Card =
   | { kind: "object"; name: string } // 对象编辑卡
   | null;
 
-export default function CanvasPage({ brand }: { brand: ReactNode }) {
+export default function CanvasPage({
+  brand,
+  closeWorkspace,
+  bindCloseDockMenus,
+}: {
+  brand: ReactNode;
+  closeWorkspace?: () => void; // 打开版本历史或验收问题集时收起工作空间下拉
+  bindCloseDockMenus?: (fn: () => void) => void; // 打开工作空间下拉时收起版本历史和验收问题集
+}) {
   const [ont, setOnt] = useState<OntologyResp | null>(null);
   const [schema, setSchema] = useState<IntrospectResp | null>(null);
   const [card, setCard] = useState<Card>(null);
+  // 工作空间下拉开着时，把版本历史和验收问题集收掉。对象编辑卡不在这列。
+  useEffect(() => {
+    bindCloseDockMenus?.(() => {
+      setCard((c) => (c?.kind === "versions" || c?.kind === "questions" ? null : c));
+    });
+    return () => bindCloseDockMenus?.(() => {});
+  }, [bindCloseDockMenus]);
+  const openDockMenu = (next: Card) => {
+    closeWorkspace?.();
+    setCard(next);
+  };
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pairs, setPairs] = useState<PairAdvice[]>([]);
   // 底中浮动卡（互斥）：留痕（已落定的判定与证据）/ 待定（召回提出、还没判定的对）——两件事两张卡
@@ -350,8 +370,8 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         to: l.to,
         inverse: l.inverse,
         description: l.description,
-        fromLabel: edgeEndLabel(ont?.object_types?.[l.from]?.description, l.from),
-        toLabel: edgeEndLabel(ont?.object_types?.[l.to]?.description, l.to),
+        fromLabel: l.from,
+        toLabel: l.to,
         kind: l.transition ? "transition" : "match",
       })),
     [ont]
@@ -418,7 +438,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
               </button>
             )}
             <i className="dock-split" aria-hidden />
-            <button className={`btn${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => setCard(card?.kind === "versions" ? null : { kind: "versions" })}>
+            <button className={`btn${card?.kind === "versions" ? " is-on" : ""}`} title="版本历史" onClick={() => (card?.kind === "versions" ? setCard(null) : openDockMenu({ kind: "versions" }))}>
               {ont ? versionLabel(ont) : "已发布 v…"} ▾
             </button>
             {ont?.dirty ? (
@@ -447,7 +467,7 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
               <button className="btn" onClick={() => showToast("没有未发布的改动——画布和已发布一致")}>发布</button>
             )}
             <i className="dock-split" aria-hidden />
-            <button className={`btn${card?.kind === "questions" ? " is-on" : ""}`} onClick={() => setCard(card?.kind === "questions" ? null : { kind: "questions" })}>验收问题集</button>
+            <button className={`btn${card?.kind === "questions" ? " is-on" : ""}`} onClick={() => (card?.kind === "questions" ? setCard(null) : openDockMenu({ kind: "questions" }))}>验收问题集</button>
           </div>
         </Bezel>
       </div>

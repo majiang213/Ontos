@@ -3,7 +3,7 @@
 // 初始空间由服务端从 cookie 读出传入（首屏即上次用的空间）；这里只校验它还在（空间已删则回 default）。
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { CaretDown, Check, Plus } from "@phosphor-icons/react";
 import CanvasPage from "@/components/CanvasPage";
 import { apiGet, apiPost, rememberWorkspace, setWorkspace } from "@/components/workspaceClient";
@@ -33,16 +33,30 @@ export default function Home({ initialWorkspace }: { initialWorkspace: string })
       }
     })();
   }, [initialWorkspace, switchWorkspace]);
+  // 左上角菜单互斥：工作空间下拉与画布上的版本历史、验收问题集同一时间只开一个。两边各留一个收口。
+  const closeWorkspace = useRef<() => void>(() => {});
+  const closeDockMenus = useRef<() => void>(() => {});
+  const bindCloseDockMenus = useCallback((fn: () => void) => {
+    closeDockMenus.current = fn;
+  }, []);
   const brand: ReactNode = (
     <>
       <span className="nav-brand">Ontos</span>
-      <WorkspaceSwitcher workspace={workspace} onChange={switchWorkspace} workspaces={workspaces} onWorkspaces={setWorkspaces} listError={listError} />
+      <WorkspaceSwitcher
+        workspace={workspace}
+        onChange={switchWorkspace}
+        workspaces={workspaces}
+        onWorkspaces={setWorkspaces}
+        listError={listError}
+        closeRef={closeWorkspace}
+        onOpen={() => closeDockMenus.current()}
+      />
     </>
   );
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* 切空间按 key 重挂（换一整套配置与历史）；品牌和入口在左上同一条工具条 */}
-      <CanvasPage key={workspace} brand={brand} />
+      <CanvasPage key={workspace} brand={brand} closeWorkspace={() => closeWorkspace.current()} bindCloseDockMenus={bindCloseDockMenus} />
     </div>
   );
 }
@@ -55,12 +69,16 @@ function WorkspaceSwitcher({
   workspaces,
   onWorkspaces,
   listError,
+  closeRef,
+  onOpen,
 }: {
   workspace: string;
   onChange: (w: string) => void;
   workspaces: string[];
   onWorkspaces: (list: string[]) => void;
   listError: string | null;
+  closeRef?: MutableRefObject<() => void>;
+  onOpen?: () => void; // 打开前先收起工具条上的其他菜单
 }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -72,6 +90,7 @@ function WorkspaceSwitcher({
     setName("");
     setError(null);
   };
+  if (closeRef) closeRef.current = () => { if (open) close(); };
   const create = async () => {
     if (!name.trim()) return;
     try {
@@ -86,7 +105,17 @@ function WorkspaceSwitcher({
   };
   return (
     <span style={{ position: "relative" }}>
-      <button className="workspace-trigger" title="工作空间" onClick={() => (open ? close() : setOpen(true))}>
+      <button
+        className="workspace-trigger"
+        title="工作空间"
+        onClick={() => {
+          if (open) close();
+          else {
+            onOpen?.(); // 先收版本历史、验收问题集
+            setOpen(true);
+          }
+        }}
+      >
         {workspace}
         <CaretDown size={12} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform var(--t-fast)" }} />
       </button>

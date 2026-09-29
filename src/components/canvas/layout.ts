@@ -36,15 +36,9 @@ export interface CanvasLink {
   to: string;
   inverse?: string;
   description?: string; // 线身主标注：关系的白话描述（没有才退英文名）
-  fromLabel?: string; // 线身副标注：源对象的短名（edgeEndLabel）
-  toLabel?: string; // 线身副标注：目标对象的短名
+  fromLabel?: string; // 线身副标注：源对象名
+  toLabel?: string; // 线身副标注：目标对象名
   kind: "match" | "transition" | "shared"; // match/transition = 配置关系；shared = 公共对象由来，只活在画布
-}
-
-/** 线端副标注的短名：描述里第一个停顿之前的那段。整段描述会把线标签铺进相邻卡片。没有这段时用对象名。 */
-export function edgeEndLabel(description: string | undefined, name: string): string {
-  const head = (description ?? "").trim().split(/[（(，,。；;]/)[0]?.trim() ?? "";
-  return head || name;
 }
 
 /** 节点尺寸的未测量回退（唯一出处）：dagre 分层、FloatingEdge.rectOf、OntologyCanvas 的 obstacles 构造共用。 */
@@ -77,7 +71,7 @@ function wrappedLines(text: string): number {
   return lines;
 }
 
-function tagRowCount(labels: string[]): number {
+function tagRowCount(labels: readonly string[]): number {
   if (labels.length === 0) return 0;
   let rows = 1;
   let used = 0;
@@ -92,18 +86,18 @@ function tagRowCount(labels: string[]): number {
 }
 
 /** 底部标签的文案，与节点渲染同一套：阶段已写进 hint 的来源不再进标签，判定芯片算在内。 */
-export function layoutTagLabels(o: CanvasObject, chips: { text: string }[] = []): string[] {
+export function layoutTagLabels(o: CanvasObject): string[] {
   const stageKeys = new Set(o.stages?.sourceKeys ?? []);
-  return [...o.sources.filter((s) => !stageKeys.has(s.key)).map((s) => s.label), ...o.actions, ...chips.map((c) => c.text)];
+  return [...o.sources.filter((s) => !stageKeys.has(s.key)).map((s) => s.label), ...o.actions];
 }
 
 /** 节点高度按内容估算，与渲染的 CSS 对齐：题头、描述换行、属性行、阶段行、标签折行。
  *  估算偏矮时整理布局会把下一行排进这张卡片。宁可比实测略高。 */
-export function estimateHeight(o: CanvasObject): number {
+export function estimateHeight(o: CanvasObject, tagLabels: readonly string[] = o.tagLabels ?? layoutTagLabels(o)): number {
   const descLines = wrappedLines(o.description ?? "");
   const props = o.properties.filter((p) => p.name !== o.stages?.property).length;
   const stages = o.stages?.items.length ?? 0;
-  const rows = tagRowCount(o.tagLabels ?? layoutTagLabels(o));
+  const rows = tagRowCount(tagLabels);
   return 60
     + (descLines ? 8 + 17 * descLines : 0)
     + (props ? 6 + 21 * props : 0)
@@ -177,11 +171,11 @@ interface RankInfo {
 }
 
 /** dagre 分层（Sugiyama）：层号是列，纵坐标把一条边的两端尽量拉平，同一列里不同的边上下错开。 */
-function ranksOf(objects: CanvasObject[], realLinks: CanvasLink[], connected: Set<string>): RankInfo {
+function ranksOf(objects: CanvasObject[], realLinks: CanvasLink[], connected: Set<string>, heightOf: Map<string, number>): RankInfo {
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: "LR", nodesep: GAP_Y, ranksep: GAP_X });
   g.setDefaultEdgeLabel(() => ({}));
-  for (const o of objects) if (connected.has(o.name)) g.setNode(o.name, { width: NODE_W, height: estimateHeight(o) });
+  for (const o of objects) if (connected.has(o.name)) g.setNode(o.name, { width: NODE_W, height: heightOf.get(o.name) ?? NODE_H });
   for (const l of realLinks) g.setEdge(l.to, l.from);
   dagre.layout(g);
   const rankOf = new Map<string, number>();
@@ -234,10 +228,27 @@ function placeByRanks(objects: CanvasObject[], info: RankInfo, heightOf: Map<str
   for (const o of objects) {
     const rank = info.rankOf.get(o.name);
     if (rank === undefined) continue;
-    const h = heightOf.get(o.name) ?? NODE_H;
-    const y = (info.centerY.get(o.name) ?? 0) - h / 2;
-    placed.push({ name: o.name, x: xOf(compact.get(rank) ?? 0), y });
-    if (y < minY) minY = y;
+    const height = heightOf.get(o.name) ?? NODE_H;
+    const top = (info.centerY.get(o.name) ?? 0) - height / 2;
+    placed.push({ name: o.name, x: xOf(compact.get(rank) ?? 0), y: top });
+    if (top < minY) minY = top;
+  }
+  const byColumn = new Map<number, typeof placed>();
+  for (const p of placed) {
+    const column = p.x;
+    const columnItems = byColumn.get(column) ?? [];
+    columnItems.push(p);
+    byColumn.set(column, columnItems);
+  }
+  for (const columnItems of byColumn.values()) {
+    columnItems.sort((a, b) => a.y - b.y || a.name.localeCompare(b.name));
+    let previousBottom = -Infinity;
+    for (const p of columnItems) {
+      const height = heightOf.get(p.name) ?? NODE_H;
+      if (p.y < previousBottom + GAP_Y) p.y = previousBottom + GAP_Y;
+      previousBottom = p.y + height;
+      if (p.y < minY) minY = p.y;
+    }
   }
   for (const p of placed) out.set(p.name, { x: p.x, y: p.y - minY });
   const isolates = objects.filter((o) => !info.rankOf.has(o.name)).map((o) => o.name);
@@ -262,30 +273,34 @@ export function edgeBlocked(l: CanvasLink, pos: Map<string, { x: number; y: numb
   return !directCurve(s, t, others);
 }
 
-export function layoutObjects(objects: CanvasObject[], links: CanvasLink[]): Map<string, { x: number; y: number }> {
+export function layoutObjects(
+  objects: CanvasObject[],
+  links: CanvasLink[],
+  tagLabelsByObject: ReadonlyMap<string, readonly string[]> = new Map(),
+): Map<string, { x: number; y: number }> {
+  const heightOf = new Map(objects.map((o) => [o.name, estimateHeight(o, tagLabelsByObject.get(o.name))] as const));
   // 自环不参与分层（只画线）；「有线」只认两端不同的边
   const realLinks = links.filter((l) => l.from !== l.to);
   const connected = new Set(realLinks.flatMap((l) => [l.from, l.to]));
-  if (connected.size === 0) return masonry(objects.map((o) => o.name), 0, new Map(objects.map((o) => [o.name, estimateHeight(o)])), GAP_X);
+  if (connected.size === 0) return masonry(objects.map((o) => o.name), 0, heightOf, GAP_X);
 
-  const info = ranksOf(objects, realLinks, connected);
-  const heightOf = new Map(objects.map((o) => [o.name, estimateHeight(o)] as const));
+  const info = ranksOf(objects, realLinks, connected, heightOf);
   const columns = new Set(info.rankOf.values()).size;
   const baseGaps = labelGaps(realLinks, info.rankOf, columns);
   const blockedCount = (pos: Map<string, { x: number; y: number }>) => realLinks.filter((l) => edgeBlocked(l, pos, heightOf)).length;
-  const withExtra = (extra: number) => baseGaps.map((g) => g + extra);
+  const withExtra = (extraColumnGap: number) => baseGaps.map((gap) => gap + extraColumnGap);
 
   // 缝宽先够放下说明。还有边穿节点就在这个宽度上再加；加宽不再减少穿节点就停。
-  let extra = 0;
-  let best = placeByRanks(objects, info, heightOf, withExtra(extra));
-  let bestBlocked = blockedCount(best);
-  for (let pass = 0; pass < MAX_PASSES && bestBlocked > 0; pass++) {
-    extra += WIDEN_X;
-    const pos = placeByRanks(objects, info, heightOf, withExtra(extra));
-    const blocked = blockedCount(pos);
-    if (blocked >= bestBlocked) break;
+  let extraColumnGap = 0;
+  let best = placeByRanks(objects, info, heightOf, withExtra(extraColumnGap));
+  let blockedEdgeCount = blockedCount(best);
+  for (let pass = 0; pass < MAX_PASSES && blockedEdgeCount > 0; pass++) {
+    extraColumnGap += WIDEN_X;
+    const pos = placeByRanks(objects, info, heightOf, withExtra(extraColumnGap));
+    const nextBlockedEdgeCount = blockedCount(pos);
+    if (nextBlockedEdgeCount >= blockedEdgeCount) break;
     best = pos;
-    bestBlocked = blocked;
+    blockedEdgeCount = nextBlockedEdgeCount;
   }
   return best;
 }

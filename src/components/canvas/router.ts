@@ -1,5 +1,5 @@
 // 正交绕障路由 —— 线不从任何节点身上穿过：端点先沿所在边的法线探出一小段（桩），
-// 再在网格上 A* 绕开所有节点（含端点自己的节点）。失败兜底为直连（总比对穿强）。
+// 再在网格上 A* 绕开所有节点（含端点自己的节点）。无路可达时保留正交点列，交由平滑层降档。
 // 弯折捏点是曲线的必经途经点：首选过点的双段曲线，兜底路由里也恰好途经（过点弧）——捏点始终压在线上，线全程无折角。
 // Pt / Side 的几何词表在 ./geometry（单源），本文件只留路由域类型。
 
@@ -21,7 +21,7 @@ const INFLATE = 8; // 节点外扩：线与节点身保持距离
 const STUB = 18; // 端点沿法线探出的桩长（> INFLATE，桩尖必在障碍区外）
 const MARGIN = 200; // 路由域外沿
 const TURN = 3; // 转弯罚（直行一步代价 1）：压锯齿
-const MAX_POPS = 60000; // A* 上限，超了兜底直连
+const MAX_POPS = 60000; // A* 上限，超出后报告无路可达
 
 const NORMAL: Record<Side, Pt> = { top: { x: 0, y: -1 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
 
@@ -46,18 +46,89 @@ function inflateOf(obstacles: RouteRect[]): RouteRect[] {
   return obstacles.map((r) => ({ x: r.x - INFLATE, y: r.y - INFLATE, w: r.w + INFLATE * 2, h: r.h + INFLATE * 2 }));
 }
 
-/** 直接贝塞尔：切向沿两端法线，手柄长随间距取——零弯的单波 S 线，首选形态。
- *  采样密度随曲线长度自适应（目标间距 12px，上限 160 点）——定值 24 点对长边会漏检节点角。 */
+const SAG_MIN = 24; // 弦中点偏离直线的下限。两端齐平时控制点落在弦上，贝塞尔会退化成直线
+const SAG_MAX = 52;
+
+/** 弦中点要拱起的距离：短边也看得见，长边不拱成半圆。 */
+function sagOf(dist: number): number {
+  return Math.min(SAG_MAX, Math.max(SAG_MIN, dist * 0.22));
+}
+
+/** 采样点到弦的最大距离。 */
+function chordDeviation(samples: Pt[], a: Pt, b: Pt): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  let max = 0;
+  for (const p of samples) {
+    const dist = Math.abs((p.x - a.x) * dy - (p.y - a.y) * dx) / len;
+    if (dist > max) max = dist;
+  }
+  return max;
+}
+
+/** 拱向：弦的顺时针法线。从左往右的边朝屏幕上方拱，平行的边拱向一致。 */
+function sagNormal(a: Pt, b: Pt): Pt {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dy / len, y: -dx / len };
+}
+
+function cubicPath(
+  from: RouteEnd,
+  c1: Pt,
+  c2: Pt,
+  to: RouteEnd,
+  inflated: RouteRect[],
+): { d: string; mid: Pt; dir: Pt; samples: Pt[] } | null {
+  const dist = Math.hypot(to.point.x - from.point.x, to.point.y - from.point.y);
+  const samples: Pt[] = [from.point];
+  const n = Math.min(Math.max(Math.ceil(dist / 12), 24), 160);
+  for (let i = 1; i <= n; i++) samples.push(cubic(from.point, c1, c2, to.point, i / n));
+  if (!clearOf(samples, inflated, from.point, to.point)) return null;
+  return {
+    d: `M ${from.point.x},${from.point.y} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${to.point.x},${to.point.y}`,
+    samples,
+    ...polylineMidDir(samples),
+  };
+}
+
+/** 直接贝塞尔：切向沿两端法线，手柄长随间距取。
+ *  两端齐平（整理布局把边的端点排到同一高度）时控制点落在弦上，曲线退化成直线——把两个控制点一起往法线外推，弦中点拱起。拱出会穿进别的节点就换一侧、再收一档；仍穿才留原来的直线。 */
 function directBezier(from: RouteEnd, to: RouteEnd, k: number, inflated: RouteRect[]): { d: string; mid: Pt; dir: Pt } | null {
   const dist = Math.hypot(to.point.x - from.point.x, to.point.y - from.point.y);
   const h = Math.min(Math.max(dist * k, 30), 220);
   const c1 = { x: from.point.x + NORMAL[from.side].x * h, y: from.point.y + NORMAL[from.side].y * h };
   const c2 = { x: to.point.x + NORMAL[to.side].x * h, y: to.point.y + NORMAL[to.side].y * h };
-  const samples: Pt[] = [from.point];
-  const n = Math.min(Math.max(Math.ceil(dist / 12), 24), 160);
-  for (let i = 1; i <= n; i++) samples.push(cubic(from.point, c1, c2, to.point, i / n));
-  if (!clearOf(samples, inflated, from.point, to.point)) return null;
-  return { d: `M ${from.point.x},${from.point.y} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${to.point.x},${to.point.y}`, ...polylineMidDir(samples) };
+  const sag = sagOf(dist);
+  const natural = cubicPath(from, c1, c2, to, inflated);
+  if (natural && chordDeviation(natural.samples, from.point, to.point) >= sag) {
+    const { samples: _samples, ...rest } = natural;
+    return rest;
+  }
+  const nrm = sagNormal(from.point, to.point);
+  const bows = sag > SAG_MIN + 4 ? [sag, SAG_MIN] : [sag];
+  for (const sign of [1, -1]) {
+    for (const bow of bows) {
+      const s = (bow / 0.75) * sign; // t=0.5 的偏移是控制点偏移的 0.75
+      const bowed = cubicPath(
+        from,
+        { x: c1.x + nrm.x * s, y: c1.y + nrm.y * s },
+        { x: c2.x + nrm.x * s, y: c2.y + nrm.y * s },
+        to,
+        inflated,
+      );
+      if (!bowed || chordDeviation(bowed.samples, from.point, to.point) < SAG_MIN - 1) continue;
+      const { samples: _samples, ...rest } = bowed;
+      return rest;
+    }
+  }
+  if (natural) {
+    const { samples: _samples, ...rest } = natural;
+    return rest;
+  }
+  return null;
 }
 
 /** 直接贝塞尔档：能走返回曲线、不能走返回 null。edgePath 与布局验收（layout.ts 的走廊迭代）共用这一判定——
@@ -352,9 +423,26 @@ function roundedTier(pts: Pt[], via = -1, cap = 14): SmoothSeg {
   return { d, samples };
 }
 
+/** 只有两个点的退路：二次曲线拱起。两侧都穿进节点才留直线。 */
+function sagSegment(a: Pt, b: Pt, obstacles: RouteRect[]): { d: string; mid: Pt; dir: Pt } {
+  const inflated = inflateOf(obstacles);
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  const nrm = sagNormal(a, b);
+  const bow = sagOf(dist);
+  for (const sign of [1, -1]) {
+    const c = { x: (a.x + b.x) / 2 + nrm.x * sign * bow * 2, y: (a.y + b.y) / 2 + nrm.y * sign * bow * 2 };
+    const samples: Pt[] = [a];
+    for (let k = 1; k <= 24; k++) samples.push(quad(a, c, b, k / 24));
+    if (!clearOf(samples, inflated, a, b)) continue;
+    return { d: `M ${a.x},${a.y} Q ${c.x},${c.y} ${b.x},${b.y}`, ...polylineMidDir(samples) };
+  }
+  return { d: `M ${a.x},${a.y} L ${b.x},${b.y}`, ...polylineMidDir([a, b]) };
+}
+
 /** 折线 → 平滑曲线。四档：流动曲线（拐角扫大弧）→ 大圆角（40px）→ 小圆角（14px）→ 原折线；逐档采样验障（外扩与免检同 clearOf 一处），碰节点就降档。
  *  via = 必经顶点下标（弯折捏点）：曲线恰好途经它，验障时捏点周围与端点桩区同口径免检。 */
 function smoothPath(pts: Pt[], obstacles: RouteRect[], via = -1): { d: string; mid: Pt; dir: Pt } {
+  if (pts.length === 2) return sagSegment(pts[0], pts[1], obstacles);
   const inflated = inflateOf(obstacles);
   const first = pts[0];
   const last = pts[pts.length - 1];
@@ -364,7 +452,7 @@ function smoothPath(pts: Pt[], obstacles: RouteRect[], via = -1): { d: string; m
     const { d, samples } = tier(pts, via);
     if (clearOf(samples, inflated, first, last, viaPt)) return { d: `M ${pts[0].x},${pts[0].y} ${d}`, ...polylineMidDir(samples) };
   }
-  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x},${p.y}`).join(" "); // 路由出来的折线本身必通
+  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x},${p.y}`).join(" ");
   return { d, ...polylineMidDir(pts) };
 }
 
@@ -376,16 +464,26 @@ export function routeOrthogonal(from: RouteEnd, to: RouteEnd, obstacles: RouteRe
   const pts = [s, t, ...(waypoint ? [waypoint] : [])];
   const xs = pts.map((p) => p.x).concat(inflated.map((r) => r.x), inflated.map((r) => r.x + r.w));
   const ys = pts.map((p) => p.y).concat(inflated.map((r) => r.y), inflated.map((r) => r.y + r.h));
-  const x0 = Math.min(...xs) - MARGIN;
-  const y0 = Math.min(...ys) - MARGIN;
-  const bounds = { x0, y0, cols: Math.ceil((Math.max(...xs) + MARGIN - x0) / CELL), rows: Math.ceil((Math.max(...ys) + MARGIN - y0) / CELL) };
-  // 每腿剔掉含起讫点的矩形：讫点若是用户手拖的途经点（可能拖进了节点怀里），线必须能到；桩尖本就在外扩区沿
-  const contains = (r: RouteRect, p: Pt) => p.x > r.x && p.x < r.x + r.w && p.y > r.y && p.y < r.y + r.h;
-  const legBlocked = (a: Pt, b: Pt) => inflated.filter((r) => !contains(r, a) && !contains(r, b));
-  const legs = waypoint
-    ? [astar(s, waypoint, legBlocked(s, waypoint), bounds), astar(waypoint, t, legBlocked(waypoint, t), bounds)]
-    : [astar(s, t, legBlocked(s, t), bounds)];
-  if (legs.some((l) => l === null)) return [from.point, to.point]; // 兜不住就直连
+  const legBlocked = (a: Pt, b: Pt) => inflated.filter((r) => {
+    const near = (p: Pt) => p.x >= r.x - STUB && p.x <= r.x + r.w + STUB && p.y >= r.y - STUB && p.y <= r.y + r.h + STUB;
+    return !near(a) && !near(b);
+  });
+  const routeWithMargin = (margin: number) => {
+    const x0 = Math.min(...xs) - margin;
+    const y0 = Math.min(...ys) - margin;
+    const bounds = { x0, y0, cols: Math.ceil((Math.max(...xs) + margin - x0) / CELL), rows: Math.ceil((Math.max(...ys) + margin - y0) / CELL) };
+    return waypoint
+      ? [astar(s, waypoint, legBlocked(s, waypoint), bounds), astar(waypoint, t, legBlocked(waypoint, t), bounds)]
+      : [astar(s, t, legBlocked(s, t), bounds)];
+  };
+  let legs = routeWithMargin(MARGIN);
+  for (const margin of [MARGIN * 4, MARGIN * 16]) {
+    if (!legs.some((leg) => leg === null)) break;
+    legs = routeWithMargin(margin);
+  }
+  if (legs.some((l) => l === null)) {
+    throw new Error("route unavailable");
+  }
   const mid = legs.map((leg, i) => {
     const exact = i === 0 ? s : waypoint!;
     const exactEnd = i === legs.length - 1 ? t : waypoint!;
@@ -395,7 +493,7 @@ export function routeOrthogonal(from: RouteEnd, to: RouteEnd, obstacles: RouteRe
   return compress([from.point, ...joined.slice(1, -1), to.point]);
 }
 
-/** 边的最终路径：默认一条直接贝塞尔（零弯单波，切向垂直边框，手柄长按间距取档）；采样撞节点才退到正交绕障+过点平滑。
+/** 边的最终路径：默认一条直接贝塞尔（切向垂直边框，手柄长按间距取档；两端齐平也拱起）；采样撞节点才退到正交绕障+过点平滑。
  *  弯折捏点 = 曲线必经的途经点：先试过途经点的双段曲线（捏点压在线上），不行再绕障、必经顶点走过点弧——捏点始终压线、全程无折角。
  *  最终边（FloatingEdge）与连线预览（FloatingConnectionLine）共用这一处——拖的时候什么样、松手就什么样。 */
 export function edgePath(from: RouteEnd, to: RouteEnd, obstacles: RouteRect[], waypoint?: Pt | null): { d: string; mid: Pt; dir: Pt } {

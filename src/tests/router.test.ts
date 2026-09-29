@@ -56,10 +56,20 @@ describe("directCurve（直接贝塞尔档：edgePath 与布局验收共用同�
     expect(c!.d).toContain(" C ");
   });
 
-  it("中间有节点挡路时返回 null：edgePath 正是以此为界退绕障（同输入同结论）", () => {
-    const obstacles = [A, BLOCK, C];
+  it("挡路的节点高过拱起时返回 null：edgePath 正是以此为界退绕障（同输入同结论）", () => {
+    const wall: RouteRect = { x: 200, y: -80, w: 100, h: 220 }; // 两侧的拱都过不去
+    const obstacles = [A, wall, C];
     expect(directCurve(from, to, obstacles)).toBeNull();
     expect(edgePath(from, to, obstacles).d).toMatch(/ Q | L /); // 退路一致：直接档走不了，绕障登场
+  });
+
+  it("弦上的矮节点拱得过：直接曲线从节点外侧绕开，不退成折线", () => {
+    const obstacles = [A, BLOCK, C];
+    const c = directCurve(from, to, obstacles);
+    expect(c).not.toBeNull();
+    const pts = samplePath(c!.d);
+    expect(crosses(pts, inflated(obstacles), from.point, to.point)).toBe(false);
+    expect(edgePath(from, to, obstacles).d).toContain(" C ");
   });
 
   it("能直连时 edgePath 必走直接贝塞尔：布局验收说「能走」渲染就真的是曲线", () => {
@@ -72,7 +82,16 @@ describe("directCurve（直接贝塞尔档：edgePath 与布局验收共用同�
 describe("edgePath（边的最终路径）", () => {
   it("无障碍时首选直接贝塞尔（单波 S 线）", () => {
     const { d } = edgePath(from, to, []);
-    expect(d).toContain(" C "); // 零弯的三次贝塞尔，不走正交
+    expect(d).toContain(" C "); // 三次贝塞尔，不走正交
+  });
+
+  it("两端齐平仍拱起：整理布局把端点排到同一高度时，线不再退化成直线", () => {
+    const { d } = edgePath(from, to, []);
+    const dev = chordDeviation(samplePath(d), from.point, to.point);
+    expect(dev).toBeGreaterThanOrEqual(24);
+    const down: RouteEnd = { point: { x: 40, y: 0 }, side: "bottom" };
+    const up: RouteEnd = { point: { x: 40, y: 220 }, side: "top" };
+    expect(chordDeviation(samplePath(edgePath(down, up, []).d), down.point, up.point)).toBeGreaterThanOrEqual(24);
   });
   it("有障碍时退回绕障，平滑后仍不穿节点", () => {
     const obstacles = [A, BLOCK, C];
@@ -87,6 +106,13 @@ describe("edgePath（边的最终路径）", () => {
     expect(crosses(pts, inflated(obstacles), from.point, to.point)).toBe(false);
   });
 });
+
+function chordDeviation(pts: Pt[], a: Pt, b: Pt): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return pts.reduce((max, p) => Math.max(max, Math.abs((p.x - a.x) * dy - (p.y - a.y) * dx) / len), 0);
+}
 
 function nearestOf(pts: Pt[], p: Pt): number {
   return Math.min(...pts.map((q) => Math.hypot(q.x - p.x, q.y - p.y)));

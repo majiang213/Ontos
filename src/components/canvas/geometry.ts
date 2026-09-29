@@ -102,7 +102,7 @@ export function closestBorderPin(r: Rect, p: Pt): { pin: BorderPin; point: Pt } 
 
 /** 线标签让位（FloatingEdge 用）：标签放在曲线中点沿法线推 base 处，压到节点就先沿法线推档、
  *  还撞（标签侧边被节点挡住，法线推不动）就沿切向让位；返回第一档不撞任何节点（外扩 4px）的
- *  { push（法线推距）, shift（切向让位）}；全撞退回 base（布局已保证走廊，罕见）。 */
+ *  { push（法线推距）, shift（切向让位）}；全撞退回原始线中点。 */
 export function labelPushOf(
   mid: Pt,
   dir: Pt,
@@ -119,7 +119,7 @@ export function labelPushOf(
     const ly = cy - labelSize.h / 2;
     return !rects.some((r) => lx < r.x + r.w && lx + labelSize.w > r.x && ly < r.y + r.h && ly + labelSize.h > r.y);
   };
-  const fallback = { push: base, shift: 0 };
+  const fallback = { push: 0, shift: 0 };
   const mags = [base, base + 24, base + 48, base + 80, base + 120, base + 170];
   const near = [0, -40, 40, -80, 80];
   // 先沿法线往外推（测试钉住的顺序），近处切向只让一小步。

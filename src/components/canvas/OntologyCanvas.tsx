@@ -194,11 +194,14 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
   const homonymPeers = useMemo(() => homonymPeerMap(decisions), [decisions]);
   const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
-  // 自动布局（整理布局与未存摆位的新节点共用）：独立 memo——同形异义芯片悬停只重算节点列表，不重跑布局。
-  // 高度把判定芯片算进去：芯片不在对象定义里，漏掉的话整理布局按偏矮的卡片排，下一行叠上来。
+  // 自动布局（整理布局与未存摆位的新节点共用）：判定芯片属于节点内容，统一由节点高度估算处理。
+  const layoutTagLabelsByObject = useMemo(
+    () => new Map(objects.map((o) => [o.name, [...layoutTagLabels(o), ...verdictChipsOf(decisions, o.name).map((chip) => chip.text)]] as const)),
+    [objects, decisions]
+  );
   const computedPos = useMemo(
-    () => layoutObjects(objects.map((o) => ({ ...o, tagLabels: layoutTagLabels(o, verdictChipsOf(decisions, o.name)) })), viewLinks),
-    [objects, viewLinks, decisions]
+    () => layoutObjects(objects, viewLinks, layoutTagLabelsByObject),
+    [objects, viewLinks, layoutTagLabelsByObject]
   );
 
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {

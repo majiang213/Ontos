@@ -483,7 +483,7 @@ input { font-family: inherit; outline: none; }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
 }
 .dock-brand {
   display: flex;
@@ -500,6 +500,10 @@ input { font-family: inherit; outline: none; }
   flex-shrink: 0;
 }
 .dock-bar .btn { padding: 6px 12px; font-size: 12px; display: inline-flex; align-items: center; } /* inline-flex：计数牌与文字垂直对齐 */
+/* 工具条按钮压在工作空间下拉的幕布上面：点另一个菜单是切换，不是先被幕布收掉 */
+.dock-bar .btn,
+.dock-bar .btn-cta,
+.workspace-trigger { position: relative; z-index: 41; }
 .dock-bar .btn-cta { font-size: 12px; padding: 6px 12px; }
 .float-bc { bottom: 18px; left: 50%; translate: -50% 0; max-width: calc(100vw - 24px); } /* translate 属性居中，与 transform 入场动画解耦；窄屏不溢出 */
 
@@ -711,4 +715,6 @@ select.ctl { background: var(--panel); }
   .decide-obj { width: 108px; }
   .decide-note { padding-left: 118px; }
   .decide-head, .decide-body { padding-left: 12px; padding-right: 12px; }
+  /* dock 的入场 transform 把 fixed 关在工具条里，100% 就是整条的底边：列表从两行按钮下面拉开 */
+  .workspace-menu { position: fixed; top: calc(100% + 6px); left: 8px; }
 }

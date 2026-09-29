@@ -82,4 +82,8 @@ describe("labelPushOf（线标签让位：压到节点就推档，法线推不�
     const obstacle = { x: 25, y: -100, w: 15, h: 200 };
     expect(labelPushOf({ x: 0, y: 0 }, { x: 1, y: 0 }, label, [obstacle], 30)).toEqual({ push: 30, shift: -40 }); // 法线推多少 x 都不动，切向 -40 净
   });
+  it("所有候选位置都被挡住时回到线中点", () => {
+    const obstacle = { x: -1000, y: -1000, w: 2000, h: 2000 };
+    expect(labelPushOf({ x: 0, y: 0 }, { x: 1, y: 0 }, label, [obstacle], 30)).toEqual({ push: 0, shift: 0 });
+  });
 });

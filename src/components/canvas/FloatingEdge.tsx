@@ -95,7 +95,10 @@ function NormalEdge({ id, source, target, label, style, markerEnd, interactionWi
   useLayoutEffect(() => {
     const el = labelRef.current;
     if (!el) return;
-    const { push: p, shift } = labelPushOf(curveMid, { x: dirX, y: dirY }, { w: el.offsetWidth, h: el.offsetHeight }, d.obstacles ?? [], 12);
+    const nx = -dirY;
+    const ny = dirX;
+    const support = (Math.abs(nx) * el.offsetWidth + Math.abs(ny) * el.offsetHeight) / 2;
+    const { push: p, shift } = labelPushOf(curveMid, { x: dirX, y: dirY }, { w: el.offsetWidth, h: el.offsetHeight }, d.obstacles ?? [], support + 10);
     setPush(p);
     setShift(shift);
   }, [dirX, dirY, label, curveMid.x, curveMid.y, d.obstacles]);
@@ -164,7 +167,7 @@ function NormalEdge({ id, source, target, label, style, markerEnd, interactionWi
       setDragBend(null);
       if (!g) return;
       const final = { dx: g.base.dx + (ev.clientX - g.startX) / g.zoom, dy: g.base.dy + (ev.clientY - g.startY) / g.zoom };
-      // 拖回中点附近（10 个 flow 单位内）吸附成直线
+      // 拖回中点附近（10 个 flow 单位内）松开手动弯折，回到默认的弧
       const straight = Math.hypot(final.dx, final.dy) < 10;
       d.commitBend?.(id, straight ? null : final);
     };

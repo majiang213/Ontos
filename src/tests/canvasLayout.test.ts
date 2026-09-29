@@ -1,7 +1,7 @@
 // 画布自动布局：无关系时天际线网格；有关系时 dagre 分成左右列（被引用方在左），没连线的排到右侧。
 // ADR 0011：奇数列错开，排完用路由当验收器——0 条线穿节点、取直率达标，列距只在确实少穿节点时加宽。
 import { describe, expect, it } from "vitest";
-import { CARD_W, edgeBlocked, edgeEndLabel, edgeLabelBox, estimateHeight, layoutObjects, NODE_W, type CanvasLink, type CanvasObject } from "../components/canvas/layout";
+import { CARD_W, edgeBlocked, edgeLabelBox, estimateHeight, layoutObjects, NODE_W, type CanvasLink, type CanvasObject } from "../components/canvas/layout";
 import { edgePath, type RouteEnd } from "../components/canvas/router";
 import { floatingEndsOf, labelPushOf } from "../components/canvas/geometry";
 import { countEdgeCrossings, crosses, samplePath } from "./canvasPath";
@@ -47,17 +47,6 @@ function richMeasured(name: string, descLen: number, props: number, stages: numb
     ...(stages ? { stages: { property: "status", items: Array.from({ length: stages }, (_, i) => ({ value: `v${i}`, hint: "h" })), sourceKeys: [] } } : {}),
   };
 }
-
-describe("edgeEndLabel（线端副标注只取短名）", () => {
-  it("停在括号、逗号、句号之前；没有描述时用对象名", () => {
-    expect(edgeEndLabel("设备（同一台设备的采购在途、台账在役、转固资产与点检视角，sn 对齐）", "equipment")).toBe("设备");
-    expect(edgeEndLabel("OA系统用户账号，包含登录名、姓名、邮箱、所属部门及是否外包信息", "account")).toBe("OA系统用户账号");
-    expect(edgeEndLabel("门禁卡持有人，每张门禁卡对应一个持卡人记录。", "card_holder")).toBe("门禁卡持有人");
-    expect(edgeEndLabel("设备保修卡，记录设备保修到期时间。", "warranty_card")).toBe("设备保修卡");
-    expect(edgeEndLabel(undefined, "room")).toBe("room");
-    expect(edgeEndLabel("   ", "room")).toBe("room");
-  });
-});
 
 /** 内容更接近真实节点（多字段/来源/动作/描述/阶段），让估算高度走完整分支。 */
 const richObj = (name: string, o: { props?: number; sources?: number; actions?: number; stages?: number; description?: boolean } = {}): CanvasObject => ({
@@ -187,6 +176,16 @@ describe("有关系布局（dagre 分层）", () => {
     expect(pos.get("shared_asset_device")!.x).toBeLessThan(pos.get("device")!.x);
   });
 
+  it("同列不同高度的对象保持卡片间距", () => {
+    const objects = [richObj("parent", { props: 12, description: true }), obj("child1"), obj("child2")];
+    const pos = layoutObjects(objects, [
+      { name: "l1", from: "child1", to: "parent", kind: "match" },
+      { name: "l2", from: "child2", to: "parent", kind: "match" },
+    ]);
+    const children = ["child1", "child2"].map((name) => ({ name, y: pos.get(name)!.y })).sort((a, b) => a.y - b.y);
+    expect(children[1].y - children[0].y).toBeGreaterThanOrEqual(estimateHeight(obj("child1")) + 32);
+  });
+
   it("高卡片不把没连线的对象挤到自己脚下", () => {
     const tall = richObj("equipment", { props: 12, sources: 5, actions: 3, stages: 3, description: true });
     const pos = layoutObjects([tall, obj("card"), obj("loose")], [{ name: "covered_by", from: "equipment", to: "card", kind: "match" }]);
@@ -264,6 +263,7 @@ describe("边感知布局（ADR 0011：0 穿节点、取直率、折行纪律）
     expect(pos.get("parent")!.x).toBeLessThan(pos.get("c1")!.x);
     const ys = children.map((c) => pos.get(c)!.y).sort((a, b) => a - b);
     expect(new Set(ys).size).toBe(children.length); // 列内上下分开，不叠在同一个点
+    for (let i = 1; i < ys.length; i++) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(estimateHeight(obj(children[i - 1])) + 32);
   });
 
   it("没连线的对象排到右侧：5 个排成 3 列，不垫在连线部分下面", () => {
@@ -299,7 +299,7 @@ describe("边感知布局（ADR 0011：0 穿节点、取直率、折行纪律）
       expect(crosses(samplePath(d), rects, from.point, to.point), `${l.name} 的路径穿过节点`).toBe(false);
       return { id: l.name, samples: samplePath(d) };
     });
-    console.info(`[观察] 密集图交叉数：${countEdgeCrossings(paths)} / ${links.length} 条边`);
+    expect(countEdgeCrossings(paths)).toBeLessThanOrEqual(links.length);
   });
 
   it("长链：10 个对象逐列向左，相邻全直连、0 穿节点", () => {
