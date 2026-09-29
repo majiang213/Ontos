@@ -26,7 +26,7 @@ import {
 } from "@xyflow/react";
 import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
-import { layoutObjects, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
+import { layoutObjects, layoutTagLabels, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import FloatingEdge from "./FloatingEdge";
 import { DecisionRow, SHARED_COLOR, homonymPeerMap, isSharedLink, overlapEdgesOf, verdictChipsOf } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
@@ -194,8 +194,12 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
   const homonymPeers = useMemo(() => homonymPeerMap(decisions), [decisions]);
   const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
-  // 自动布局计算（整理布局与未存摆位的新节点共用同一份）：独立 memo——同形异义芯片悬停只重算节点列表，不重跑布局
-  const computedPos = useMemo(() => layoutObjects(objects, viewLinks), [objects, viewLinks]);
+  // 自动布局（整理布局与未存摆位的新节点共用）：独立 memo——同形异义芯片悬停只重算节点列表，不重跑布局。
+  // 高度把判定芯片算进去：芯片不在对象定义里，漏掉的话整理布局按偏矮的卡片排，下一行叠上来。
+  const computedPos = useMemo(
+    () => layoutObjects(objects.map((o) => ({ ...o, tagLabels: layoutTagLabels(o, verdictChipsOf(decisions, o.name)) })), viewLinks),
+    [objects, viewLinks, decisions]
+  );
 
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = computedPos;
@@ -297,7 +301,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
           className: shared ? "is-shared" : undefined,
           source: l.from,
           target: l.to,
-          // 由来边只标「公共部分」；配置关系两行：主行描述，副行「源对象 → 目标对象」
+          // 由来边只标「公共部分」；配置关系两行：主行是模型写的描述，副行「源对象 → 目标对象」
           label: shared ? (
             <span className="edge-label-shared">{l.description}</span>
           ) : (

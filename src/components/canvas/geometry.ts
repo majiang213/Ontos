@@ -120,10 +120,15 @@ export function labelPushOf(
     return !rects.some((r) => lx < r.x + r.w && lx + labelSize.w > r.x && ly < r.y + r.h && ly + labelSize.h > r.y);
   };
   const fallback = { push: base, shift: 0 };
-  for (const p of [base, base + 24, base + 48, base + 80, base + 120, base + 170]) {
-    for (const q of [0, -40, 40, -80, 80]) {
-      if (clearAt(p, q)) return { push: p, shift: q };
-    }
+  const mags = [base, base + 24, base + 48, base + 80, base + 120, base + 170];
+  const near = [0, -40, 40, -80, 80];
+  // 先沿法线往外推（测试钉住的顺序），近处切向只让一小步。
+  for (const p of mags) for (const q of near) if (clearAt(p, q)) return { push: p, shift: q };
+  // 这一侧近处都撞上：换到线的另一侧，并允许沿切向多挪几档，把说明放进卡片旁边的空处。
+  const far = [0, -40, 40, -80, 80, -140, 140, -200, 200];
+  for (const p of [...mags, base + 230]) {
+    for (const q of far) if (clearAt(-p, q)) return { push: -p, shift: q };
+    for (const q of far) if (clearAt(p, q)) return { push: p, shift: q };
   }
   return fallback;
 }

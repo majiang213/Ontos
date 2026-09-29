@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import OntologyCanvas from "./canvas/OntologyCanvas";
-import type { CanvasLink, CanvasObject } from "./canvas/layout";
+import { edgeEndLabel, type CanvasLink, type CanvasObject } from "./canvas/layout";
 import type { BorderPin } from "./canvas/geometry";
 import Bezel from "./cards/Bezel";
 import DecisionLog from "./cards/DecisionLog";
@@ -350,8 +350,8 @@ export default function CanvasPage({ brand }: { brand: ReactNode }) {
         to: l.to,
         inverse: l.inverse,
         description: l.description,
-        fromLabel: ont?.object_types?.[l.from]?.description ?? l.from,
-        toLabel: ont?.object_types?.[l.to]?.description ?? l.to,
+        fromLabel: edgeEndLabel(ont?.object_types?.[l.from]?.description, l.from),
+        toLabel: edgeEndLabel(ont?.object_types?.[l.to]?.description, l.to),
         kind: l.transition ? "transition" : "match",
       })),
     [ont]

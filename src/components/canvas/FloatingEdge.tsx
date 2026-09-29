@@ -84,21 +84,18 @@ function NormalEdge({ id, source, target, label, style, markerEnd, interactionWi
     waypoint
   );
   const path = routed.d;
-  // 捏点压在线上（弯着在途经点，直着在曲线中点）；标签沿中点切向的法线整个让出线身——
-  // 推开距离按标签实测量（法向支撑半径 + 10），压到节点就沿法线再推几档（labelPushOf，几何纯函数）
+  // 捏点压在线上（弯着在途经点，直着在曲线中点）。标签先贴着线（只让出线身几像素）：
+  // 按整张标签的宽度推开会把说明推进相邻卡片，两条竖线的说明就叠在一起。压到节点再沿法线推档（labelPushOf）。
   const curveMid = waypoint ?? routed.mid;
   const labelRef = useRef<HTMLDivElement>(null);
-  const [push, setPush] = useState(20);
+  const [push, setPush] = useState(12);
   const [shift, setShift] = useState(0); // 切向让位（labelPushOf 的 shift：法线推不动时沿切线挪）
   const dirX = routed.dir.x;
   const dirY = routed.dir.y;
   useLayoutEffect(() => {
     const el = labelRef.current;
     if (!el) return;
-    const nx = -dirY; // 法向
-    const ny = dirX;
-    const half = (Math.abs(nx) * el.offsetWidth + Math.abs(ny) * el.offsetHeight) / 2; // 矩形在法向上的支撑半径
-    const { push: p, shift } = labelPushOf(curveMid, { x: dirX, y: dirY }, { w: el.offsetWidth, h: el.offsetHeight }, d.obstacles ?? [], half + 10);
+    const { push: p, shift } = labelPushOf(curveMid, { x: dirX, y: dirY }, { w: el.offsetWidth, h: el.offsetHeight }, d.obstacles ?? [], 12);
     setPush(p);
     setShift(shift);
   }, [dirX, dirY, label, curveMid.x, curveMid.y, d.obstacles]);

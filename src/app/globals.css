@@ -439,6 +439,8 @@ input { font-family: inherit; outline: none; }
   flex-direction: column;
   align-items: center;
   line-height: 1.5;
+  max-width: 220px;
+  text-align: center;
 }
 /* 线上副标注：源 → 目（小一号、弱色） */
 .edge-label-sub {
