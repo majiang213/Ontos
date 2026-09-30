@@ -1,4 +1,4 @@
-// M7 查询求值 —— 对应《ontos-article.md》§5.4 与图 7。
+// M7 查询求值 —— 对应《ontology-reference.md》§5.4 与图 7。
 // 个体由 individual 组装；本文件只投影结果树（展开、聚合、排序）。全程只读。
 
 import type { OntologyConfig } from "../../schema/config";

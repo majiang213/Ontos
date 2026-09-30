@@ -1,4 +1,4 @@
-# 已发布配置 —— 《ontos-article.md》附录 C 全文。引擎加载的就是这份文本。
+# 已发布配置 —— 《ontology-reference.md》附录 C 全文。引擎加载的就是这份文本。
 # test 空间世界（ADR 0012）：设备一生 + 办公线；人事/招聘已撤。
 object_types:
   equipment:
@@ -86,7 +86,8 @@ object_types:
           - create:
               object: warranty_card
               properties:
-                serial_no: { from: identity }  # 与设备序列号相同，covers 靠 match 成立
+                card_id: { from: generated }    # 保修卡用自身编号认人；重发靠它幂等
+                serial_no: { from: identity }   # 与设备序列号相同，covers 靠 match 成立
                 expiry: now+1y
       transfer:
         description: 调拨
@@ -218,8 +219,14 @@ object_types:
   warranty_card:
     description: 保修卡                        # 挂在设备上，不是设备自己
     kind: thing
-    identity: serial_no                        # 与设备同一序列号
+    identity: card_id                          # 记录表用自身编号认人，序列号只用于 covers
     properties:
+      card_id:
+        type: string
+        description: 保修卡号
+        generate:
+          - "WC-"
+          - { from: identity }
       serial_no:
         type: string
         description: 出厂序列号
@@ -232,6 +239,7 @@ object_types:
         table: warranty_card
         pk: card_id
         fields:
+          card_id: card_id
           serial_no: sn
           expiry: expiry
 

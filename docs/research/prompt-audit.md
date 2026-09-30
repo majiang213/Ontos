@@ -109,6 +109,8 @@
 
 ## 发现明细
 
+> 本文是一次性提示词审计记录，不是现行规格；现行术语以 `CONTEXT.md`、有效 ADR 和代码为准。
+
 ### 发现①（已修）identity 把列名前后缀当判据 —— 格式示例
 
 - **位置**：`src/server/infra/llm/identityHint.ts:9-15`（现行文本）。
@@ -131,7 +133,7 @@
   2. 同一属性 `derived` 规则的产出值（161-164 行）；
   3. 自环转化关系：关系名 `${a}_to_${to}`、反向名 `${a}_from_${from}`、`transition: { from, to }`（166-172 行）；
   4. 转化动作：名字 `convert_to_${to}`（`skeletons.ts:63-65`）、描述「转化为${to}」（`skeletons.ts:72`）。
-  时期名**不进** `class_conclusions`（该表只收 overlap / homonym / subtype：`schema/config.ts:176-178`；生命周期分支没有 push）。写进配置后，画布阶段块、对象卡（键名原样显示：`src/tests/objectCard.test.ts:41`）、问数过滤字面量、动作前置全都消费这几个词。
+  时期名**不进** `adj_decision`（它是裁决与证据工作记录；生命周期结构写入草稿配置，画布阶段块、对象卡（键名原样显示：`src/tests/objectCard.test.ts:41`）、问数过滤字面量、动作前置全都消费这些时期标识）。历史 `class_conclusions` 只由兼容投影读取，不是新裁决的写入位置。
 - **引擎对时期名的约束（核查结论）**：结构层任意字符串/数字（`config.ts:165-171`；`values` 允许任意字面量，`config.ts:50-57`）；语义层只要求 transition 两端值落在派生规则产出集合里（`validate.ts:105-113`），而 `applyVerdict` 自己生成的 values 与 derived 恒满足，等于没约束；改标识（`edit_stages`）可事后级联改写关系名、反向名、transition 与转化动作（`ops/editStages.ts:68-105`；测试钉住该链路：`src/tests/ops.test.ts:99-114`）。
 - **换成什么判据（方向）**：提示词侧把「时期名」从枚举词汇改成判据——「from/to 填这两个类各自领域里早、晚阶段的标识：优先从两类字段、枚举值、列注释里找现成的状态取值；找不到就留空」，删掉设备/人两套写死词（含 168 行括号里「候选人表和员工表」这类演示例子，换领域中性说法）。引擎侧把 `executionPlan` 的设备词兜底与 `applyVerdict` 的类名兜底（`${a}_前` / `${b}_后`，`applyVerdict.ts:142-143`）并成一处按类名派生——现在同一不变量有两个家、两套答案，画布路径（PairCard 恒带 stage_names）永远走设备词兜底。
 - **影响面**：演示两域之外的一切生命周期裁决——订单（已提交→已履约）、工单（已受理→已关闭）、审批流、会员状态。真模型下模型照抄提示词就把 in_transit/in_service 写进订单类：值域、派生规则、`order_to_in_service` 关系、`convert_to_in_service` 动作全套带设备词，此后「已履约订单多少」编不出能对上行数的查询（过滤值只能取 values 字面量，字面量是设备词）；模型自造词则偏离提示词，产出失去依据（零温度加固定种子保证同一输入产出稳定——`aiSdk.ts:45-47`——但稳定不等于正确）。演示实现下所有对一律设备词，连演示世界的人对都要人事后用改标识救回（`ops.test.ts:99-114` 的级联改写就是这条修复链）。错词不是显示问题：人点完裁决按钮，错词即进工作副本，发布后问数与动作读的就是它。
@@ -152,7 +154,7 @@
 
 | 项 | 位置 | 为什么豁免 |
 |---|---|---|
-| demoQueries 问数剧本 | `demo.ts:216-241` | 明标「演示数据，不是引擎逻辑」（213-214 行）；两道闸守着：非 test 空间直接拒绝（29 行），命中的类不存在就拒绝（34-36 行）。它不声称普适，正则是剧本的检索键，不是判据；《ontos-article.md》第 366 行也把它登记为全引擎唯一的领域词例外 |
+| demoQueries 问数剧本 | `demo.ts:216-241` | 明标「演示数据，不是引擎逻辑」（213-214 行）；两道闸守着：非 test 空间直接拒绝（29 行），命中的类不存在就拒绝（34-36 行）。它不声称普适，正则是剧本的检索键，不是判据；《ontology-reference.md》第 366 行也把它登记为全引擎唯一的领域词例外 |
 | 倾向枚举集合（same / overlap / stage / name_similar） | `aiSdk.ts:168、192`；`schema/verdict.ts:22-33` | 契约：decisions API、adj_decision 留痕、画布按钮、出接口 Zod 共用同一套机器键，汉字只做展示 |
 | keep 必须是两个类名之一、不留 shared_* | `aiSdk.ts:168、201` | 契约+判据：`onPair` 认名（`verdict.ts:50-52`）、`isSharedObjectName`（`config.ts:205-207`）是真实硬闸；不留公共对象对应 ADR 0001 的落地规则 |
 | 类名形状约定（小写下划线；撞名 {连接名}_{表名}） | `aiSdk.ts:147、151` | 契约：`NAME_RE`（`schema/ops.ts:8`）与 `prefixedTableName`（`llm.ts:77-79`）是真实硬闸，提示词只是复述 |

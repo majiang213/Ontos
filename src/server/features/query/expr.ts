@@ -1,5 +1,5 @@
 // 表达式求值 —— 日期一套、数字一套，表面都跟 Elasticsearch。
-// 语义见《ontos-article.md》§6.2 与附录 B「保留字」。
+// 语义见《ontology-reference.md》§6.2 与附录 B「保留字」。
 
 import type { PropertyDef, ValueSource } from "../../schema/config";
 import { EXPR_LIKE } from "../../schema/spec/valueSpec";

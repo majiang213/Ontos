@@ -1,4 +1,4 @@
-// 配置三视图 —— Agent 编请求前按需读取，不读整份配置（《ontos-article.md》§5.3）。
+// 配置三视图 —— Agent 编请求前按需读取，不读整份配置（《ontology-reference.md》§5.3）。
 // 列出类 / 读取一个类 / 检索。description 供阅读；填进 JSON 的是 name。
 // 已发布视图不返回 sources/pk（问数 Agent 不绑表）；草稿视图（space=draft）带状态与来源对照，供改画布。
 

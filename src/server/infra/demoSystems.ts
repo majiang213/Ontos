@@ -183,7 +183,7 @@ export function insertAssignment(db: DatabaseSync): void {
  *  处置档案 8 条（3 条台账 scrapped + 5 条已从台账移除）。 */
 export function createAssetTables(db: DatabaseSync): void {
   db.exec(`CREATE TABLE asset (asset_id INTEGER PRIMARY KEY AUTOINCREMENT, asset_name TEXT, sn TEXT UNIQUE)`);
-  db.exec(`CREATE TABLE warranty_card (card_id INTEGER PRIMARY KEY AUTOINCREMENT, sn TEXT UNIQUE, expiry INTEGER)`);
+  db.exec(`CREATE TABLE warranty_card (card_id TEXT PRIMARY KEY, sn TEXT UNIQUE, expiry INTEGER)`);
   db.exec(`CREATE TABLE disposal (record_no TEXT PRIMARY KEY, sn TEXT UNIQUE, disposed_at INTEGER, reason TEXT)`);
 }
 
@@ -198,8 +198,11 @@ export function insertAssets(db: DatabaseSync): void {
 /** 保修卡 30 张：SN-40080…SN-40109（前 10 张已过期，后 20 张未过期）。
  *  验收主角 SN-40217 的卡由 convert 动作现建（不在种子里）。保修期内 = 20。 */
 export function insertWarrantyCards(db: DatabaseSync, now: number): void {
-  const ins = db.prepare(`INSERT INTO warranty_card (sn, expiry) VALUES (?, ?)`);
-  for (let i = 80; i < 110; i++) ins.run(sn4(i), now - (i < 90 ? 400 : -200) * 86400);
+  const ins = db.prepare(`INSERT INTO warranty_card (card_id, sn, expiry) VALUES (?, ?, ?)`);
+  for (let i = 80; i < 110; i++) {
+    const sn = sn4(i);
+    ins.run(`WC-${sn}`, sn, now - (i < 90 ? 400 : -200) * 86400);
+  }
 }
 
 /** 处置档案 8 条：SN-40080…SN-40082（台账 scrapped，交集 3）+ SN-41003…SN-41007（台账已移除）。

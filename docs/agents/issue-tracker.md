@@ -1,6 +1,6 @@
 # Issue tracker: Local Markdown
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
+Issues and temporary specs for this repo live as markdown files in `.scratch/`. They are working records, not current product specifications; stable decisions must be promoted to `CONTEXT.md`, `docs/system-architecture.md`, `docs/ontology-reference.md`, or an ADR.
 
 ## Conventions
 

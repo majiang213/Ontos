@@ -1,4 +1,4 @@
-// 本体配置的 Zod schema —— 对应《ontos-article.md》附录 B。
+// 本体配置的 Zod schema —— 对应《ontology-reference.md》附录 B。
 // 引擎只加载通过本校验的已发布配置。
 // 结构校验在这里做；语义校验（属性名、关系名对得上配置）在引擎执行时做，对不上就拒绝。
 

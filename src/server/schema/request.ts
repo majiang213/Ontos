@@ -1,4 +1,4 @@
-// 请求的 Zod schema —— 查询与写入对应《ontos-article.md》§5、§6，建稿判定对应对齐判定工作流。
+// 请求的 Zod schema —— 查询与写入对应《ontology-reference.md》§5、§6，建稿判定对应对齐判定工作流。
 // 这些形状同时用于：REST 路由入口校验、MCP 工具入参校验、模型结构化输出的约束。
 
 import { z } from "zod";

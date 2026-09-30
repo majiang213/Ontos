@@ -1,4 +1,4 @@
-// LLM 接口 —— 「模型在哪几个出口出现、没 Key 怎么办」（《ontos-article.md》§4、§5.3）。
+// LLM 接口 —— 「模型在哪几个出口出现、没 Key 怎么办」（《ontology-reference.md》§4、§5.3）。
 // 整合出口两次出场：proposePairs 看名字、连接集合和字段名；proposePair 看过交集率再给倾向。
 // 接口 + 组合原语；实现选择（有 OPENAI_API_KEY 走真模型 AiSdkLlm；没 Key 时 test 空间走演示实现
 // DemoLlm，其他空间直接报错——演示剧本只属于 test）收在组合根 runtime.ts，边界经 EngineEnv.llm(workspace) 下传。

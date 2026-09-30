@@ -174,7 +174,7 @@ export const MSG = {
   updateNoHit: "条件更新未命中（行可能已被并发改动）",
   noteAlreadyTarget: "已是目标值，没重复写",
   noteAlreadyInserted: "已有这行，没重复插",
-  notifyDeferred: "告知本期预留，引擎不执行外发（机制见《ontos-article.md》§6.5）",
+  notifyDeferred: "告知本期预留，引擎不执行外发",
   notifyDeferredWithFailure: "告知本期预留，引擎不执行外发；有投影失败，事件按计划生成，与实际存在可能有差（§6.5）",
   notifyBuildFailed: (detail: string) => `变更事件生成失败：${detail}`,
   noWritableProps: "该类没有可写字段（唯一键与派生字段不可写）",
