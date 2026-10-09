@@ -27,6 +27,7 @@ import {
 import { XYHandle } from "@xyflow/system";
 import "@xyflow/react/dist/style.css";
 import { layoutObjects, layoutTagLabels, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
+import { homonymHotKey, homonymPairHot } from "./sharedOrigin";
 import FloatingEdge from "./FloatingEdge";
 import { DecisionRow, SHARED_COLOR, homonymPeerMap, isSharedLink, overlapEdgesOf, verdictChipsOf } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
@@ -101,12 +102,14 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
             </div>
           ))}
         </div>
-        {data.stages && data.stages.items.length > 0 && (
+        {data.stages && data.stages.lines.length > 0 && (
           <div className="node-stages">
-            {data.stages.items.map((it) => (
-              <div key={it.value} className="node-stage">
-                <span className="t" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.hint}</span>
-                <code>{it.value}</code>
+            {data.stages.lines.map((line, i) => line.kind === "turn" ? (
+              <div key={`${line.value}-${i}`} className="node-stage-turn">{line.text}</div>
+            ) : (
+              <div key={line.value} className="node-stage">
+                <span title={line.text !== line.value ? line.value : undefined}>{line.text}</span>
+                <span className="t" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.hint}</span>
               </div>
             ))}
           </div>
@@ -118,16 +121,12 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
           {data.actions.map((a) => (
             <span key={a} className="tag tag-ok">{a}</span>
           ))}
-          {((data.judgmentChips as { text: string; dashed: boolean; peer: string | null }[]) ?? []).map((chip) => (
+          {((data.judgmentChips as { text: string; peer: string | null }[]) ?? []).map((chip) => (
             <span
               key={chip.text}
-              className={chip.dashed ? "tag is-homonym" : "tag tag-ok"}
-              title={
-                chip.dashed
-                  ? `同形异义：与 ${chip.peer} 不是同一种东西，两类都留下`
-                  : `判定结论：与 ${chip.peer} 的关系已落成（并成多源类或时期）`
-              }
-              onPointerEnter={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(chip.peer ?? "")}
+              className="tag is-homonym"
+              title={`同形异义：与 ${chip.peer} 不是同一种东西，两类都留下`}
+              onPointerEnter={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(chip.peer ? homonymHotKey(String(data.name), chip.peer) : null)}
               onPointerLeave={() => (data.onHomonymHot as ((p: string | null) => void) | undefined)?.(null)}
             >
               {chip.text}
@@ -217,7 +216,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
           label: o.name,
           homonyms: peers,
           judgmentChips: verdictChipsOf(decisions, o.name),
-          homonymHot: homonymHot !== null && (o.name === homonymHot || peers.includes(homonymHot)),
+          homonymHot: homonymPairHot(homonymHot, o.name),
           onHomonymHot: setHomonymHot,
         },
       };

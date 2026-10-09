@@ -13,7 +13,7 @@ import { listClasses, readClass, search } from "../server/features/ontology/view
 import { VERDICT_LABELS, Verdict } from "../server/schema/verdict";
 import { conclusionsAbout, liveConclusions } from "../server/features/ontology/classConclusions";
 import { DemoLlm } from "../server/infra/llm/demo";
-import { classStages, explainWhen, moveStageItem } from "../server/features/ontology/stages";
+import { classStages, explainWhen, moveStageItem, stageStripLines } from "../server/features/ontology/stages";
 
 const config = configSchema.parse(load(readFileSync(join(process.cwd(), "src/server/config/ontology.yaml"), "utf8")));
 
@@ -38,6 +38,20 @@ describe("classStages（类上的阶段从配置读）", () => {
   it("附带出向转化：converted 把在途转为在役，执行动作是 convert", () => {
     const s = classStages(config, "equipment")!;
     expect(s.conversions).toEqual([{ link: "converted", from: "in_transit", to: "in_service", action: "convert" }]);
+  });
+});
+
+describe("stageStripLines（画布阶段条）", () => {
+  it("每个时期一行，紧接其后写「转为」加晚阶段的中文名", () => {
+    const s = classStages(config, "equipment")!;
+    expect(stageStripLines(s.items, s.conversions).map((l) => l.text)).toEqual(["在途", "转为 在役", "在役", "报废"]);
+  });
+
+  it("晚阶段没有中文名时，「转为」后面用时期标识", () => {
+    expect(stageStripLines(
+      [{ value: "early", label: "早期" }, { value: "late" }],
+      [{ from: "early", to: "late" }],
+    ).map((l) => l.text)).toEqual(["早期", "转为 late", "late"]);
   });
 });
 

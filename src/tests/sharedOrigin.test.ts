@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Verdict } from "../server/schema/verdict";
-import { DecisionRow, decisionRowsOf, homonymPeerMap, overlapEdgesOf, verdictChipsOf } from "../components/canvas/sharedOrigin";
+import { DecisionRow, decisionRowsOf, homonymHotKey, homonymPairHot, homonymPeerMap, overlapEdgesOf, verdictChipsOf } from "../components/canvas/sharedOrigin";
 
 describe("decisionRowsOf（留痕统一行）", () => {
   it("adj 行原样进；历史 class_conclusions 行按 kind 映射（homonym→name_similar、overlap→overlap，带 shared）", () => {
@@ -56,23 +56,32 @@ describe("homonymPeerMap", () => {
   });
 });
 
-describe("verdictChipsOf（节点底部的判定结论芯片）", () => {
+describe("verdictChipsOf（节点底部只留同形异义芯片）", () => {
   const rows: DecisionRow[] = [
     { classes: ["po_item", "device"], verdict: Verdict.Stage },
     { classes: ["asset", "device"], verdict: Verdict.Same },
     { classes: ["a", "device"], verdict: Verdict.NameSimilar },
     { classes: ["po_item", "asset"], verdict: Verdict.Overlap, shared: "shared_po_item_asset" },
+    { classes: ["b", "device"], verdict: Verdict.Skip },
   ];
 
-  it("芯片统一「结论 · 对方」：和谁一目了然；类等价对方已并入，不打芯片", () => {
-    expect(verdictChipsOf(rows, "device").map((c) => c.text)).toEqual(["生命周期 · po_item", "同形异义 · a"]);
-    expect(verdictChipsOf(rows, "asset").map((c) => c.text)).toEqual(["部分重叠 · po_item"]); // 历史行：源类也标部分重叠（旧世界正确渲染）
+  it("只给同形异义打「同形异义 · 对方类名」；类等价、部分重叠、生命周期、跳过都不打芯片", () => {
+    expect(verdictChipsOf(rows, "device").map((c) => c.text)).toEqual(["同形异义 · a"]);
+    expect(verdictChipsOf(rows, "asset")).toEqual([]);
+    expect(verdictChipsOf(rows, "po_item")).toEqual([]);
+    expect(verdictChipsOf(rows, "b")).toEqual([]);
   });
 
-  it("虚线只标「两类都留下」（同形异义）；实心标结构变化（并类 / 时期）；历史 shared_ 标公共对象", () => {
-    const chips = verdictChipsOf(rows, "device");
-    expect(chips.every((c) => c.text.includes("生命周期") ? !c.dashed : true)).toBe(true);
-    expect(chips.find((c) => c.text.includes("同形异义"))!.dashed).toBe(true);
-    expect(verdictChipsOf(rows, "shared_po_item_asset").map((c) => c.text)).toEqual(["公共对象"]);
+  it("悬停只点亮这一对的两张卡", () => {
+    const hot = homonymHotKey("a", "b");
+    expect(homonymPairHot(hot, "a")).toBe(true);
+    expect(homonymPairHot(hot, "b")).toBe(true);
+    expect(homonymPairHot(hot, "c")).toBe(false);
+    expect(homonymPairHot(null, "a")).toBe(false);
+  });
+
+  it("同形异义芯片是虚线，并带上对方类名；历史 shared_ 对象不标「公共对象」", () => {
+    expect(verdictChipsOf(rows, "device")).toEqual([{ text: "同形异义 · a", dashed: true, peer: "a" }]);
+    expect(verdictChipsOf(rows, "shared_po_item_asset")).toEqual([]);
   });
 });

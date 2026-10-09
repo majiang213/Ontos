@@ -33,6 +33,18 @@ describe("estimateHeight（整理布局用的卡片高度不能矮过实测）",
       expect(est - h, o.name).toBeLessThanOrEqual(24);
     }
   });
+
+  it("每条「转为」多占一行阶段", () => {
+    const bare = richMeasured("equipment", 10, 2, 2, ["来源"]);
+    const withTurn: CanvasObject = {
+      ...bare,
+      stages: {
+        ...bare.stages!,
+        lines: [...bare.stages!.lines, { kind: "turn", text: "转为 在役", value: "v1" }],
+      },
+    };
+    expect(estimateHeight(withTurn) - estimateHeight(bare)).toBe(18);
+  });
 });
 
 function richMeasured(name: string, descLen: number, props: number, stages: number, tagLabels: string[]): CanvasObject {
@@ -44,7 +56,7 @@ function richMeasured(name: string, descLen: number, props: number, stages: numb
     sources: [],
     actions: [],
     tagLabels,
-    ...(stages ? { stages: { property: "status", items: Array.from({ length: stages }, (_, i) => ({ value: `v${i}`, hint: "h" })), sourceKeys: [] } } : {}),
+    ...(stages ? { stages: { property: "status", lines: Array.from({ length: stages }, (_, i) => ({ kind: "stage" as const, text: `v${i}`, value: `v${i}`, hint: "h" })), sourceKeys: [] } } : {}),
   };
 }
 
@@ -56,7 +68,7 @@ const richObj = (name: string, o: { props?: number; sources?: number; actions?: 
   properties: Array.from({ length: o.props ?? 1 }, (_, i) => ({ name: `p${i}`, type: "string", derived: false })),
   sources: Array.from({ length: o.sources ?? 0 }, (_, i) => ({ key: `s${i}`, label: `src.t${i}` })),
   actions: Array.from({ length: o.actions ?? 0 }, (_, i) => `act${i}`),
-  ...(o.stages ? { stages: { property: "p0", items: Array.from({ length: o.stages }, (_, i) => ({ value: `v${i}`, hint: "h" })), sourceKeys: [] } } : {}),
+  ...(o.stages ? { stages: { property: "p0", lines: Array.from({ length: o.stages }, (_, i) => ({ kind: "stage" as const, text: `v${i}`, value: `v${i}`, hint: "h" })), sourceKeys: [] } } : {}),
 });
 
 /** 布局位置 + 估算高度 → 节点矩形（pad 外扩可选：验收口径与渲染实测口径）。 */

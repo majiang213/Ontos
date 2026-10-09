@@ -20,12 +20,11 @@ export interface CanvasObject {
   actions: string[];
   state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
   homonyms?: string[]; // 同形异义的对方类名（配置投影，不是关系）
-  verdicts?: string[]; // 头上的裁决结论徽章（部分重叠/公共对象/生命周期/同形异义），见 sharedOrigin.verdictBadgesOf
-  tagLabels?: string[]; // 底部标签文案（来源、动作、判定芯片）。整理布局按它折行算高度；缺省用来源和动作名
-  /** 有转化时：派生枚举的全部时期。来源已写进 hint 的不再进普通标签。 */
+  tagLabels?: string[]; // 底部标签文案（来源、动作、同形异义芯片）。整理布局按它折行算高度；缺省用来源和动作名
+  /** 有转化时：阶段条按 stageStripLines 的顺序排好。来源已写进 hint 的不再进普通标签。 */
   stages?: {
     property: string;
-    items: { value: string; hint: string }[];
+    lines: { kind: "stage" | "turn"; text: string; value: string; hint?: string }[];
     sourceKeys: string[];
   };
 }
@@ -85,7 +84,7 @@ function tagRowCount(labels: readonly string[]): number {
   return rows;
 }
 
-/** 底部标签的文案，与节点渲染同一套：阶段已写进 hint 的来源不再进标签，判定芯片算在内。 */
+/** 底部标签的文案：阶段已写进 hint 的来源不再进标签。同形异义芯片由画布另拼。 */
 export function layoutTagLabels(o: CanvasObject): string[] {
   const stageKeys = new Set(o.stages?.sourceKeys ?? []);
   return [...o.sources.filter((s) => !stageKeys.has(s.key)).map((s) => s.label), ...o.actions];
@@ -96,12 +95,12 @@ export function layoutTagLabels(o: CanvasObject): string[] {
 export function estimateHeight(o: CanvasObject, tagLabels: readonly string[] = o.tagLabels ?? layoutTagLabels(o)): number {
   const descLines = wrappedLines(o.description ?? "");
   const props = o.properties.filter((p) => p.name !== o.stages?.property).length;
-  const stages = o.stages?.items.length ?? 0;
+  const stageRows = o.stages?.lines.length ?? 0;
   const rows = tagRowCount(tagLabels);
   return 60
     + (descLines ? 8 + 17 * descLines : 0)
     + (props ? 6 + 21 * props : 0)
-    + (stages ? 14 + 18 * stages : 0)
+    + (stageRows ? 14 + 18 * stageRows : 0)
     + (rows ? 8 + 20 * rows + 4 * (rows - 1) : 0);
 }
 

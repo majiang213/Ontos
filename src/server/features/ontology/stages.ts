@@ -30,6 +30,32 @@ function boolPresence(when: Record<string, unknown>): boolean {
   return vals.length > 0 && vals.every((v) => typeof v === "boolean");
 }
 
+/** 画布阶段条的一行：时期，或紧接在该时期后面的「转为 …」。 */
+export interface StageStripLine {
+  kind: "stage" | "turn";
+  text: string;
+  value: string;
+  from?: string;
+  to?: string;
+}
+
+/** 每个时期一行，中文名优先。从这一期出发的转化紧跟其后，晚阶段同样用中文名。 */
+export function stageStripLines(
+  items: { value: string; label?: string }[],
+  conversions: { from: string; to: string }[],
+): StageStripLine[] {
+  const nameOf = new Map(items.map((it) => [it.value, it.label || it.value]));
+  const lines: StageStripLine[] = [];
+  for (const it of items) {
+    lines.push({ kind: "stage", text: nameOf.get(it.value) ?? it.value, value: it.value });
+    for (const c of conversions) {
+      if (c.from !== it.value) continue;
+      lines.push({ kind: "turn", text: `转为 ${nameOf.get(c.to) ?? c.to}`, value: c.to, from: c.from, to: c.to });
+    }
+  }
+  return lines;
+}
+
 /** 一条派生规则怎么用白话说：来源有/没有；带列条件的只说「按规则」。 */
 export function stageHint(when: Record<string, unknown>, label: (key: string) => string): string {
   if (!boolPresence(when)) return "按规则";

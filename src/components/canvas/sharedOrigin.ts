@@ -20,7 +20,7 @@ export interface DecisionRow {
 }
 
 /** 留痕的统一行：现行 = adj_decision 行（verdict 由引擎按枚举写入，JSON 边界在 CanvasPage 收口为 Verdict）；
- *  历史 = 旧 class_conclusions 行（kind 映射为判定键，overlap 带 shared 供由来虚线与公共对象徽章）。 */
+ *  历史 = 旧 class_conclusions 行（kind 映射为判定键，overlap 带 shared 供由来虚线）。 */
 export function decisionRowsOf(
   legacy: ClassConclusion[] | undefined,
   adj: { class_a: string; class_b: string; verdict: Verdict }[] | undefined
@@ -53,7 +53,19 @@ export function isSharedLink(l: CanvasLink): boolean {
   return l.kind === SHARED_KIND;
 }
 
-/** 同形异义：每个类 → 对方类名（一次判定一行，不合成一团）。 */
+/** 悬停的是这一对，不是对方类名。A–B 与 B–C 同时存在时，点 A 上的 B 只亮 A 和 B。 */
+export function homonymHotKey(self: string, peer: string): string {
+  return `${self}|${peer}`;
+}
+
+export function homonymPairHot(hot: string | null, name: string): boolean {
+  if (!hot) return false;
+  const sep = hot.indexOf("|");
+  if (sep < 0) return false;
+  return name === hot.slice(0, sep) || name === hot.slice(sep + 1);
+}
+
+/** 同形异义：每个类 → 对方类名（一次判定一枚芯片，不合成一团）。 */
 export function homonymPeerMap(rows: DecisionRow[]): Map<string, string[]> {
   const m = new Map<string, string[]>();
   for (const r of rows) {
@@ -66,31 +78,21 @@ export function homonymPeerMap(rows: DecisionRow[]): Map<string, string[]> {
   return m;
 }
 
-/** 节点底部的判定结论芯片（统一「结论 · 对方」格式）：谁、什么结论，一目了然。
- *  类等价合并后对方已并入本类（来源芯片即它），不打芯片；历史 shared_ 上位对象标「公共对象」（兼容渲染）。 */
+/** 节点底部只留同形异义芯片。类等价、部分重叠、生命周期写在对象本身（来源或阶段条），跳过不留记号。 */
 export interface VerdictChip {
   text: string;
-  dashed: boolean; // 虚线 = 两类都留下（同形异义）；实心 = 结构变了（并类 / 时期）
-  peer: string | null; // 对方类名（画布上存在时可悬停高亮）
+  dashed: boolean; // 同形异义：两类都留下，虚线
+  peer: string | null; // 对方类名，悬停时两张卡一起亮
 }
 
 export function verdictChipsOf(rows: DecisionRow[], name: string): VerdictChip[] {
   const merged = new Map<string, VerdictChip>();
   for (const r of rows) {
-    if (r.shared === name) {
-      merged.set("公共对象", { text: "公共对象", dashed: false, peer: null }); // 历史 shared_ 上位对象（ADR 0013 前的旧结论，兼容渲染）
-      continue;
-    }
-    if (!r.classes.includes(name) || r.verdict === Verdict.Same) continue; // 类等价：对方已并入本类，来源芯片即它
+    if (r.verdict !== Verdict.NameSimilar || !r.classes.includes(name)) continue;
     const other = r.classes.find((c) => c !== name);
     if (!other) continue;
-    const label =
-      r.verdict === Verdict.Overlap
-        ? `部分重叠 · ${other}`
-        : r.verdict === Verdict.Stage
-          ? `生命周期 · ${other}`
-          : `同形异义 · ${other}`;
-    merged.set(label, { text: label, dashed: r.verdict === Verdict.NameSimilar, peer: other });
+    const text = `同形异义 · ${other}`;
+    merged.set(text, { text, dashed: true, peer: other });
   }
   return [...merged.values()];
 }

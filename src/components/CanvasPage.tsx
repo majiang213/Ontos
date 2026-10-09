@@ -41,7 +41,7 @@ import { columnTarget as columnTargetOf } from "../server/features/ontology/line
 import { definedPinEnds } from "../server/features/ontology/canvasState";
 import { isUiStateOp } from "../server/schema/ops";
 import { Verdict, type PairAdvice } from "../server/schema/verdict";
-import { classStages, stageHint, stageSourceKeys } from "../server/features/ontology/stages";
+import { classStages, stageHint, stageSourceKeys, stageStripLines } from "../server/features/ontology/stages";
 import type { ObjectType } from "../server/schema/config";
 
 interface IntrospectResp {
@@ -334,6 +334,7 @@ export default function CanvasPage({
       Object.entries(ont?.object_types ?? {}).map(([name, t]) => {
         const st = ont ? classStages(ont, name) : null;
         const srcLabel = (key: string) => sourceLabel(t.sources, key);
+        const stageHintOf = new Map(st?.items.map((it) => [it.value, stageHint(it.when, srcLabel)]) ?? []);
         return {
           name,
           description: t.description,
@@ -354,7 +355,12 @@ export default function CanvasPage({
           stages: st
             ? {
                 property: st.property,
-                items: st.items.map((it) => ({ value: it.value, hint: stageHint(it.when, srcLabel) })),
+                lines: stageStripLines(st.items, st.conversions).map((l) => ({
+                  kind: l.kind,
+                  text: l.text,
+                  value: l.value,
+                  hint: l.kind === "stage" ? stageHintOf.get(l.value) : undefined,
+                })),
                 sourceKeys: stageSourceKeys(st.items),
               }
             : undefined,
