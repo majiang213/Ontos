@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Verdict } from "../server/schema/verdict";
-import { DecisionRow, decisionRowsOf, homonymHotKey, homonymPairHot, homonymPeerMap, overlapEdgesOf, verdictChipsOf } from "../components/canvas/sharedOrigin";
+import { DecisionRow, decisionRowsOf, homonymHotKey, homonymPairHot, overlapEdgesOf, verdictChipsOf } from "../components/canvas/sharedOrigin";
 
 describe("decisionRowsOf（留痕统一行）", () => {
   it("adj 行原样进；历史 class_conclusions 行按 kind 映射（homonym→name_similar、overlap→overlap，带 shared）", () => {
@@ -44,29 +44,18 @@ describe("overlapEdgesOf（历史行的由来虚线）", () => {
   });
 });
 
-describe("homonymPeerMap", () => {
-  it("一行一次判定，不把多对收成一团", () => {
-    const m = homonymPeerMap([
-      { classes: ["fund_account", "login_account"], verdict: Verdict.NameSimilar },
-      { classes: ["fund_account", "member_account"], verdict: Verdict.NameSimilar },
-    ]);
-    expect(m.get("fund_account")).toEqual(["login_account", "member_account"]);
-    expect(m.get("login_account")).toEqual(["fund_account"]);
-    expect(m.get("member_account")).toEqual(["fund_account"]);
-  });
-});
-
 describe("verdictChipsOf（节点底部只留同形异义芯片）", () => {
   const rows: DecisionRow[] = [
     { classes: ["po_item", "device"], verdict: Verdict.Stage },
     { classes: ["asset", "device"], verdict: Verdict.Same },
     { classes: ["a", "device"], verdict: Verdict.NameSimilar },
+    { classes: ["c", "device"], verdict: Verdict.NameSimilar },
     { classes: ["po_item", "asset"], verdict: Verdict.Overlap, shared: "shared_po_item_asset" },
     { classes: ["b", "device"], verdict: Verdict.Skip },
   ];
 
   it("只给同形异义打「同形异义 · 对方类名」；类等价、部分重叠、生命周期、跳过都不打芯片", () => {
-    expect(verdictChipsOf(rows, "device").map((c) => c.text)).toEqual(["同形异义 · a"]);
+    expect(verdictChipsOf(rows, "device").map((c) => c.text)).toEqual(["同形异义 · a", "同形异义 · c"]);
     expect(verdictChipsOf(rows, "asset")).toEqual([]);
     expect(verdictChipsOf(rows, "po_item")).toEqual([]);
     expect(verdictChipsOf(rows, "b")).toEqual([]);
@@ -81,7 +70,10 @@ describe("verdictChipsOf（节点底部只留同形异义芯片）", () => {
   });
 
   it("同形异义芯片是虚线，并带上对方类名；历史 shared_ 对象不标「公共对象」", () => {
-    expect(verdictChipsOf(rows, "device")).toEqual([{ text: "同形异义 · a", dashed: true, peer: "a" }]);
+    expect(verdictChipsOf(rows, "device")).toEqual([
+      { text: "同形异义 · a", peer: "a" },
+      { text: "同形异义 · c", peer: "c" },
+    ]);
     expect(verdictChipsOf(rows, "shared_po_item_asset")).toEqual([]);
   });
 });

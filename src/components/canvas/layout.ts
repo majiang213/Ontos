@@ -19,7 +19,6 @@ export interface CanvasObject {
   sources: { key: string; label: string }[]; // key=源条目名，label=connection.table
   actions: string[];
   state?: "new" | "modified" | "same"; // 草稿态：new=未发布的新对象，modified=有未发布改动
-  homonyms?: string[]; // 同形异义的对方类名（配置投影，不是关系）
   tagLabels?: string[]; // 底部标签文案（来源、动作、同形异义芯片）。整理布局按它折行算高度；缺省用来源和动作名
   /** 有转化时：阶段条按 stageStripLines 的顺序排好。来源已写进 hint 的不再进普通标签。 */
   stages?: {

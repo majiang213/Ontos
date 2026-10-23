@@ -35,8 +35,6 @@ export interface StageStripLine {
   kind: "stage" | "turn";
   text: string;
   value: string;
-  from?: string;
-  to?: string;
 }
 
 /** 每个时期一行，中文名优先。从这一期出发的转化紧跟其后，晚阶段同样用中文名。 */
@@ -50,7 +48,7 @@ export function stageStripLines(
     lines.push({ kind: "stage", text: nameOf.get(it.value) ?? it.value, value: it.value });
     for (const c of conversions) {
       if (c.from !== it.value) continue;
-      lines.push({ kind: "turn", text: `转为 ${nameOf.get(c.to) ?? c.to}`, value: c.to, from: c.from, to: c.to });
+      lines.push({ kind: "turn", text: `转为 ${nameOf.get(c.to) ?? c.to}`, value: c.to });
     }
   }
   return lines;

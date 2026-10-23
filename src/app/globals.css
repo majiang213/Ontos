@@ -4,6 +4,9 @@
    ============================================================ */
 
 :root {
+  /* 浅色是暖纸。暗色在下面的 media 里另配一套，不让浏览器把纸色反相。 */
+  color-scheme: light;
+
   /* 色板 */
   --bg: #f7f4ed;            /* 暖纸 */
   --bg-deep: #f1ede3;       /* 纸的暗部（外壳托盘） */
@@ -13,12 +16,16 @@
   --ink-2: #5d574c;
   --ink-3: #a09a8c;
   --accent: #3b36b0;        /* 产品靛蓝（深化） */
+  --accent-hover: #2c29a0;  /* 实心按钮悬停，和字色分开配 */
   --shared: #9a94b8;        /* 公共对象由来边（SVG marker 用同值 SHARED_COLOR） */
+  --shared-ink: #5c5890;    /* 同形异义芯片上的字 */
   --accent-ink: #2c29a0;
   --accent-soft: rgba(59, 54, 176, 0.09);
+  --canvas-dot: rgba(32, 29, 24, 0.06);
   --ok: #0b7a55;
   --ok-soft: #e5f2ea;
   --warn: #8a5f0b;
+  --draft: #8a5f0b;         /* 草稿虚线。暗色里另配，避免每张卡一圈金边 */
   --warn-soft: #f8efdb;
   --danger: #b0382a;
 
@@ -65,6 +72,40 @@
   --drawer-gap: 12px;
   --schema-toggle-h: 37px;
   --panel-lift: calc(var(--drawer-gap) + var(--schema-toggle-h) + var(--drawer-gap));
+}
+
+/* 暗色是同一套暖色的夜里，不是把纸色反相。color-scheme: dark 让 Dia 用这套，不再整页重染。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #12110e;
+    --bg-deep: #1e1b16;
+    --panel: #2c2820;
+    --panel-2: #383228;
+    --ink: #f3efe6;
+    --ink-2: #c9c0b0;
+    --ink-3: #918778;
+    --accent: #6e6ad4;
+    --accent-hover: #8581e0;
+    --shared: #9a94b8;        /* 与 SHARED_COLOR 同值：SVG 箭头不吃 CSS 变量 */
+    --shared-ink: #d5d1ea;
+    --accent-ink: #d5d2f6;
+    --accent-soft: rgba(141, 137, 230, 0.18);
+    --canvas-dot: rgba(243, 239, 230, 0.07);
+    --ok: #5dbe96;
+    --ok-soft: #173328;
+    --warn: #d4b072;
+    --draft: #7a6848;
+    --warn-soft: #3a2e16;
+    --danger: #e07a6c;
+    --hairline: rgba(243, 239, 230, 0.1);
+    --hairline-strong: rgba(243, 239, 230, 0.22);
+    --line: #4e473c;
+    --line-strong: #7d7466;
+    --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+    --shadow-lift: 0 2px 8px -2px rgba(0, 0, 0, 0.45), 0 24px 56px -20px rgba(0, 0, 0, 0.7);
+    --bezel-hi: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -244,7 +285,7 @@ input { font-family: inherit; outline: none; }
   color: #fff;
   transition: background var(--t-fast), transform var(--t-fast);
 }
-.btn-cta:hover { background: var(--accent-ink); }
+.btn-cta:hover { background: var(--accent-hover); }
 .btn-cta:active { transform: scale(0.98); }
 .btn-cta:disabled { opacity: 0.45; cursor: default; transform: none; }
 .btn-cta:disabled:hover { background: var(--accent); }
@@ -310,7 +351,7 @@ input { font-family: inherit; outline: none; }
 .edge-bend-knob.is-bent { background: var(--accent); border-color: var(--panel); }
 .node-shell:hover { border-color: var(--line-strong); box-shadow: var(--shadow-lift); transform: translateY(-2px); }
 /* 草稿态：新对象虚线轮廓；有未发布改动的右上角一个 amber 点 */
-.node-shell.is-new { outline: 2px dashed var(--warn); outline-offset: 2px; }
+.node-shell.is-new { outline: 2px dashed var(--draft); outline-offset: 2px; }
 .node-shell.is-modified { position: relative; }
 .node-shell.is-modified::before {
   content: "";
@@ -361,13 +402,22 @@ input { font-family: inherit; outline: none; }
 }
 .node-stage {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
 }
-.node-stage code { font-family: var(--font-mono); font-size: 11.5px; }
-.node-stage-turn { font-size: 12px; color: var(--ink-3); padding-left: 12px; line-height: 18px; }
+.node-stage-name { font-family: var(--font-serif); font-size: 13px; color: var(--ink); }
+.node-stage-key { font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
+.node-stage .t { color: var(--ink-3); font-size: 11px; }
+.node-stage-turn {
+  margin: 1px 0 1px 2px;
+  border-left: 2px solid var(--hairline-strong);
+  padding-left: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 18px;
+}
 
 /* 对象编辑卡：标签页行（is-on 选中；表单开着锁其余页，见 ObjectCard） */
 .card-tabs {
@@ -451,7 +501,7 @@ input { font-family: inherit; outline: none; }
 .edge-label-shared {
   color: var(--shared);
 }
-.tag.is-homonym { border: 1px dashed var(--shared); color: #5c5890; cursor: default; }
+.tag.is-homonym { border: 1px dashed var(--shared); color: var(--shared-ink); cursor: default; }
 .node-shell.is-homonym-hot { outline: 2px solid var(--shared); outline-offset: 3px; }
 .react-flow__edge-text { font-size: 11px; fill: var(--ink-2); }
 .react-flow__edge-textbg { fill: var(--bg); }

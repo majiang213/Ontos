@@ -65,24 +65,10 @@ export function homonymPairHot(hot: string | null, name: string): boolean {
   return name === hot.slice(0, sep) || name === hot.slice(sep + 1);
 }
 
-/** 同形异义：每个类 → 对方类名（一次判定一枚芯片，不合成一团）。 */
-export function homonymPeerMap(rows: DecisionRow[]): Map<string, string[]> {
-  const m = new Map<string, string[]>();
-  for (const r of rows) {
-    if (r.verdict !== Verdict.NameSimilar) continue;
-    for (const name of r.classes) {
-      const others = r.classes.filter((c) => c !== name);
-      m.set(name, [...new Set([...(m.get(name) ?? []), ...others])].sort());
-    }
-  }
-  return m;
-}
-
 /** 节点底部只留同形异义芯片。类等价、部分重叠、生命周期写在对象本身（来源或阶段条），跳过不留记号。 */
 export interface VerdictChip {
   text: string;
-  dashed: boolean; // 同形异义：两类都留下，虚线
-  peer: string | null; // 对方类名，悬停时两张卡一起亮
+  peer: string; // 对方类名，悬停时只点亮这一对
 }
 
 export function verdictChipsOf(rows: DecisionRow[], name: string): VerdictChip[] {
@@ -92,7 +78,7 @@ export function verdictChipsOf(rows: DecisionRow[], name: string): VerdictChip[]
     const other = r.classes.find((c) => c !== name);
     if (!other) continue;
     const text = `同形异义 · ${other}`;
-    merged.set(text, { text, dashed: true, peer: other });
+    merged.set(text, { text, peer: other });
   }
   return [...merged.values()];
 }

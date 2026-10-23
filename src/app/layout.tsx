@@ -1,9 +1,14 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  colorScheme: "light dark",
+};
 
 export const metadata: Metadata = {
   title: "Ontos 安托斯 — 本体工作台",
   description: "逆向建模 → 多源整合 → 发布映射；问数与动作由外部 Agent 经 MCP 驱动",
+  other: { "darkreader-lock": "1" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

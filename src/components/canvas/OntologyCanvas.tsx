@@ -29,7 +29,7 @@ import "@xyflow/react/dist/style.css";
 import { layoutObjects, layoutTagLabels, NODE_H, NODE_W, type CanvasLink, type CanvasObject } from "./layout";
 import { homonymHotKey, homonymPairHot } from "./sharedOrigin";
 import FloatingEdge from "./FloatingEdge";
-import { DecisionRow, SHARED_COLOR, homonymPeerMap, isSharedLink, overlapEdgesOf, verdictChipsOf } from "./sharedOrigin";
+import { DecisionRow, SHARED_COLOR, isSharedLink, overlapEdgesOf, verdictChipsOf } from "./sharedOrigin";
 import { closestBorderPin, rectOf, type Bend, type BorderPin } from "./geometry";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import { beginSession, currentSession, dropSession, endSession, fireSession, trackSession, xyDragArgs } from "./connectSession";
@@ -108,7 +108,7 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
               <div key={`${line.value}-${i}`} className="node-stage-turn">{line.text}</div>
             ) : (
               <div key={line.value} className="node-stage">
-                <span title={line.text !== line.value ? line.value : undefined}>{line.text}</span>
+                <span className={line.text === line.value ? "node-stage-key" : "node-stage-name"} title={line.text !== line.value ? line.value : undefined}>{line.text}</span>
                 <span className="t" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line.hint}</span>
               </div>
             ))}
@@ -121,7 +121,7 @@ function ObjectNode({ data }: { data: ObjNodeData }) {
           {data.actions.map((a) => (
             <span key={a} className="tag tag-ok">{a}</span>
           ))}
-          {((data.judgmentChips as { text: string; peer: string | null }[]) ?? []).map((chip) => (
+          {((data.judgmentChips as { text: string; peer: string }[]) ?? []).map((chip) => (
             <span
               key={chip.text}
               className="tag is-homonym"
@@ -190,7 +190,6 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
     () => [...links.filter((l) => l.kind !== "transition"), ...overlapEdgesOf(decisions)],
     [links, decisions]
   );
-  const homonymPeers = useMemo(() => homonymPeerMap(decisions), [decisions]);
   const [homonymHot, setHomonymHot] = useState<string | null>(null);
 
   // 自动布局（整理布局与未存摆位的新节点共用）：判定芯片属于节点内容，统一由节点高度估算处理。
@@ -205,23 +204,19 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
 
   const initialNodes: Node<ObjNodeData>[] = useMemo(() => {
     const pos = computedPos;
-    return objects.map((o) => {
-      const peers = homonymPeers.get(o.name) ?? [];
-      return {
-        id: o.name,
-        type: "obj",
-        position: layout?.[o.name] ?? pos.get(o.name) ?? { x: 0, y: 0 }, // 已存摆位优先
-        data: {
-          ...o,
-          label: o.name,
-          homonyms: peers,
-          judgmentChips: verdictChipsOf(decisions, o.name),
-          homonymHot: homonymPairHot(homonymHot, o.name),
-          onHomonymHot: setHomonymHot,
-        },
-      };
-    });
-  }, [objects, viewLinks, layout, homonymPeers, homonymHot, computedPos]);
+    return objects.map((o) => ({
+      id: o.name,
+      type: "obj",
+      position: layout?.[o.name] ?? pos.get(o.name) ?? { x: 0, y: 0 }, // 已存摆位优先
+      data: {
+        ...o,
+        label: o.name,
+        judgmentChips: verdictChipsOf(decisions, o.name),
+        homonymHot: homonymPairHot(homonymHot, o.name),
+        onHomonymHot: setHomonymHot,
+      },
+    }));
+  }, [objects, viewLinks, layout, homonymHot, computedPos]);
 
   // 受控节点状态：没有 onNodesChange 把变化写回 state，拖动会被旧 props 弹回
   const [nodes, setNodes] = useNodesState(initialNodes);
@@ -402,7 +397,7 @@ function Flow({ objects, links, layout, edgeBends, edgePins, selectedLink, onSel
       }}
       proOptions={{ hideAttribution: true }}
     >
-      <Background gap={20} color="rgba(32,29,24,0.06)" />
+      <Background gap={20} color="var(--canvas-dot)" />
       <Controls showInteractive={false} />
       <Panel position="top-right" style={{ display: "flex", gap: 8 }}>
         <button className="btn" onClick={tidy}>整理布局</button>
